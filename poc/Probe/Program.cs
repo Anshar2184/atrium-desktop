@@ -37,8 +37,9 @@ try
         case "echo": EchoProbe.Run(); break;
         case "trayfail": TrayFailureProbe.Run(); break;
         case "smto": SmtoProbe.Run(); break;
-        case "recovery": RecoveryProbe.Run(args.Length > 2 ? args[2] : "native/build/win-x64/Release/Atrium.Guard.exe"); break;
+        case "recovery": RecoveryProbe.Run(args.Length > 2 ? args[2] : "native/build/win-x64/Release/Atrium.Guard.exe", args.Length > 3 ? args[3] : ""); break;
         case "txcore": RecoveryProbe.Core(args); break;
+        case "holdlock": RecoveryProbe.HoldLock(args); break;
         case "desktop2": DesktopEventProbe.Run(); break;
         case "optionc2": OptionCDynamicProbe.Run(); break;
         case "perf": PerfProbe.Run(args.Length > 2 ? args[2] : ""); break;

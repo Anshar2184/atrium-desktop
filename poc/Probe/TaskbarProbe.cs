@@ -30,6 +30,29 @@ internal static class TaskbarProbe
         SHAppBarMessage(ABM_SETSTATE, ref abd);
     }
 
+    // Registers `hwnd` as a bottom AppBar of `height` px on the primary monitor and
+    // moves it into the negotiated rectangle.
+    public static RECT RegisterBottomAppBar(IntPtr hwnd, int height)
+    {
+        var mi = new MONITORINFOEX { cbSize = (uint)Marshal.SizeOf<MONITORINFOEX>() };
+        GetMonitorInfo(MonitorFromPoint(new POINT(), MONITOR_DEFAULTTOPRIMARY), ref mi);
+        var abd = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>(), hWnd = hwnd, uCallbackMessage = WM_USER + 77 };
+        SHAppBarMessage(ABM_NEW, ref abd);
+        abd.uEdge = ABE_BOTTOM;
+        abd.rc = new RECT { Left = mi.rcMonitor.Left, Right = mi.rcMonitor.Right, Top = mi.rcMonitor.Bottom - height, Bottom = mi.rcMonitor.Bottom };
+        SHAppBarMessage(ABM_QUERYPOS, ref abd);
+        abd.rc.Top = abd.rc.Bottom - height;
+        SHAppBarMessage(ABM_SETPOS, ref abd);
+        SetWindowPos(hwnd, HWND_TOPMOST, abd.rc.Left, abd.rc.Top, abd.rc.Width, abd.rc.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        return abd.rc;
+    }
+
+    public static void RemoveAppBar(IntPtr hwnd)
+    {
+        var abd = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>(), hWnd = hwnd };
+        SHAppBarMessage(ABM_REMOVE, ref abd);
+    }
+
     public static bool GetAutoHide()
     {
         var abd = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>() };

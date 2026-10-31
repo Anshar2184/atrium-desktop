@@ -36,7 +36,7 @@ Every probe takes an optional watchdog limit in seconds as its second argument (
 | `optionc2` | P01g dynamic per-window backdrop rebuild (round 2) | Shows moving test windows and glass in a free desktop area |
 | `trayfail` | P04d tray bridge failure semantics (round 2) | Briefly becomes the tray host; test icons go to a fake tray, other apps to Explorer |
 | `smto` | SendMessageTimeout timing reference | Starts a fake tray process only |
-| `recovery <guard.exe>` | P07b takeover transaction + native guard (round 2) | **Hides the taskbar and changes auto-hide repeatedly**, kills/hangs its own child processes, restores everything |
+| `recovery <guard.exe> [R<n>]` | P07c takeover protocol v2 with a real AppBar, scenarios R1–R15 (round 3; `R<n>` runs one scenario) | **Hides the taskbar, registers a test AppBar and changes auto-hide repeatedly** for ~4 min, kills/hangs/stalls its own child processes, restores everything |
 | `desktop2` | P06b event-driven desktop widgets (round 2) | **Presses Win+D, invokes Show Desktop, clicks, toggles desktop icons on and back off**; waits until you are idle |
 | `demo [dir]` | README images | Nothing on screen; renders over a synthetic background |
 
@@ -46,18 +46,20 @@ Every probe takes an optional watchdog limit in seconds as its second argument (
 poc/TrayProbe/bin/Release/net8.0-windows/win-x64/Atrium.TrayProbe.exe <path-to-Atrium.Probe.exe> poc/results
 ```
 
-Helper modes started by the probes themselves: `clicktarget`, `tbcore`, `tbguard`, `trayclient`, `faketray`, `sendto`, `txcore`.
+Helper modes started by the probes themselves: `clicktarget`, `tbcore`, `tbguard`, `trayclient`, `faketray`, `sendto`, `txcore`, `holdlock`.
 
 ## Native guard
 
-`native/` is a CMake project (Visual Studio 2022 generator, static CRT):
+`native/` is a CMake project (newest installed Visual Studio generator, static CRT):
 
 ```powershell
 cmake --preset win-x64 -S native
 cmake --build native/build/win-x64 --config Release
 # then
-$probe recovery 180 (Resolve-Path native/build/win-x64/Release/Atrium.Guard.exe)
+$probe recovery 600 (Resolve-Path native/build/win-x64/Release/Atrium.Guard.exe)
 ```
+
+`ATRIUM_GUARD_FAULT` (`no-map`, `no-terminate`, `no-shell`, `shell-late`, `autohide-noop`) injects guard failures; the recovery probe sets it for single scenarios only. Never set it outside tests.
 
 ## Hybrid GPUs
 
