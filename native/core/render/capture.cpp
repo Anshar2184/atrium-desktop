@@ -10,6 +10,10 @@ namespace wgd = winrt::Windows::Graphics::DirectX;
 
 namespace atrium {
 
+namespace {
+constexpr int kBuffers = 1;
+} // namespace
+
 MonitorCapture::MonitorCapture(const Gpu& gpu, HMONITOR monitor, HANDLE frameEvent)
 {
     auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
@@ -22,7 +26,9 @@ MonitorCapture::MonitorCapture(const Gpu& gpu, HMONITOR monitor, HANDLE frameEve
     device_ = inspectable.as<wgd::Direct3D11::IDirect3DDevice>();
 
     size_ = item.Size();
-    pool_ = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size_);
+    // One buffer: each frame is closed right after its ROI is copied, and a
+    // full-monitor buffer costs 4 bytes per pixel (25 MB at 3200x2000).
+    pool_ = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, kBuffers, size_);
     token_ = pool_.FrameArrived([frameEvent](auto&&, auto&&) { SetEvent(frameEvent); });
     session_ = pool_.CreateCaptureSession(item);
     session_.IsCursorCaptureEnabled(false);
@@ -58,7 +64,7 @@ wgc::Direct3D11CaptureFrame MonitorCapture::TryLatest()
         if (cs.Width != size_.Width || cs.Height != size_.Height) {
             // Resolution changed: later frames come at the new size.
             size_ = cs;
-            pool_.Recreate(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size_);
+            pool_.Recreate(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, kBuffers, size_);
             Log(L"capture: monitor resized to %dx%d", size_.Width, size_.Height);
         }
     }

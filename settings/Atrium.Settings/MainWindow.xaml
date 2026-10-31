@@ -38,7 +38,7 @@
 
                 <TextBlock Text="材质" Style="{StaticResource SectionHeaderStyle}" />
                 <StackPanel x:Name="MaterialPanel" Spacing="4">
-                    <Grid Style="{StaticResource CardStyle}">
+                    <Grid Style="{StaticResource CardStyle}" ColumnSpacing="16">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -47,13 +47,13 @@
                             <TextBlock Text="预设" />
                             <TextBlock Style="{StaticResource CardDescriptionStyle}" Text="液态玻璃：边缘折射、轻度模糊；磨砂玻璃：强模糊、无折射。修改任一材质参数会变为自定义。" />
                         </StackPanel>
-                        <ComboBox x:Name="PresetBox" Grid.Column="1" MinWidth="160" VerticalAlignment="Center" SelectionChanged="OnPresetChanged">
+                        <ComboBox x:Name="PresetBox" Grid.Column="1" MinWidth="160" AutomationProperties.Name="预设" VerticalAlignment="Center" SelectionChanged="OnPresetChanged">
                             <ComboBoxItem Content="液态玻璃" Tag="liquid" />
                             <ComboBoxItem Content="磨砂玻璃" Tag="frosted" />
                             <ComboBoxItem Content="自定义" Tag="custom" />
                         </ComboBox>
                     </Grid>
-                    <Grid Style="{StaticResource CardStyle}">
+                    <Grid Style="{StaticResource CardStyle}" ColumnSpacing="16">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -76,10 +76,48 @@
                 </StackPanel>
 
                 <TextBlock Text="形状与位置" Style="{StaticResource SectionHeaderStyle}" />
-                <StackPanel x:Name="LayoutPanel" Spacing="4" />
+                <StackPanel x:Name="LayoutPanel" Spacing="4">
+                    <Grid x:Name="AutoWidthCard" Style="{StaticResource CardStyle}" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="自动宽度" />
+                            <TextBlock Style="{StaticResource CardDescriptionStyle}" Text="玻璃栏随内容伸缩；关闭后固定为“最大宽度”。" />
+                        </StackPanel>
+                        <ToggleSwitch x:Name="AutoWidthSwitch" Grid.Column="1" OnContent="开" OffContent="关" MinWidth="0"
+                                      AutomationProperties.Name="自动宽度" VerticalAlignment="Center" Toggled="OnAutoWidthToggled" />
+                    </Grid>
+                </StackPanel>
+
+                <TextBlock Text="固定的应用" Style="{StaticResource SectionHeaderStyle}" />
+                <Grid Style="{StaticResource CardStyle}" Padding="16,4,16,12" MinHeight="0">
+                    <StackPanel>
+                        <StackPanel x:Name="PinsList" />
+                        <TextBlock x:Name="PinsEmpty" Text="还没有固定的应用。" Style="{StaticResource CardDescriptionStyle}"
+                                   Margin="0,16,0,8" Visibility="Collapsed" />
+                        <Border Height="1" Margin="0,4,0,12" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="AddPinButton" Click="OnAddPin">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE710;" FontSize="14" />
+                                    <TextBlock Text="添加应用…" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="ImportPinsButton" Click="OnImportPins">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE896;" FontSize="14" />
+                                    <TextBlock Text="导入系统任务栏固定项" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
 
                 <TextBlock Text="内容" Style="{StaticResource SectionHeaderStyle}" />
-                <Grid Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="4">
+                <Grid Style="{StaticResource CardStyle}" ColumnSpacing="16">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -89,8 +127,37 @@
                         <TextBlock Style="{StaticResource CardDescriptionStyle}" Text="使用系统的时间与日期格式。" />
                     </StackPanel>
                     <ToggleSwitch x:Name="ClockSwitch" Grid.Column="1" OnContent="开" OffContent="关" MinWidth="0"
-                                  VerticalAlignment="Center" Toggled="OnClockToggled" />
+                                  AutomationProperties.Name="显示时钟和日期" VerticalAlignment="Center" Toggled="OnClockToggled" />
                 </Grid>
+                <Grid Style="{StaticResource CardStyle}" ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="显示正在运行的应用" />
+                        <TextBlock Style="{StaticResource CardDescriptionStyle}" Text="在固定的应用之后显示未固定但正在运行的应用。" />
+                    </StackPanel>
+                    <ToggleSwitch x:Name="RunningSwitch" Grid.Column="1" OnContent="开" OffContent="关" MinWidth="0"
+                                  AutomationProperties.Name="显示正在运行的应用" VerticalAlignment="Center" Toggled="OnRunningToggled" />
+                </Grid>
+                <Grid Style="{StaticResource CardStyle}" ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="文字颜色" />
+                        <TextBlock Style="{StaticResource CardDescriptionStyle}" Text="自动：按玻璃下方背景的明暗选择。" />
+                    </StackPanel>
+                    <ComboBox x:Name="TextColorBox" Grid.Column="1" MinWidth="160" VerticalAlignment="Center"
+                              AutomationProperties.Name="文字颜色" SelectionChanged="OnTextColorChanged">
+                        <ComboBoxItem Content="自动" Tag="auto" />
+                        <ComboBoxItem Content="浅色" Tag="light" />
+                        <ComboBoxItem Content="深色" Tag="dark" />
+                    </ComboBox>
+                </Grid>
+                </StackPanel>
 
                 <TextBlock x:Name="PathText" Style="{StaticResource CardDescriptionStyle}" Margin="2,24,0,0" IsTextSelectionEnabled="True" />
             </StackPanel>

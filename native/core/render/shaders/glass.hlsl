@@ -97,13 +97,27 @@ float4 PS(VSOut i) : SV_Target
     float3 soft = blurred(px + off);
     float3 col = lerp(sharp, soft, BlurMix);
 
+    // Vibrancy: content under the glass reads a little richer and brighter,
+    // as on macOS, before the tint is mixed in.
+    float luma = dot(col, float3(0.2126, 0.7152, 0.0722));
+    col = lerp(luma.xxx, col, 1.0 + 0.22 * Highlight) * (1.0 + 0.04 * Highlight);
+
     col = lerp(col, Tint.rgb, TintMix);
 
+    // Light: a crisp specular line along the rim, strongest facing the light,
+    // a softer glow just inside it, and a faint sheen from the top.
     float lit = saturate(dot(n, LightDir));
-    float rim = 1 - smoothstep(0, 2.0, depth);
-    float inner = saturate(1 - depth / (Edge * 1.6));
-    col += Highlight * (rim * (0.25 + 0.75 * lit) + inner * lit * 0.12);
-    col += Highlight * 0.35 * rim * saturate(dot(n, -LightDir)) * 0.5; // faint counter-rim
+    float back = saturate(dot(n, -LightDir));
+    float rimLine = 1 - smoothstep(0.0, 1.6, depth);
+    float glow = saturate(1 - depth / (Edge * 1.6));
+    col += Highlight * rimLine * (0.22 + 0.78 * lit + 0.35 * back);
+    col += Highlight * glow * glow * lit * 0.16;
+    float sheen = saturate(1 - (px.y - Inset) / max(Size.y - 2 * Inset, 1));
+    col += Highlight * 0.045 * sheen * sheen;
+
+    // Depth: a very light shade in the band where the lens bends the most.
+    float band = smoothstep(0.0, Edge * 0.5, depth) * (1 - smoothstep(Edge * 0.5, Edge * 1.3, depth));
+    col *= 1 - 0.05 * band * (1 - lit);
 
     float4 glass = float4(saturate(col) * cov, cov);
     return glass + (1 - cov) * float4(0, 0, 0, shadowA);

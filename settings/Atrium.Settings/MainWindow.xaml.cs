@@ -1,11 +1,16 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Storage;
+using Windows.Storage.Pickers;
 using Windows.UI;
 
 namespace Atrium.Settings;
@@ -33,9 +38,10 @@ public sealed partial class MainWindow : Window
     private static readonly SliderDef[] LayoutSliders =
     {
         new("圆角", "超过高度的一半时即为胶囊形。", 0, 80, 1, "px", s => s.CornerRadius, (s, v) => s.CornerRadius = v, false),
-        new("宽度", "不会超过屏幕工作区。", 300, 2400, 10, "px", s => s.Width, (s, v) => s.Width = v, false),
+        new("最大宽度", "开启“自动宽度”时，玻璃栏按内容收缩，最宽不超过此值；不会超过屏幕工作区。", 300, 2400, 10, "px", s => s.Width, (s, v) => s.Width = v, false),
         new("高度", "", 32, 120, 1, "px", s => s.Height, (s, v) => s.Height = v, false),
         new("底部间距", "与工作区底边（系统任务栏上方）的距离。", 0, 200, 1, "px", s => s.Margin, (s, v) => s.Margin = v, false),
+        new("图标大小", "任务栏图标的边长。", 16, 64, 1, "px", s => s.IconSize, (s, v) => s.IconSize = v, false),
     };
 
     private readonly CoreClient _client = new();
@@ -57,7 +63,9 @@ public sealed partial class MainWindow : Window
         AppWindow.Closing += OnClosing;
 
         foreach (var d in MaterialSliders) MaterialPanel.Children.Add(CreateRow(d));
-        foreach (var d in LayoutSliders) LayoutPanel.Children.Add(CreateRow(d));
+        // The auto-width card sits right after the width row.
+        for (int i = 0; i < LayoutSliders.Length; i++)
+            LayoutPanel.Children.Insert(i < 2 ? i : i + 1, CreateRow(LayoutSliders[i]));
         PathText.Text = "设置文件：" + CoreClient.SettingsPath;
         _ = ConnectAndLoadAsync();
     }
@@ -75,7 +83,7 @@ public sealed partial class MainWindow : Window
         var slider = new Slider { Minimum = d.Min, Maximum = d.Max, StepFrequency = d.Step, VerticalAlignment = VerticalAlignment.Center };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(slider, d.Title);
         slider.SetValue(Grid.ColumnProperty, 1);
-        var value = new TextBlock { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
+        var value = new TextBlock { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, TextAlignment = TextAlignment.Right };
         value.SetValue(Grid.ColumnProperty, 2);
         card.Children.Add(text);
         card.Children.Add(slider);
@@ -150,6 +158,10 @@ public sealed partial class MainWindow : Window
         }
         PresetBox.SelectedIndex = _current.Preset switch { "liquid" => 0, "frosted" => 1, _ => 2 };
         ClockSwitch.IsOn = _current.ShowClock;
+        AutoWidthSwitch.IsOn = _current.AutoWidth;
+        RunningSwitch.IsOn = _current.ShowRunning;
+        TextColorBox.SelectedIndex = _current.TextColor switch { "light" => 1, "dark" => 2, _ => 0 };
+        RebuildPins();
         var c = TintColor(_current.Tint);
         TintPicker.Color = c;
         TintSwatch.Background = new SolidColorBrush(c);
@@ -200,6 +212,179 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.ShowClock = ClockSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnAutoWidthToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.AutoWidth = AutoWidthSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnRunningToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.ShowRunning = RunningSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnTextColorChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || TextColorBox.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        _current.TextColor = tag;
+        Changed();
+    }
+
+    // ---- Pinned apps ----
+
+    private readonly Dictionary<string, ImageSource?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string PinTitle(PinnedApp p) =>
+        p.Name.Length > 0 ? p.Name : p.Path.Length > 0 ? System.IO.Path.GetFileNameWithoutExtension(p.Path) : p.Aumid;
+
+    private void RebuildPins(int focusIndex = -1, string? focusTag = null)
+    {
+        var pins = _current.Pins ?? new List<PinnedApp>();
+        PinsList.Children.Clear();
+        PinsEmpty.Visibility = pins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        for (int i = 0; i < pins.Count; i++)
+        {
+            if (i > 0)
+                PinsList.Children.Add(new Border { Height = 1, Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"] });
+            PinsList.Children.Add(CreatePinRow(pins[i], i, pins.Count));
+        }
+        if (focusIndex >= 0 && pins.Count > 0)
+        {
+            focusIndex = Math.Clamp(focusIndex, 0, pins.Count - 1);
+            var row = (Grid)PinsList.Children[focusIndex * 2];
+            var buttons = row.Children.OfType<StackPanel>().First().Children.OfType<Button>().ToList();
+            var target = buttons.FirstOrDefault(b => (string)b.Tag == focusTag && b.IsEnabled) ?? buttons.FirstOrDefault(b => b.IsEnabled);
+            target?.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private Grid CreatePinRow(PinnedApp pin, int index, int count)
+    {
+        var title = PinTitle(pin);
+        var row = new Grid { Padding = new Thickness(0, 8, 0, 8), ColumnSpacing = 12, MinHeight = 48 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var icon = new Grid { Width = 32, Height = 32, VerticalAlignment = VerticalAlignment.Center };
+        var glyph = new FontIcon { Glyph = "\uECAA", FontSize = 22, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] };
+        icon.Children.Add(glyph);
+        row.Children.Add(icon);
+        _ = LoadIconAsync(pin, icon, glyph);
+
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis });
+        // Files show where they are; Store and system apps have no useful path.
+        var detail = pin.Path.Length > 0 ? pin.Path : "已安装的应用";
+        if (detail.Length > 0 && detail != title)
+            text.Children.Add(new TextBlock { Text = detail, Style = (Style)Application.Current.Resources["CardDescriptionStyle"], TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
+        text.SetValue(Grid.ColumnProperty, 1);
+        row.Children.Add(text);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        buttons.SetValue(Grid.ColumnProperty, 2);
+        buttons.Children.Add(PinButton("\uE70E", "上移", title, "up", index > 0, () => MovePin(index, -1)));
+        buttons.Children.Add(PinButton("\uE70D", "下移", title, "down", index < count - 1, () => MovePin(index, 1)));
+        buttons.Children.Add(PinButton("\uE74D", "移除", title, "remove", true, () => RemovePin(index)));
+        row.Children.Add(buttons);
+        return row;
+    }
+
+    private static Button PinButton(string glyph, string verb, string title, string tag, bool enabled, Action click)
+    {
+        var b = new Button
+        {
+            Content = new FontIcon { Glyph = glyph, FontSize = 14 },
+            Width = 36, Height = 32, Padding = new Thickness(0),
+            Style = (Style)Application.Current.Resources["SubtleButtonStyle"],
+            IsEnabled = enabled, Tag = tag,
+        };
+        AutomationProperties.SetName(b, verb + " " + title);
+        ToolTipService.SetToolTip(b, verb);
+        b.Click += (_, _) => click();
+        return b;
+    }
+
+    private async Task LoadIconAsync(PinnedApp pin, Grid host, FontIcon fallback)
+    {
+        var name = ShellIcons.ParsingName(pin);
+        if (!_iconCache.TryGetValue(name, out var source))
+        {
+            var img = await ShellIcons.LoadAsync(name, 64); // 32 DIP at up to 200 % scale
+            if (img != null)
+            {
+                var bmp = new WriteableBitmap(img.Width, img.Height);
+                using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(img.Bgra, 0, img.Bgra.Length);
+                bmp.Invalidate();
+                source = bmp;
+            }
+            _iconCache[name] = source;
+        }
+        if (source == null) return;
+        host.Children.Remove(fallback);
+        host.Children.Add(new Image { Source = source, Width = 32, Height = 32 });
+    }
+
+    private void MovePin(int index, int delta)
+    {
+        var pins = _current.Pins;
+        int to = index + delta;
+        if (pins == null || index < 0 || index >= pins.Count || to < 0 || to >= pins.Count) return;
+        (pins[index], pins[to]) = (pins[to], pins[index]);
+        RebuildPins(to, delta < 0 ? "up" : "down");
+        Changed();
+    }
+
+    private void RemovePin(int index)
+    {
+        var pins = _current.Pins;
+        if (pins == null || index < 0 || index >= pins.Count) return;
+        pins.RemoveAt(index);
+        RebuildPins(index, "remove");
+        Changed();
+    }
+
+    private async void OnAddPin(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        picker.FileTypeFilter.Add(".exe");
+        picker.FileTypeFilter.Add(".lnk");
+        var file = await picker.PickSingleFileAsync();
+        if (file == null) return;
+        var pins = _current.Pins ??= new List<PinnedApp>();
+        if (pins.Count >= 64)
+        {
+            Status.Severity = InfoBarSeverity.Warning;
+            Status.Title = "固定的应用已达上限";
+            Status.Message = "最多可以固定 64 个应用。";
+            return;
+        }
+        pins.Add(new PinnedApp(System.IO.Path.GetFileNameWithoutExtension(file.Path), file.Path, "", ""));
+        RebuildPins(pins.Count - 1, "remove");
+        Changed();
+    }
+
+    private async void OnImportPins(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "导入系统任务栏固定项？",
+            Content = "当前的固定列表将被 Windows 任务栏上固定的应用替换。",
+            PrimaryButtonText = "替换",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        _current.Pins = CoreClient.ImportTaskbarPins();
+        RebuildPins();
         Changed();
     }
 

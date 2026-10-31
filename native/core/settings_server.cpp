@@ -83,6 +83,30 @@ Settings SettingsServer::Current()
     return current_;
 }
 
+bool SettingsServer::Modify(const std::function<void(Settings&)>& change)
+{
+    Settings saved, current;
+    {
+        std::lock_guard g(lock_);
+        saved = saved_;
+        current = current_;
+    }
+    change(saved);
+    saved.Clamp();
+    if (!SaveSettings(saved)) {
+        Log(L"settings: could not save %s", SettingsPath().c_str());
+        return false;
+    }
+    change(current);
+    current.Clamp();
+    {
+        std::lock_guard g(lock_);
+        saved_ = saved;
+    }
+    SetCurrent(current);
+    return true;
+}
+
 void SettingsServer::SetCurrent(const Settings& s)
 {
     {

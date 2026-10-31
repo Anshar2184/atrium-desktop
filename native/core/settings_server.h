@@ -7,6 +7,7 @@
 
 #include <windows.h>
 
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -27,6 +28,9 @@ public:
     SettingsServer& operator=(const SettingsServer&) = delete;
 
     Settings Current();
+    // A change made by the core itself (e.g. pinning from the bar's menu):
+    // applied to the saved settings and to the current preview, then written.
+    bool Modify(const std::function<void(Settings&)>& change);
 
 private:
     void Run();

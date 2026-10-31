@@ -17,7 +17,7 @@ Thanks for your interest. Atrium is at the architecture and feasibility stage, s
 
 1. Open an issue first for anything larger than a typo, so the approach can be agreed on.
 2. Keep a pull request to one topic; match the style of the surrounding code and documents.
-3. Make sure `./tools/build.ps1` (native core and guard, settings app, portable package) and `dotnet build poc/Atrium.Poc.sln -c Release` pass. For changes to Atrium.Core or Atrium.Settings, also run `./tests/e2e-settings.ps1 -Package` and `./tests/pipe-protocol.ps1`.
+3. Make sure `./tools/build.ps1` (native core and guard, settings app, portable package) and `dotnet build poc/Atrium.Poc.sln -c Release` pass. For changes to Atrium.Core or Atrium.Settings, also run `./tests/e2e-settings.ps1 -Package`, `./tests/pipe-protocol.ps1` and, when you can leave the mouse alone for a minute, `./tests/e2e-bar.ps1`.
 4. Describe how you verified the change and on which Windows build.
 
 Documents under `docs/` are currently written in Chinese; English contributions and translations are welcome.

@@ -123,14 +123,36 @@ internal sealed class CoreClient : IDisposable
 
     private static BarSettings ReadFile()
     {
+        BarSettings s;
         try
         {
-            return BarSettings.FromJson(JsonNode.Parse(File.ReadAllText(SettingsPath)) as JsonObject, new());
+            s = BarSettings.FromJson(JsonNode.Parse(File.ReadAllText(SettingsPath)) as JsonObject, new());
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
-            return new BarSettings();
+            s = new BarSettings();
         }
+        // First run (no "pins" key yet): show what the core would import.
+        s.Pins ??= ImportTaskbarPins();
+        return s;
+    }
+
+    // The pins of the Windows taskbar, as the core imports them on first run.
+    public static List<PinnedApp> ImportTaskbarPins()
+    {
+        var pins = new List<PinnedApp>();
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar");
+            if (!Directory.Exists(dir)) return pins;
+            foreach (var f in Directory.EnumerateFiles(dir, "*.lnk").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                pins.Add(new PinnedApp(Path.GetFileNameWithoutExtension(f), f, "", ""));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+        return pins.Count > 64 ? pins.GetRange(0, 64) : pins;
     }
 
     private static void WriteFile(BarSettings s)

@@ -31,7 +31,8 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height) :
     D3D11_BUFFER_DESC ob{4 * 4, D3D11_USAGE_DEFAULT, D3D11_BIND_UNORDERED_ACCESS, 0, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, 4};
     Check(dev->CreateBuffer(&ob, nullptr, cmpOut_.put()));
     D3D11_BUFFER_DESC sb{4 * 4, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ};
-    Check(dev->CreateBuffer(&sb, nullptr, cmpStaging_.put()));
+    for (auto& s : slots_)
+        Check(dev->CreateBuffer(&sb, nullptr, s.counters.put()));
     D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
     ud.Format = DXGI_FORMAT_UNKNOWN;
     ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
@@ -93,6 +94,19 @@ void GlassRenderer::CreateSizeDependent()
     roiSrv_ = nullptr;
     Check(dev->CreateTexture2D(&td, nullptr, roi_.put()));
     Check(dev->CreateShaderResourceView(roi_.get(), nullptr, roiSrv_.put()));
+    // Luminance grid: the first mip at most 96 texels wide (~16 px cells).
+    D3D11_TEXTURE2D_DESC created{};
+    roi_->GetDesc(&created);
+    gridMip_ = 0;
+    while (gridMip_ + 1 < created.MipLevels && (rw >> gridMip_) > 96)
+        ++gridMip_;
+    gridW_ = std::max(1, int(rw >> gridMip_));
+    gridH_ = std::max(1, int(rh >> gridMip_));
+    D3D11_TEXTURE2D_DESC gd{UINT(gridW_), UINT(gridH_), 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, {1, 0}, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0};
+    for (auto& s : slots_) {
+        s.grid = nullptr;
+        Check(dev->CreateTexture2D(&gd, nullptr, s.grid.put()));
+    }
 
     td.MipLevels = 1;
     td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -106,6 +120,7 @@ void GlassRenderer::CreateSizeDependent()
     gpu_.context->UpdateSubresource(cmpCb_.get(), 0, nullptr, cp, 0, 0);
     hasPresented_ = false;
     hasBackdrop_ = false;
+    inFlight_.clear(); // results for the old size are meaningless
 }
 
 void GlassRenderer::Resize(int width, int height)
@@ -131,12 +146,15 @@ void GlassRenderer::UpdateBackdrop(ID3D11Texture2D* frame, int x, int y)
     gpu_.context->CopySubresourceRegion(roi_.get(), 0, UINT(cx0 - x0), UINT(cy0 - y0), 0, frame, 0, &box);
     gpu_.context->GenerateMips(roiSrv_.get());
     hasBackdrop_ = true;
-}
-
-bool GlassRenderer::BackdropChanged()
-{
     if (!hasPresented_)
-        return true;
+        return; // nothing to compare with yet; the caller presents anyway
+
+    // Keep at most kSlots comparisons in flight; on overflow wait for the oldest.
+    if (int(inFlight_.size()) == kSlots) {
+        Readback discard;
+        ReadSlot(inFlight_.front(), true, discard);
+        inFlight_.pop_front();
+    }
     auto* ctx = gpu_.context.get();
     const UINT zero[4] = {};
     ctx->ClearUnorderedAccessViewUint(cmpUav_.get(), zero);
@@ -152,16 +170,71 @@ bool GlassRenderer::BackdropChanged()
     ctx->CSSetShaderResources(0, 2, noSrv);
     ID3D11UnorderedAccessView* noUav = nullptr;
     ctx->CSSetUnorderedAccessViews(0, 1, &noUav, nullptr);
-    ctx->CopyResource(cmpStaging_.get(), cmpOut_.get());
-    D3D11_MAPPED_SUBRESOURCE m{};
-    if (FAILED(ctx->Map(cmpStaging_.get(), 0, D3D11_MAP_READ, 0, &m)))
-        return true;
-    bool changed = static_cast<const UINT*>(m.pData)[0] != 0;
-    ctx->Unmap(cmpStaging_.get(), 0);
-    return changed;
+    int slot = nextSlot_;
+    nextSlot_ = (nextSlot_ + 1) % kSlots;
+    ctx->CopyResource(slots_[slot].counters.get(), cmpOut_.get());
+    ctx->CopySubresourceRegion(slots_[slot].grid.get(), 0, 0, 0, 0, roi_.get(), gridMip_, nullptr);
+    ctx->Flush(); // start the GPU now; the result is polled later
+    inFlight_.push_back(slot);
 }
 
-bool GlassRenderer::Present(const GlassParams& in, const TextOverlay& text)
+bool GlassRenderer::ReadSlot(int slot, bool wait, Readback& out)
+{
+    auto* ctx = gpu_.context.get();
+    UINT flags = wait ? 0 : D3D11_MAP_FLAG_DO_NOT_WAIT;
+    D3D11_MAPPED_SUBRESOURCE m{};
+    if (ctx->Map(slots_[slot].counters.get(), 0, D3D11_MAP_READ, flags, &m) != S_OK)
+        return false; // DXGI_ERROR_WAS_STILL_DRAWING (or device trouble: retried later)
+    out.changed = static_cast<const UINT*>(m.pData)[0] != 0;
+    ctx->Unmap(slots_[slot].counters.get(), 0);
+    if (ctx->Map(slots_[slot].grid.get(), 0, D3D11_MAP_READ, 0, &m) == S_OK) {
+        out.gridW = gridW_;
+        out.gridH = gridH_;
+        out.cellX = float(w_ + 2 * kPad) / float(gridW_);
+        out.cellY = float(h_ + 2 * kPad) / float(gridH_);
+        out.luma.resize(size_t(gridW_) * size_t(gridH_));
+        for (int y = 0; y < gridH_; ++y) {
+            const auto* row = static_cast<const uint8_t*>(m.pData) + size_t(y) * m.RowPitch;
+            for (int x = 0; x < gridW_; ++x) {
+                const uint8_t* px = row + 4 * x; // BGRA
+                out.luma[size_t(y) * gridW_ + x] = (0.0722f * px[0] + 0.7152f * px[1] + 0.2126f * px[2]) / 255.f;
+            }
+        }
+        ctx->Unmap(slots_[slot].grid.get(), 0);
+    }
+    return true;
+}
+
+float Readback::RegionLuma(float x0, float y0, float x1, float y1) const
+{
+    if (luma.empty())
+        return 0.5f;
+    int gx0 = std::clamp(int(x0 / cellX), 0, gridW - 1), gx1 = std::clamp(int(x1 / cellX), 0, gridW - 1);
+    int gy0 = std::clamp(int(y0 / cellY), 0, gridH - 1), gy1 = std::clamp(int(y1 / cellY), 0, gridH - 1);
+    float sum = 0;
+    int n = 0;
+    for (int y = gy0; y <= gy1; ++y)
+        for (int x = gx0; x <= gx1; ++x, ++n)
+            sum += luma[size_t(y) * gridW + x];
+    return n ? sum / float(n) : 0.5f;
+}
+
+std::optional<Readback> GlassRenderer::Poll()
+{
+    std::optional<Readback> merged;
+    while (!inFlight_.empty()) {
+        Readback r;
+        if (!ReadSlot(inFlight_.front(), false, r))
+            break;
+        inFlight_.pop_front();
+        bool changed = r.changed || (merged && merged->changed);
+        merged = r;
+        merged->changed = changed;
+    }
+    return merged;
+}
+
+bool GlassRenderer::Present(const GlassParams& in, const std::function<void(ID2D1DeviceContext2*)>& overlay)
 {
     auto* ctx = gpu_.context.get();
     GlassParams p = in;
@@ -196,7 +269,7 @@ bool GlassRenderer::Present(const GlassParams& in, const TextOverlay& text)
     ctx->PSSetShaderResources(0, 1, &none);
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
 
-    if (!text.primary.empty()) {
+    if (overlay) {
         auto surface = back.as<IDXGISurface>();
         D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
                                                              D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
@@ -204,29 +277,8 @@ bool GlassRenderer::Present(const GlassParams& in, const TextOverlay& text)
         Check(d2d_->CreateBitmapFromDxgiSurface(surface.get(), &bp, target.put()));
         d2d_->SetTarget(target.get());
         d2d_->BeginDraw();
-        winrt::com_ptr<ID2D1SolidColorBrush> fg, shade;
-        d2d_->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.96f), fg.put());
-        d2d_->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0.30f), shade.put());
-        auto draw = [&](const std::wstring& s, float px, float top, float bottom, DWRITE_FONT_WEIGHT weight) {
-            winrt::com_ptr<IDWriteTextFormat> f;
-            if (FAILED(dwrite_->CreateTextFormat(L"Segoe UI Variable Text", nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
-                                                 DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put())))
-                return;
-            f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            float o = std::max(1.0f, px / 14);
-            d2d_->DrawText(s.c_str(), UINT32(s.size()), f.get(), D2D1::RectF(o, top + o, float(w_) + o, bottom + o), shade.get());
-            d2d_->DrawText(s.c_str(), UINT32(s.size()), f.get(), D2D1::RectF(0, top, float(w_), bottom), fg.get());
-        };
-        float mid = float(h_) / 2;
-        if (text.secondary.empty()) {
-            draw(text.primary, text.primaryPx, 0, float(h_), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        } else {
-            float total = text.primaryPx * 1.25f + text.secondaryPx * 1.25f;
-            float top = mid - total / 2;
-            draw(text.primary, text.primaryPx, top, top + text.primaryPx * 1.25f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            draw(text.secondary, text.secondaryPx, top + text.primaryPx * 1.25f, top + total, DWRITE_FONT_WEIGHT_NORMAL);
-        }
+        d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
+        overlay(d2d_.get());
         HRESULT hr = d2d_->EndDraw();
         d2d_->SetTarget(nullptr);
         if (hr == D2DERR_RECREATE_TARGET)

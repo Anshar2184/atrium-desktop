@@ -25,14 +25,28 @@ Settings Settings::Frosted()
 {
     Settings s;
     s.preset = L"frosted";
-    s.transparency = 0.78;
+    s.transparency = 0.80;
     s.blur = 1.0;
-    s.refraction = 0;
-    s.edge = 1;
-    s.dispersion = 0;
-    s.highlight = 0.30;
+    s.refraction = 6;
+    s.edge = 10;
+    s.dispersion = 0.04;
+    s.highlight = 0.45;
+    s.shadow = 0.30;
     s.tint = 0xF5F5FA;
     return s;
+}
+
+void Settings::ApplyMaterial(const Settings& p)
+{
+    preset = p.preset;
+    transparency = p.transparency;
+    blur = p.blur;
+    refraction = p.refraction;
+    edge = p.edge;
+    dispersion = p.dispersion;
+    highlight = p.highlight;
+    shadow = p.shadow;
+    tint = p.tint;
 }
 
 void Settings::Clamp()
@@ -52,7 +66,12 @@ void Settings::Clamp()
     c(width, 200, 4000, d.width);
     c(height, 32, 160, d.height);
     c(margin, 0, 400, d.margin);
+    c(iconSize, 16, 64, d.iconSize);
     tint &= 0xFFFFFF;
+    if (textColor != L"light" && textColor != L"dark")
+        textColor = L"auto";
+    if (pins && pins->size() > 64)
+        pins->resize(64);
     if (preset != L"liquid" && preset != L"frosted")
         preset = L"custom";
 }
@@ -77,7 +96,23 @@ std::wstring Settings::ToJson() const
     num(L"width", width);
     num(L"height", height);
     num(L"margin", margin);
+    num(L"iconSize", iconSize);
     o.SetNamedValue(L"showClock", json::JsonValue::CreateBooleanValue(showClock));
+    o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
+    o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
+    o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
+    if (pins) {
+        json::JsonArray a;
+        for (const auto& p : *pins) {
+            json::JsonObject e;
+            e.SetNamedValue(L"name", json::JsonValue::CreateStringValue(p.name));
+            e.SetNamedValue(L"path", json::JsonValue::CreateStringValue(p.path));
+            e.SetNamedValue(L"args", json::JsonValue::CreateStringValue(p.args));
+            e.SetNamedValue(L"aumid", json::JsonValue::CreateStringValue(p.aumid));
+            a.Append(e);
+        }
+        o.SetNamedValue(L"pins", a);
+    }
     return std::wstring(o.Stringify());
 }
 
@@ -109,8 +144,32 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
         if (t.size() == 7 && t[0] == L'#' && std::all_of(t.begin() + 1, t.end(), [](wchar_t c) { return iswxdigit(c) != 0; }))
             s.tint = static_cast<uint32_t>(wcstoul(t.c_str() + 1, nullptr, 16));
     }
-    if (o.HasKey(L"showClock") && o.GetNamedValue(L"showClock").ValueType() == json::JsonValueType::Boolean)
-        s.showClock = o.GetNamedBoolean(L"showClock");
+    num(L"iconSize", s.iconSize);
+    auto flag = [&](const wchar_t* k, bool& v) {
+        if (o.HasKey(k) && o.GetNamedValue(k).ValueType() == json::JsonValueType::Boolean)
+            v = o.GetNamedBoolean(k);
+    };
+    flag(L"showClock", s.showClock);
+    flag(L"autoWidth", s.autoWidth);
+    flag(L"showRunning", s.showRunning);
+    if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
+        s.textColor = std::wstring(o.GetNamedString(L"textColor"));
+    if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {
+        std::vector<PinnedApp> pins;
+        for (const auto& v : o.GetNamedArray(L"pins")) {
+            if (v.ValueType() != json::JsonValueType::Object)
+                continue;
+            auto e = v.GetObject();
+            auto str = [&](const wchar_t* k) {
+                return e.HasKey(k) && e.GetNamedValue(k).ValueType() == json::JsonValueType::String ? std::wstring(e.GetNamedString(k))
+                                                                                                    : std::wstring();
+            };
+            PinnedApp p{str(L"name"), str(L"path"), str(L"args"), str(L"aumid")};
+            if (!p.path.empty() || !p.aumid.empty())
+                pins.push_back(std::move(p));
+        }
+        s.pins = std::move(pins);
+    }
     s.Clamp();
     out = s;
     return true;

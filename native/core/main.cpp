@@ -7,6 +7,7 @@
 #include "resource.h"
 #include "settings.h"
 #include "settings_server.h"
+#include "shell/task_model.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -14,6 +15,7 @@
 
 #include <winrt/Windows.Foundation.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -27,7 +29,7 @@ constexpr UINT WM_TRAY = WM_APP + 2;
 constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.Core.exe
 constexpr UINT kTrayId = 1;
 
-enum Command : UINT { kCmdSettings = 100, kCmdToggle, kCmdExit };
+enum Command : UINT { kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose };
 
 struct App {
     HINSTANCE instance = nullptr;
@@ -35,6 +37,7 @@ struct App {
     UINT taskbarCreated = 0;
     std::unique_ptr<Bar> bar;
     std::unique_ptr<SettingsServer> server;
+    std::unique_ptr<TaskModel> tasks;
 };
 
 App g_app;
@@ -111,8 +114,83 @@ void ShowMenu(POINT pt)
     }
 }
 
+// Applies settings to the bar and the task model.
+void ApplySettings(const Settings& s)
+{
+    g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
+    g_app.tasks->SetShowRunning(s.showRunning);
+    g_app.bar->Apply(s);
+}
+
+void ShowItemMenu(const std::wstring& key, POINT pt)
+{
+    std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
+    if (it == items.end())
+        return;
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, it->name.c_str());
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kCmdNewWindow, L"打开新窗口");
+    AppendMenuW(menu, MF_STRING, it->pinned ? kCmdUnpin : kCmdPin, it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium");
+    if (!it->windows.empty())
+        AppendMenuW(menu, MF_STRING, kCmdClose, it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kCmdSettings, L"外观设置…");
+    SetForegroundWindow(g_app.host);
+    UINT cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_CENTERALIGN, pt.x, pt.y, g_app.host, nullptr);
+    DestroyMenu(menu);
+    PostMessageW(g_app.host, WM_NULL, 0, 0);
+    switch (cmd) {
+    case kCmdNewWindow:
+        g_app.tasks->Launch(key);
+        break;
+    case kCmdPin: {
+        PinnedApp pin = g_app.tasks->PinFor(key);
+        g_app.server->Modify([&](Settings& s) {
+            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+            pins.push_back(pin);
+            s.pins = std::move(pins);
+        });
+        break;
+    }
+    case kCmdUnpin:
+        g_app.server->Modify([&](Settings& s) {
+            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+            if (it->pinIndex >= 0 && it->pinIndex < int(pins.size()))
+                pins.erase(pins.begin() + it->pinIndex);
+            s.pins = std::move(pins);
+        });
+        break;
+    case kCmdClose:
+        g_app.tasks->CloseAll(key);
+        break;
+    case kCmdSettings:
+        OpenSettings();
+        break;
+    }
+}
+
+// The clock opens the Windows calendar and notifications (Win+N), like the
+// system clock does (D11: public shortcuts only).
+void OpenCalendar()
+{
+    INPUT in[4] = {};
+    for (auto& i : in)
+        i.type = INPUT_KEYBOARD;
+    in[0].ki.wVk = VK_LWIN;
+    in[1].ki.wVk = 'N';
+    in[2].ki.wVk = 'N';
+    in[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    in[3].ki.wVk = VK_LWIN;
+    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(4, in, sizeof(INPUT));
+}
+
 LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
+    if (g_app.tasks && g_app.tasks->HandleMessage(m, w, l))
+        return 0;
     if (m == g_app.taskbarCreated && m != 0) {
         AddTrayIcon(); // Explorer restarted
         return 0;
@@ -135,7 +213,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         OpenSettings();
         return 0;
     case WM_ATRIUM_SETTINGS:
-        g_app.bar->Apply(g_app.server->Current());
+        ApplySettings(g_app.server->Current());
         return 0;
     case WM_DISPLAYCHANGE:
     case WM_DPICHANGED:
@@ -198,10 +276,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ChangeWindowMessageFilterEx(g_app.host, g_app.taskbarCreated, MSGFLT_ALLOW, nullptr);
 
     Settings settings = LoadSettings();
-    g_app.bar = std::make_unique<Bar>(instance, wcsstr(cmdLine, L"--debug-capturable") != nullptr);
+    if (!settings.pins) {
+        // First run: start from the user's Windows taskbar pins (saved on the next save).
+        settings.pins = TaskModel::ImportWindowsPins();
+        Log(L"core: imported %zu Windows taskbar pins", settings.pins->size());
+    }
+    g_app.bar = std::make_unique<Bar>(instance, wcsstr(cmdLine, L"--debug-capturable") != nullptr, wcsstr(cmdLine, L"--debug-layout") != nullptr);
+    g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] { g_app.bar->SetItems(g_app.tasks->Snapshot()); });
+    g_app.bar->iconProvider = [](const std::wstring& key, int px) { return g_app.tasks->Icon(key, px); };
+    g_app.bar->onActivate = [](const std::wstring& key) { g_app.tasks->Activate(key); };
+    g_app.bar->onLaunch = [](const std::wstring& key) { g_app.tasks->Launch(key); };
+    g_app.bar->onItemMenu = ShowItemMenu;
+    g_app.bar->onClockClick = OpenCalendar;
     g_app.bar->onContextMenu = ShowMenu;
     g_app.bar->onCloseRequest = [] { PostMessageW(g_app.host, WM_CLOSE, 0, 0); };
-    g_app.bar->Apply(settings);
+    ApplySettings(settings);
+    g_app.bar->SetItems(g_app.tasks->Snapshot());
     g_app.server = std::make_unique<SettingsServer>(g_app.host, settings);
     AddTrayIcon();
 
@@ -211,6 +301,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         DispatchMessageW(&msg);
     }
     g_app.server.reset();
+    g_app.tasks.reset();
     g_app.bar.reset();
     Log(L"core: exited");
     ReleaseMutex(mutex);

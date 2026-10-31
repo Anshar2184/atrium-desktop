@@ -6,25 +6,32 @@
 
 `%LOCALAPPDATA%\Atrium\settings.json`，UTF-8，一个扁平 JSON 对象，原子替换写入。缺少的键取默认值，超出范围的值被截断，格式错误的文件整体回退到默认值（Core 日志会记录）。
 
-| 键 | 类型 | 范围 | 默认（液态） | 说明 |
+| 键 | 类型 | 范围 | 默认（液态，参照 macOS Liquid Glass） | 说明 |
 | --- | --- | --- | --- | --- |
 | `version` | number | 1 | 1 | 架构版本 |
 | `preset` | string | `liquid` / `frosted` / `custom` | `liquid` | 仅用于界面显示 |
-| `transparency` | number | 0–1 | 0.90 | 1 = 完全不染色；着色混合 = 1 − transparency |
-| `blur` | number | 0–1 | 0.35 | 模糊混合比例，同时决定 mip 级别 |
-| `refraction` | number | 0–60 DIP | 13 | 边缘最大采样偏移 |
-| `edge` | number | 1–80 DIP | 17 | 发生折射的边缘宽度 |
-| `dispersion` | number | 0–0.5 | 0.08 | 通道分离比例 |
-| `highlight` | number | 0–1 | 0.55 | 边缘高光 |
-| `shadow` | number | 0–1 | 0.28 | 投影浓度 |
+| `transparency` | number | 0–1 | 0.95 | 1 = 完全不染色；着色混合 = 1 − transparency |
+| `blur` | number | 0–1 | 0.50 | 模糊强度：主要决定 mip 级别（1 + 4.5 × blur），低值时与清晰采样混合 |
+| `refraction` | number | 0–60 DIP | 30 | 边缘最大采样偏移 |
+| `edge` | number | 1–80 DIP | 24 | 发生折射的边缘宽度 |
+| `dispersion` | number | 0–0.5 | 0.30 | 通道分离比例 |
+| `highlight` | number | 0–1 | 0.80 | 边缘高光与玻璃下内容的鲜艳度 |
+| `shadow` | number | 0–1 | 0.30 | 投影浓度 |
 | `tint` | string | `#RRGGBB` | `#FFFFFF` | 染色 |
-| `cornerRadius` | number | 0–200 DIP | 28 | 绘制时不超过高度的一半 |
-| `width` | number | 200–4000 DIP | 720 | 不超过工作区 |
-| `height` | number | 32–160 DIP | 56 | |
+| `cornerRadius` | number | 0–200 DIP | 30 | 绘制时不超过高度的一半 |
+| `width` | number | 200–4000 DIP | 1200 | 最大宽度，不超过工作区；`autoWidth` 关闭时为固定宽度 |
+| `height` | number | 32–160 DIP | 60 | |
 | `margin` | number | 0–400 DIP | 10 | 与工作区底边的距离 |
 | `showClock` | bool | | true | 时钟与日期 |
+| `textColor` | string | `auto` / `light` / `dark` | `auto` | 文字颜色；`auto` 按玻璃下方的实际亮度选择 |
+| `iconSize` | number | 16–64 DIP | 36 | 任务栏图标边长 |
+| `autoWidth` | bool | | true | 宽度随内容伸缩，最大为 `width` |
+| `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
+| `pins` | array | | 见下 | 固定的应用，按顺序显示 |
 
-磨砂预设：`transparency 0.78, blur 1, refraction 0, edge 1, dispersion 0, highlight 0.30, tint #F5F5FA`。
+`pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空"}`。识别同一应用时 `aumid` 优先，其次是 `path` 指向的程序。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。
+
+预设只改材质键（transparency、blur、refraction、edge、dispersion、highlight、shadow、tint），不改布局与内容键。数值以 `native/core/settings.cpp` 中的 `Settings::Liquid()` / `Settings::Frosted()` 为准，`BarSettings.cs` 必须一致。
 
 ## 管道
 

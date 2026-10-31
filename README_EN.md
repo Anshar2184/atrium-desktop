@@ -18,17 +18,19 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
 </div>
 
 > [!NOTE]
-> **v0.1 development build.** The first runnable slice: a C++ glass bar (clock and date) that coexists with the Windows taskbar, plus a settings app that adjusts its look live. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
+> **v0.2 development build.** A C++ glass taskbar that coexists with the Windows taskbar: pinned and running apps, click to switch windows, clock and calendar, plus a settings app that adjusts the look live. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
 
 <p align="center">
-  <img src="docs/images/v01-bar-liquid.png" alt="Liquid preset" width="80%"><br>
-  <img src="docs/images/v01-bar-frosted.png" alt="Frosted preset" width="80%"><br>
-  <sub>Atrium.Core v0.1 on screen: liquid and frosted presets (over a test pattern)</sub>
+  <img src="docs/images/v02-bar-liquid.png" alt="Liquid preset" width="80%"><br>
+  <img src="docs/images/v02-bar-frosted.png" alt="Frosted preset" width="80%"><br>
+  <img src="docs/images/v02-bar-light.png" alt="Dark text chosen automatically over a light backdrop" width="80%"><br>
+  <sub>On screen: liquid (strong refraction and dispersion after macOS Liquid Glass), frosted, and dark ink chosen automatically over a light backdrop (test pattern behind)</sub>
 </p>
 
 <p align="center">
-  <img src="docs/images/v01-settings.png" alt="Settings" width="60%"><br>
-  <sub>Settings: the bar previews every slider change live; nothing is written until you save (UI in Chinese for now)</sub>
+  <img src="docs/images/v02-bar-hover.png" alt="Hover" width="80%"><br>
+  <img src="docs/images/v02-settings-pins.png" alt="Settings" width="60%"><br>
+  <sub>Hovered icons lift and show their name above; the settings app adjusts material and size live and manages pinned apps (UI in Chinese for now)</sub>
 </p>
 
 ## What it is
@@ -42,9 +44,10 @@ Atrium redesigns the layer you look at every day: a floating glass taskbar and a
 ## Quick start
 
 1. Download the `Atrium-win-x64` artifact from the latest successful run in [Actions](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml), or build it as described below.
-2. Unzip and run `Atrium.Core.exe`. A glass bar appears at the bottom of the screen, and an Atrium icon appears in the tray.
-3. Double-click the tray icon (or right-click it or the bar → the first menu item) to open the settings: transparency, blur, refraction, corner radius, size and more.
-4. Right-click the tray icon → the last menu item to quit. Nothing is written to the registry and no service is installed; settings live in `%LOCALAPPDATA%\Atrium`.
+2. Unzip and run `Atrium.Core.exe`. The glass taskbar appears at the bottom of the screen; on first run it imports your current Windows taskbar pins.
+3. Left-click an app to open it, bring it to the front or minimize it; middle-click for a new window; right-click to pin, unpin or close. Click the clock for the calendar and notifications.
+4. Double-click the tray icon (or right-click it → the first menu item) to open the settings: material, size, pinned apps and more.
+5. Right-click the tray icon → the last menu item to quit. Nothing is written to the registry and no service is installed; settings live in `%LOCALAPPDATA%\Atrium`.
 
 ## Status
 
@@ -52,7 +55,7 @@ All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc
 
 | Area | Result |
 |---|---|
-| v0.1 glass bar and settings | ✅ coexistence mode; with a backdrop changing every frame, frame work p95 1.7 ms and 126 MB memory; 9 end-to-end settings checks and 7 protocol robustness checks pass |
+| v0.2 glass taskbar and settings | ✅ coexistence mode; pinned and running apps, click to switch (5 real-click checks pass); with a backdrop changing every frame, present p95 0.8 ms, about 4 % of one core, 144 MB; 12 end-to-end settings checks and 7 protocol checks pass |
 | Live glass | ✅ WGC capture with self-exclusion + D3D11; iGPU frame work p95 2.4 ms, content lag p95 1 frame |
 | Self-capture echo | ✅ exact comparison with the last presented backdrop; slow gradients, 1 px cursors and low-contrast scrolling text are never lost |
 | Click-through | ✅ click-through visual window + region-shaped input window; shadows and transparent corners pass clicks through |
@@ -90,6 +93,7 @@ Requires Windows 10 19041+ (Windows 11 recommended), the .NET 10 SDK and Visual 
 # tests (briefly start Atrium and drive the settings window; the settings file is restored)
 ./tests/e2e-settings.ps1 -Package
 ./tests/pipe-protocol.ps1
+./tests/e2e-bar.ps1          # moves the mouse and clicks; runs only after 30 s without user input
 
 # verification probes
 dotnet build poc/Atrium.Poc.sln -c Release

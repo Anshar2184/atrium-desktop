@@ -32,6 +32,7 @@ try {
     Start-Process $Core
     Start-Sleep 2
     $p = Connect
+    $defaults = (Req $p '{"op":"get"}').saved # the core's own defaults (no settings file)
     $r = Req $p "not json"
     Check "malformed" ($r.op -eq "error") $r.message
     $r = Req $p '{"op":"explode"}'
@@ -41,13 +42,13 @@ try {
     $r = Req $p '{"op":"preview","settings":{"transparency":7,"height":-3,"tint":"#zzzzzz","width":"wide"}}'
     $s = Req $p '{"op":"get"}'
     Check "clamped" ($r.op -eq "ok" -and $s.current.transparency -eq 1 -and $s.current.height -eq 32) "transparency=$($s.current.transparency) height=$($s.current.height)"
-    Check "invalid-ignored" ($s.current.tint -eq "#FFFFFF" -and $s.current.width -eq 720) "tint=$($s.current.tint) width=$($s.current.width)"
-    Check "saved-untouched" ($s.saved.transparency -eq 0.9 -and -not (Test-Path $file)) "saved transparency=$($s.saved.transparency)"
+    Check "invalid-ignored" ($s.current.tint -eq $defaults.tint -and $s.current.width -eq $defaults.width) "tint=$($s.current.tint) width=$($s.current.width)"
+    Check "saved-untouched" ($s.saved.transparency -eq $defaults.transparency -and -not (Test-Path $file)) "saved transparency=$($s.saved.transparency)"
     $p.Dispose()
     Start-Sleep 1
     $p = Connect
     $s = Req $p '{"op":"get"}'
-    Check "revert-on-disconnect" ($s.current.transparency -eq 0.9 -and $s.current.height -eq 56) "current after reconnect: transparency=$($s.current.transparency) height=$($s.current.height)"
+    Check "revert-on-disconnect" ($s.current.transparency -eq $defaults.transparency -and $s.current.height -eq $defaults.height) "current after reconnect: transparency=$($s.current.transparency) height=$($s.current.height)"
     $p.Dispose()
 }
 finally {

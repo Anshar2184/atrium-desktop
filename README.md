@@ -18,17 +18,19 @@
 </div>
 
 > [!NOTE]
-> **v0.1 开发版。** 可以运行的第一个切片：一条与系统任务栏共存的 C++ 玻璃栏（时钟与日期）和一个可实时调节外观的设置中心。它不会隐藏或替换系统任务栏；完整替换还要等恢复与托盘在稳定版 Windows 11 上通过验证。
+> **v0.2 开发版。** 一条与系统任务栏共存的 C++ 玻璃任务栏：固定与运行中的应用、点击切换窗口、时钟与日历，加上可实时调节外观的设置中心。它不会隐藏或替换系统任务栏；完整替换还要等恢复与托盘在稳定版 Windows 11 上通过验证。
 
 <p align="center">
-  <img src="docs/images/v01-bar-liquid.png" alt="液态玻璃预设" width="80%"><br>
-  <img src="docs/images/v01-bar-frosted.png" alt="磨砂玻璃预设" width="80%"><br>
-  <sub>v0.1 的 Atrium.Core 实机画面：液态与磨砂两种预设（背景为测试图案）</sub>
+  <img src="docs/images/v02-bar-liquid.png" alt="液态玻璃预设" width="80%"><br>
+  <img src="docs/images/v02-bar-frosted.png" alt="磨砂玻璃预设" width="80%"><br>
+  <img src="docs/images/v02-bar-light.png" alt="浅色背景下自动切换为深色文字" width="80%"><br>
+  <sub>实机画面：液态（参照 macOS Liquid Glass 的强折射与色散）、磨砂，以及浅色背景下自动切换的深色文字（背景为测试图案）</sub>
 </p>
 
 <p align="center">
-  <img src="docs/images/v01-settings.png" alt="设置中心" width="60%"><br>
-  <sub>设置中心：拖动滑块时玻璃栏实时预览，保存后才写入设置</sub>
+  <img src="docs/images/v02-bar-hover.png" alt="悬停" width="80%"><br>
+  <img src="docs/images/v02-settings-pins.png" alt="设置中心" width="60%"><br>
+  <sub>悬停时图标浮起并在上方显示名称；设置中心可实时调节材质、尺寸并管理固定的应用</sub>
 </p>
 
 ## 它要做什么
@@ -42,9 +44,10 @@ Atrium 重新设计你每天看到的那一层：一条悬浮的玻璃任务栏�
 ## 快速开始
 
 1. 从 [Actions](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml) 最新一次成功构建下载 `Atrium-win-x64` 构件，或按下文自行构建。
-2. 解压后运行 `Atrium.Core.exe`。屏幕底部出现玻璃栏，托盘区出现 Atrium 图标。
-3. 双击托盘图标（或右键 →“外观设置…”，或右键玻璃栏）打开设置中心，调整透明度、模糊、折射、圆角、尺寸等。
-4. 托盘右键 →“退出 Atrium”即可完全退出；不修改注册表，不安装服务，设置保存在 `%LOCALAPPDATA%\Atrium`。
+2. 解压后运行 `Atrium.Core.exe`。屏幕底部出现玻璃任务栏，首次运行会导入你当前 Windows 任务栏的固定项。
+3. 左键点击应用：打开、切到前台或最小化；中键：新窗口；右键：固定 / 取消固定、关闭窗口。点击时钟打开日历和通知。
+4. 双击托盘图标（或右键 →“外观设置…”）打开设置中心，调整材质、尺寸、固定的应用等。
+5. 托盘右键 →“退出 Atrium”即可完全退出；不修改注册表，不安装服务，设置保存在 `%LOCALAPPDATA%\Atrium`。
 
 ## 当前状态
 
@@ -52,7 +55,7 @@ Atrium 重新设计你每天看到的那一层：一条悬浮的玻璃任务栏�
 
 | 方向 | 结论 |
 |---|---|
-| v0.1 玻璃栏与设置中心 | ✅ 共存模式；背景每帧变化时每帧工作 p95 1.7 ms、内存 126 MB；设置端到端 9 项与协议健壮性 7 项通过 |
+| v0.2 玻璃任务栏与设置中心 | ✅ 共存模式；固定与运行中的应用、点击切换（真实点击测试 5 项通过）；背景每帧变化时每次呈现 p95 0.8 ms、约单核 4% CPU、内存 144 MB；设置端到端 12 项与协议 7 项通过 |
 | 实时玻璃 | ✅ WGC 捕获 + 排除自身 + D3D11；核显每帧 p95 2.4 ms，画面滞后 p95 1 帧 |
 | 自回声 | ✅ 与最近一次呈现的背景精确比较；缓慢渐变、1 像素光标、低对比滚动文字都不会漏画 |
 | 点击穿透 | ✅ 可点穿的显示窗口 + 带形状的输入窗口，阴影和透明角都能点到下方窗口 |
@@ -92,6 +95,7 @@ poc/results    探测原始结果（JSON）
 # 测试（会短暂启动 Atrium 并操作设置窗口，结束后恢复设置文件）
 ./tests/e2e-settings.ps1 -Package
 ./tests/pipe-protocol.ps1
+./tests/e2e-bar.ps1          # 会移动鼠标并点击，仅在你 30 秒未操作时运行
 
 # 验证探测程序
 dotnet build poc/Atrium.Poc.sln -c Release

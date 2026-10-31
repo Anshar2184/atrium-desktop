@@ -11,7 +11,10 @@
 #include <dcomp.h>
 #include <dwrite_3.h>
 
-#include <string>
+#include <deque>
+#include <functional>
+#include <optional>
+#include <vector>
 
 namespace atrium {
 
@@ -26,11 +29,16 @@ struct GlassParams {
 };
 static_assert(sizeof(GlassParams) == 96);
 
-struct TextOverlay {
-    std::wstring primary;   // e.g. the time
-    std::wstring secondary; // e.g. the date, drawn under the primary line
-    float primaryPx = 0;
-    float secondaryPx = 0;
+// Result of one backdrop comparison, read back without stalling the CPU.
+struct Readback {
+    bool changed = false; // ROI differed from the last presented ROI
+    // Backdrop luminance (0..1) on a coarse grid over the ROI; one cell covers
+    // cellX x cellY ROI pixels. The ROI is the window plus GlassRenderer::kPad.
+    std::vector<float> luma;
+    int gridW = 0, gridH = 0;
+    float cellX = 1, cellY = 1;
+    // Mean luminance over a rectangle in ROI pixels.
+    float RegionLuma(float x0, float y0, float x1, float y1) const;
 };
 
 class GlassRenderer {
@@ -45,12 +53,21 @@ public:
     int Width() const { return w_; }
     int Height() const { return h_; }
 
-    // Copies the backdrop under the surface (monitor-relative px) into the ROI.
+    // Copies the backdrop under the surface (monitor-relative px) into the ROI
+    // and queues its comparison with the ROI used for the last present (D04).
     void UpdateBackdrop(ID3D11Texture2D* monitorFrame, int x, int y);
-    // True if the ROI differs from the one used for the last present.
-    bool BackdropChanged();
-    // Draws and presents; returns false if the device was lost.
-    bool Present(const GlassParams& params, const TextOverlay& text);
+    bool HasPresented() const { return hasPresented_; }
+    // Completed comparisons since the last call, merged (changed = any changed,
+    // colour = newest), or nullopt if none finished yet. Never waits.
+    std::optional<Readback> Poll();
+    bool ReadbackPending() const { return !inFlight_.empty(); }
+
+    // Draws the glass, then `overlay` with D2D on the same back buffer, and
+    // presents. Returns false if the device was lost.
+    bool Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay);
+
+    ID2D1DeviceContext2* D2D() const { return d2d_.get(); }
+    IDWriteFactory3* DWrite() const { return dwrite_.get(); }
 
 private:
     void CreateSizeDependent();
@@ -64,7 +81,20 @@ private:
     winrt::com_ptr<ID3D11VertexShader> vs_;
     winrt::com_ptr<ID3D11PixelShader> ps_;
     winrt::com_ptr<ID3D11ComputeShader> cs_;
-    winrt::com_ptr<ID3D11Buffer> cb_, cmpCb_, cmpOut_, cmpStaging_;
+    // Readback ring: comparison counters and a small mip (luminance grid).
+    struct Slot {
+        winrt::com_ptr<ID3D11Buffer> counters;
+        winrt::com_ptr<ID3D11Texture2D> grid;
+    };
+    static constexpr int kSlots = 3;
+    Slot slots_[kSlots];
+    std::deque<int> inFlight_;
+    int nextSlot_ = 0;
+    UINT gridMip_ = 0;
+    int gridW_ = 1, gridH_ = 1;
+    bool ReadSlot(int slot, bool wait, Readback& out);
+
+    winrt::com_ptr<ID3D11Buffer> cb_, cmpCb_, cmpOut_;
     winrt::com_ptr<ID3D11UnorderedAccessView> cmpUav_;
     winrt::com_ptr<ID3D11SamplerState> sampler_;
     winrt::com_ptr<ID3D11BlendState> blend_;

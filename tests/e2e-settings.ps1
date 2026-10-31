@@ -6,7 +6,7 @@
 .DESCRIPTION
   Starts Atrium.Core (with --debug-capturable when -Shots is given, so the
   glass shows up in screenshots) and Atrium.Settings from the build output,
-  changes the preset and two sliders, saves, makes an unsaved change, closes
+  changes the preset and two sliders, turns auto width off, removes the first pin, saves, makes an unsaved change, closes
   without saving and checks that the core reverted it. The user's settings
   file is backed up and put back afterwards.
 #>
@@ -56,6 +56,24 @@ function SetSlider($win, $name, $value) {
 function Invoke($win, $name) {
     (Find $win $name ([Windows.Automation.ControlType]::Button)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+function SkipCheck($name, $detail) { "SKIP {0}: {1}" -f $name, $detail }
+function ToggleOff($win, $name) {
+    $c = New-Object Windows.Automation.AndCondition(
+        (New-Object Windows.Automation.PropertyCondition($A::NameProperty, $name)),
+        (New-Object Windows.Automation.PropertyCondition($A::IsTogglePatternAvailableProperty, $true)))
+    $e = $null
+    for ($i = 0; $i -lt 40 -and -not $e; $i++) {
+        $e = $win.FindFirst([Windows.Automation.TreeScope]::Descendants, $c)
+        if (-not $e) { Start-Sleep -Milliseconds 250 }
+    }
+    if (-not $e) { throw "toggle not found: $name" }
+    $t = $e.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+    if ($t.Current.ToggleState -eq [Windows.Automation.ToggleState]::On) { $t.Toggle() }
+}
+function RemoveButtons($win) {
+    $all = $win.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition($A::ControlTypeProperty, [Windows.Automation.ControlType]::Button)))
+    @($all | Where-Object { $_.Current.Name -like "移除 *" })
+}
 function StartSettings {
     $p = Start-Process $settingsExe -PassThru
     for ($i = 0; $i -lt 60 -and $p.MainWindowHandle -eq 0; $i++) { Start-Sleep -Milliseconds 250; $p.Refresh() }
@@ -76,7 +94,7 @@ try {
     Check "connected" ($null -ne $status) "settings window shows the core as running"
 
     # Preset -> frosted, then shape changes; all of this is a live preview.
-    $combo = $win.FindFirst([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition($A::ControlTypeProperty, [Windows.Automation.ControlType]::ComboBox)))
+    $combo = Find $win "预设" ([Windows.Automation.ControlType]::ComboBox)
     $combo.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
     (Find $win "磨砂玻璃" ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $combo.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
@@ -89,8 +107,33 @@ try {
     Invoke $win "保存"
     Start-Sleep 1
     $saved = if (Test-Path $file) { Get-Content $file -Raw | ConvertFrom-Json } else { $null }
-    Check "commit-written" ($saved -and $saved.preset -eq "frosted" -and $saved.cornerRadius -eq 12 -and $saved.height -eq 64 -and [math]::Abs($saved.transparency - 0.78) -lt 1e-6) `
+    Check "commit-written" ($saved -and $saved.preset -eq "frosted" -and $saved.cornerRadius -eq 12 -and $saved.height -eq 64 -and [math]::Abs($saved.transparency - 0.80) -lt 1e-6) `
         "settings.json after save: preset=$($saved.preset) cornerRadius=$($saved.cornerRadius) height=$($saved.height) transparency=$($saved.transparency)"
+
+    # Auto width off, saved.
+    ToggleOff $win "自动宽度"
+    Invoke $win "保存"
+    Start-Sleep 1
+    $saved = Get-Content $file -Raw | ConvertFrom-Json
+    Check "autowidth-saved" ($saved.autoWidth -eq $false) "settings.json autoWidth=$($saved.autoWidth)"
+
+    # Pins list: remove the first pin and save.
+    $removes = RemoveButtons $win
+    if ($removes.Count -gt 0) {
+        $before = $removes.Count
+        $name = $removes[0].Current.Name
+        $removes[0].GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Start-Sleep 0.5
+        $left = (RemoveButtons $win).Count
+        Check "pin-removed-in-ui" ($left -eq $before - 1) "$name : $before -> $left rows"
+        Invoke $win "保存"
+        Start-Sleep 1
+        $saved = Get-Content $file -Raw | ConvertFrom-Json
+        $count = if ($saved.PSObject.Properties["pins"]) { @($saved.pins).Count } else { -1 }
+        Check "pin-removed-saved" ($count -eq $before - 1) "settings.json pins: $before -> $count"
+    } else {
+        SkipCheck "pin-removed" "the pin list is empty (no Windows taskbar pins to import)"
+    }
 
     # Unsaved change, then close without saving: the core must revert it.
     SetSlider $win "透明度" 30
@@ -103,14 +146,14 @@ try {
     Check "settings-closed" $exited "the window closed after choosing not to save"
     Check "preview-reverted" ((NewLog) -match "client left with an unsaved preview, reverted") "core log reports the revert"
     $after = Get-Content $file -Raw | ConvertFrom-Json
-    Check "file-unchanged" ([math]::Abs($after.transparency - 0.78) -lt 1e-6) "settings.json transparency still $($after.transparency)"
+    Check "file-unchanged" ([math]::Abs($after.transparency - 0.80) -lt 1e-6) "settings.json transparency still $($after.transparency)"
     Shot "e2e-3-reverted"
 
     # A new settings window shows the saved values from the core.
     $p = StartSettings
     $win = $A::FromHandle($p.MainWindowHandle)
     $t = (Find $win "透明度" ([Windows.Automation.ControlType]::Slider)).GetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern).Current.Value
-    Check "reopen-shows-saved" ([math]::Abs($t - 78) -lt 0.5) "transparency slider shows $t"
+    Check "reopen-shows-saved" ([math]::Abs($t - 80) -lt 0.5) "transparency slider shows $t"
     $win.GetCurrentPattern([Windows.Automation.WindowPattern]::Pattern).Close()
     Check "clean-close" ($p.WaitForExit(10000)) "closing without changes needs no confirmation"
     Check "commit-logged" ((NewLog) -match "pipe: commit saved") "core log reports the save"
