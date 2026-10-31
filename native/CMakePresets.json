@@ -3,7 +3,7 @@
   "configurePresets": [
     {
       "name": "win-x64",
-      "generator": "Visual Studio 17 2022",
+      "description": "Newest installed Visual Studio generator, x64",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/win-x64"
     }
