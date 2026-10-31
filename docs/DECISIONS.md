@@ -22,7 +22,7 @@
 | D12 | 托盘：Core 内自写**转发式桥接**。拷贝消息负载后由每个目标一个转发线程投递，桥接线程最多等 500 ms；失败和超时一律对应用返回 FALSE（超时后目标可能仍处理该消息，结果不确定）；不改 Explorer 任务栏 Z 序；广播 `TaskbarCreated` 时跳过 Explorer 自己的窗口；少数拿不到的旧图标提供“打开系统溢出区”兜底 | 待证（Explorer 重启与真实应用兼容矩阵未测） | V5.x |
 | D13 | 任务列表：EnumWindows + WinEvent（合并 30 ms），AUMID 优先、其次程序路径分组；图标统一用 `IShellItemImageFactory`（.lnk / exe / `shell:AppsFolder\<AUMID>`）后台加载；点击先试 `SetForegroundWindow`，被拒绝时用 `SwitchToThisWindow`（不发送任何按键）；DWM 缩略图待做 | 有效 | V6、V14 |
 | D14 | 桌面组件：公开顶层窗口 + `EVENT_SYSTEM_FOREGROUND` / `MINIMIZESTART` / `MINIMIZEEND` 状态机。桌面模式 = 所有应用窗口已最小化且前台不是应用窗口；不嵌入 WorkerW / Progman | 有效（单屏） | V7.x |
-| D15 | 通知中心不进首版；包身份是否能让实时事件成立尚未对照验证 | 延后 | V8.x |
+| D15 | 通知中心不进首版；包身份是否能让实时事件成立尚未对照验证 | 被 D24 取代 | V8.x |
 | D16 | 首个 C++ 纵切默认**不**自动接管系统任务栏（共存模式）；完整替换须在恢复、托盘门槛在稳定版系统上通过后由用户开启 | 有效 | 审查建议 |
 | D17 | 许可证 MIT。可参考 Apache-2.0 / MIT 项目并保留声明；GPL / AGPL 项目只研究行为，不复制代码 | 有效 | LICENSE |
 | D18 | 设置中心：C# / WinUI 3，**.NET 10**（LTS 至 2028-11；.NET 8/9 于 2026-11-10 停止支持），Windows App SDK 2.6.4 只引用 WinUI 组件，未打包、自包含，按需启动 | 有效 | V13 |
@@ -30,6 +30,8 @@
 | D20 | 分发：v0.1 为便携 zip（`tools/build.ps1`：Core + Guard + Settings），CI 产出构件；安装器、开机启动、签名与升级延后到 M4 | 有效 | V13 |
 | D21 | 预设：液态参照 macOS Liquid Glass——几乎不染色、中等模糊、强折射（30 DIP）、宽边缘（24 DIP）、明显色散（0.30）、锐利边缘高光与轻微鲜艳度提升；磨砂为强模糊、弱折射。数值以 `settings.cpp` 为准 | 有效 | V14 |
 | D22 | 玻璃栏布局：图标在栏内垂直居中，背后是方形底板（悬停、按下、前台应用、拖动时显示），底板到上下边的距离为 v，圆角取栏圆角减 v，与栏的圆角同心；图标默认 30 DIP，底板约为图标的 1.55 倍；拖动排序不会取消固定，拖到固定项之间的运行中应用会被固定 | 有效 | V15 |
+| D23 | Atrium 开始菜单：自绘（Direct2D 弹出窗口，简单半透明占位材质），只含固定应用、全部应用（shell AppsFolder）、应用搜索与睡眠/重启/关机；不做推荐、最近文件、文件搜索。底部网络（`ms-availablenetworks:`）、音量（Core Audio 读数与滚轮调节，点击 Win+Ctrl+V）、电池（`GetSystemPowerStatus`）、托盘（Win+B 后对获得焦点的“显示隐藏的图标”按钮做 UI 自动化 Invoke；焦点不是该按钮时只保留焦点并记录日志）。系统开始菜单（Win 键）照常可用 | 有效 | V16 |
+| D24 | 通知：Atrium 自己的通知窗口位于铃铛上方，不改变栏宽；弹出不取得焦点、全屏/演示/勿扰时不弹出。镜像 Windows 通知（UserNotificationListener，未打包进程轮询）为实验功能、默认关闭：无法在不改用户系统通知设置的情况下避免系统横幅重复 | 有效 | V16 |
 
 ## 已取代的方案
 

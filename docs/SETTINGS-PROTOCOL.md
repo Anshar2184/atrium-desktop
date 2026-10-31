@@ -27,6 +27,9 @@
 | `iconSize` | number | 16–64 DIP | 30 | 任务栏图标边长 |
 | `autoWidth` | bool | | true | 宽度随内容伸缩，最大为 `width` |
 | `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
+| `notifyTimeout` | number | 3–30 s | 6 | 通知弹出后停留的时间（指针停在卡片上时不计时） |
+| `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |
+| `notifyListener` | bool | | false | 实验：通过 UserNotificationListener 把 Windows 通知也显示为 Atrium 卡片（系统横幅仍会出现） |
 | `pins` | array | | 见下 | 固定的应用，按顺序显示 |
 
 `pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空"}`。识别同一应用时 `aumid` 优先，其次是 `path` 指向的程序。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。
