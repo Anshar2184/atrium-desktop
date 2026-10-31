@@ -1,0 +1,23 @@
+{
+  "probe": "p05-notification-listener",
+  "startedAt": "2026-10-31T18:22:49.2354268+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "unpackaged.accessStatus": "Allowed",
+  "unpackaged.getNotifications": "ok: 7 toasts from 2 apps",
+  "unpackaged.notificationChangedEvent": "COMException: 0x80070490 ",
+  "verdicts": {
+    "unpackaged-access": {
+      "verdict": "Passed",
+      "note": "access status for an unpackaged process: Allowed"
+    },
+    "unpackaged-read": {
+      "verdict": "Passed",
+      "note": "reading current toasts (count only): ok: 7 toasts from 2 apps"
+    },
+    "unpackaged-change-event": {
+      "verdict": "Failed",
+      "note": "NotificationChanged without package identity: COMException: 0x80070490 "
+    }
+  },
+  "finishedAt": "2026-10-31T18:22:49.4145849+08:00"
+}

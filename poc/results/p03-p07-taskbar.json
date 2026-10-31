@@ -1,0 +1,89 @@
+{
+  "probe": "p03-p07-taskbar",
+  "startedAt": "2026-10-31T18:06:49.3054766+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "before": {
+    "autoHide": true,
+    "workArea": "[0,0,3200,2000]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": true,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "r1.core": "HIDDEN appbar=[0,1890,3200,2000]",
+  "r1.during": {
+    "autoHide": true,
+    "workArea": "[0,0,3200,1890]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": false,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "r1.after3s.taskbarVisible": false,
+  "r1.after": {
+    "autoHide": true,
+    "workArea": "[0,0,3200,2000]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": true,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "verdicts": {
+    "appbar-reserves-work-area": {
+      "verdict": "Passed",
+      "note": "work area [0,0,3200,2000] -> [0,0,3200,1890] while the AppBar is registered"
+    },
+    "hide-taskbar": {
+      "verdict": "Passed",
+      "note": "Explorer taskbar windows hidden with ShowWindow(SW_HIDE)"
+    },
+    "explorer-does-not-fight": {
+      "verdict": "Passed",
+      "note": "taskbar stays hidden for 3 s without re-hide loops"
+    },
+    "graceful-restore": {
+      "verdict": "Passed",
+      "note": "state after graceful exit equals the snapshot"
+    },
+    "crash-recovery": {
+      "verdict": "Passed",
+      "note": "hard kill -> taskbar visible after 128 ms, work area restored after 128 ms (target < 2000 ms), final state equals snapshot: True"
+    }
+  },
+  "r2.guard": "GUARD_RESTORED 115.5ms",
+  "r2.killToGuardRestoreMs": 128.1,
+  "r2.killToTaskbarVisibleMs": 128.1,
+  "r2.killToWorkAreaRestoredMs": 128.2,
+  "r2.after": {
+    "autoHide": true,
+    "workArea": "[0,0,3200,2000]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": true,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "final": {
+    "autoHide": true,
+    "workArea": "[0,0,3200,2000]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": true,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "finishedAt": "2026-10-31T18:06:56.0957677+08:00"
+}

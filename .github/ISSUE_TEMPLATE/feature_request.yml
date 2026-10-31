@@ -1,0 +1,16 @@
+name: Idea or design feedback
+description: Suggest a feature or comment on the architecture
+labels: [design]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What should Atrium do, and why?
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Windows constraints
+      description: Public APIs involved, known limitations, or links to docs/RISKS.md items this touches.

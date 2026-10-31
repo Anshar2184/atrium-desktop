@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+*.binlog
+
+# Probe screenshots of the live desktop may contain personal content
+poc/results/**/*.png
+poc/results/**/*.bmp
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store

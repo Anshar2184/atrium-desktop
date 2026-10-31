@@ -1,0 +1,66 @@
+{
+  "probe": "p03b-taskbar-not-autohide",
+  "startedAt": "2026-10-31T18:07:26.4549535+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "userAutoHide": true,
+  "notAutoHide.before": {
+    "autoHide": false,
+    "workArea": "[0,0,3200,1904]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": true,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "notAutoHide.hiddenOnly": {
+    "autoHide": false,
+    "workArea": "[0,0,3200,1904]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": false,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "verdicts": {
+    "hide-leaves-reserved-strip": {
+      "verdict": "Passed",
+      "note": "hiding the pinned taskbar keeps its work-area reservation ([0,0,3200,1904]); an empty strip remains unless auto-hide is used"
+    },
+    "autohide-releases-strip": {
+      "verdict": "Passed",
+      "note": "with Explorer switched to auto-hide the work area is [0,0,3200,2000] and the taskbar stays hidden"
+    },
+    "restore-pinned": {
+      "verdict": "Passed",
+      "note": "pinned state restored exactly"
+    }
+  },
+  "notAutoHide.hiddenPlusAutoHide": {
+    "autoHide": true,
+    "workArea": "[0,0,3200,2000]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": false,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "final": {
+    "autoHide": true,
+    "workArea": "[0,0,3200,2000]",
+    "taskbars": [
+      {
+        "class": "Shell_TrayWnd",
+        "visible": true,
+        "rect": "[0,1904,3200,2000]"
+      }
+    ]
+  },
+  "finalAutoHideMatchesUser": true,
+  "finishedAt": "2026-10-31T18:07:33.9172408+08:00"
+}

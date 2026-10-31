@@ -1,0 +1,28 @@
+{
+  "probe": "p01d-capture-border",
+  "startedAt": "2026-10-31T18:00:57.6833218+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "cases": [
+    {
+      "requestedBorderless": false,
+      "note": null,
+      "yellowFractionOnEdge": 0.671
+    },
+    {
+      "requestedBorderless": true,
+      "note": "IsBorderRequired=false accepted",
+      "yellowFractionOnEdge": 0
+    }
+  ],
+  "verdicts": {
+    "border-visible-by-default": {
+      "verdict": "Passed",
+      "note": "yellow fraction on window edge with default border: 0.671"
+    },
+    "borderless-honoured": {
+      "verdict": "Passed",
+      "note": "yellow fraction with IsBorderRequired=false: 0"
+    }
+  },
+  "finishedAt": "2026-10-31T18:01:00.4537615+08:00"
+}

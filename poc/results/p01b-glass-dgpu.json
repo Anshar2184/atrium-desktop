@@ -1,0 +1,66 @@
+{
+  "probe": "p01b-glass-dgpu",
+  "startedAt": "2026-10-31T18:27:20.5853462+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "idleSecondsAtStart": 123.2,
+  "window": "850,1776,1500,196",
+  "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "wgc.border": "IsBorderRequired=false accepted",
+  "wgc.dirty": "DirtyRegionMode=ReportOnly",
+  "phase0.captureFps": 2,
+  "phase1.presentFps": 60.4,
+  "phase1.captureFps": 14.2,
+  "phase1.cpuPercentOfMachine": 0.54,
+  "phase1.frameAgeMs.p50": 47,
+  "phase1.frameAgeMs.p95": 125,
+  "phase2.captureFps": 45.2,
+  "phase2.presentFps": 45.2,
+  "phase2.cpuPercentOfMachine": 0.43,
+  "phase2.dirty.onlyInsideGlass": 216,
+  "phase2.dirty.elsewhere": 10,
+  "phase2.dirty.none": 0,
+  "phase2b.captureFps": 8.1,
+  "phase2b.presentFps": 4.2,
+  "phase2b.cpuPercentOfMachine": 0.21,
+  "phase2b.echoSkipped": 24,
+  "phase2b.insideButChangedDrawn": 12,
+  "phase2b.outsideDrawn": 13,
+  "phase2b.signatureMs.p95": 3.446,
+  "phase2b.arrivalToPresentMs.p50": 0,
+  "phase2b.arrivalToPresentMs.p95": 16,
+  "bench.throughputMsPerFrame": 0.042,
+  "bench.updateMs.p50": 0.02,
+  "bench.updateMs.p95": 0.02,
+  "bench.drawMs.p50": 0.022,
+  "bench.drawMs.p95": 0.023,
+  "gpuMs.note": "gpuMs.* brackets the draw into the swap-chain buffer and can include waiting for DWM to release it; bench.* is the pure GPU cost",
+  "gpuMs.samples": 631,
+  "gpuMs.p50": 0.09,
+  "gpuMs.p95": 0.174,
+  "gpuMs.p99": 0.185,
+  "privateMB": 141,
+  "workingSetMB": 118,
+  "verdicts": {
+    "live-glass-renders": {
+      "verdict": "Passed",
+      "note": "631 presents through D3D11 + DirectComposition with WDA exclusion"
+    },
+    "gpu-budget": {
+      "verdict": "Passed",
+      "note": "pure GPU cost 0.043 ms per frame (timestamp p95 0.043, throughput 0.042) for ROI copy+mips+glass draw of a 1500x196 bar (target <= 3 ms)"
+    },
+    "backdrop-age": {
+      "verdict": "Inconclusive",
+      "note": "p95 age of the backdrop frame when drawn: 125 ms (target <= 2 refresh periods); WGC only delivers frames when the screen changes, so high values can mean a static desktop"
+    },
+    "no-self-echo": {
+      "verdict": "Failed",
+      "note": "static phase: 216 capture frames dirty only inside the glass vs 10 elsewhere; capture 45.2 fps vs 2 fps without glass"
+    },
+    "echo-filter": {
+      "verdict": "Passed",
+      "note": "with filter: capture 8.1 fps, 24 echo frames skipped, 12 real changes under the glass drawn (12 colour flips), 13 outside changes"
+    }
+  },
+  "finishedAt": "2026-10-31T18:27:42.6212026+08:00"
+}

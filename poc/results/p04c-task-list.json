@@ -1,0 +1,46 @@
+{
+  "probe": "p04c-task-list",
+  "startedAt": "2026-10-31T18:25:14.3672907+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "ours.windows": 6,
+  "ours.groups": 6,
+  "ours.windowsWithExplicitAumid": 1,
+  "explorer.taskButtons": 7,
+  "verdicts": {
+    "grouping-matches-explorer": {
+      "verdict": "Passed",
+      "note": "our groups 6 vs Explorer buttons 7 (pinned-but-not-running buttons and grouping settings can differ)"
+    },
+    "activate-from-bar": {
+      "verdict": "Passed",
+      "note": "switching to another app after a click on our bar works with: noactivate-after (all: [{\"variant\":\"noactivate-after\",\"clickReceived\":true,\"targetActivated\":true},{\"variant\":\"noactivate-in-handler\",\"clickReceived\":true,\"targetActivated\":true},{\"variant\":\"activating-bar\",\"clickReceived\":true,\"targetActivated\":true}])"
+    },
+    "dwm-thumbnail": {
+      "verdict": "Passed",
+      "note": "DwmRegisterThumbnail 0x00000000, DwmUpdateThumbnailProperties 0x00000000"
+    }
+  },
+  "activation.withoutUserInput": false,
+  "activation.variants": [
+    {
+      "variant": "noactivate-after",
+      "clickReceived": true,
+      "targetActivated": true
+    },
+    {
+      "variant": "noactivate-in-handler",
+      "clickReceived": true,
+      "targetActivated": true
+    },
+    {
+      "variant": "activating-bar",
+      "clickReceived": true,
+      "targetActivated": true
+    }
+  ],
+  "thumbnail.sameProcessSource": "0x00000000",
+  "thumbnail.register": "0x00000000",
+  "thumbnail.update": "0x00000000",
+  "focusRestoredToUser": true,
+  "finishedAt": "2026-10-31T18:25:18.2503003+08:00"
+}

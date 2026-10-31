@@ -1,0 +1,26 @@
+{
+  "probe": "p01e-option-c",
+  "startedAt": "2026-10-31T18:02:42.2033202+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "skippedOverlays": [
+    "ShellHandwritingCanvas {18E91349-E229-4995-8049-7437243BBCC3}",
+    "ThumbnailDeviceHelperWnd",
+    "CEF-OSC-WIDGET"
+  ],
+  "region": "[40,1520,800,1750]",
+  "rebuiltVsScreen.meanAbsDiff": 2.76,
+  "desktopLayerOnlyVsScreen.meanAbsDiff": 24.04,
+  "screenshot.insideGlass.diffFromScreen": 20.22,
+  "screenshot.outsideGlass.diffFromScreen": 0,
+  "verdicts": {
+    "rebuilt-backdrop-matches": {
+      "verdict": "Passed",
+      "note": "desktop layer + window layer vs real screen: mean abs diff 2.76 (desktop layer alone 24.04)"
+    },
+    "glass-visible-in-screenshot": {
+      "verdict": "Passed",
+      "note": "GDI screenshot differs inside the glass by 20.22 and outside by 0"
+    }
+  },
+  "finishedAt": "2026-10-31T18:02:45.8600749+08:00"
+}

@@ -1,0 +1,28 @@
+name: Bug report
+description: Something in a probe or document is wrong or does not work
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw.
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Windows build
+      description: Output of `winver`, e.g. 26100.2454
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Displays and GPUs
+      description: Number of monitors, resolution, scaling, HDR, GPUs. The `env` probe output is ideal.
+  - type: textarea
+    id: results
+    attributes:
+      label: Probe results
+      description: Attach or paste the relevant `poc/results/*.json`. Do not include screenshots with personal content.
