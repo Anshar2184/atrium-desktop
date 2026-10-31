@@ -26,6 +26,9 @@ atrium-desktop/
   packaging/                   # 安装、签名与升级；MSIX 身份随通知中心延后（D15）
   poc/                         # 已存在：C# 验证探测（Probe、TrayProbe）与 results/
   native/guard/                # 已存在：原生 Atrium.Guard（D10）
+  native/core/                 # 已存在（v0.1）：Atrium.Core，render/ 为设备、捕获、玻璃渲染与 shaders
+  settings/Atrium.Settings/    # 已存在（v0.1）：WinUI 3 设置中心（D18）
+  tools/ tests/ assets/        # 已存在：build.ps1 与图标生成；端到端与协议测试脚本；图标
   tests/                       # 纯数据单测和手动验收脚本/清单
   tools/                       # build.ps1、采集测量结果、验证包
 ```

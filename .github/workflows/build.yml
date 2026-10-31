@@ -19,11 +19,18 @@ jobs:
       - name: Build probes
         run: dotnet build poc/Atrium.Poc.sln -c Release
 
-  native:
+  package:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Configure
-        run: cmake --preset win-x64 -S native
-      - name: Build guard
-        run: cmake --build native/build/win-x64 --config Release
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Build native, settings and the portable package
+        shell: pwsh
+        run: ./tools/build.ps1 -Zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Atrium-win-x64
+          path: dist/*.zip
+          if-no-files-found: error
