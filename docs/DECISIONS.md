@@ -29,6 +29,7 @@
 | D19 | 设置模型与协议：扁平 JSON `%LOCALAPPDATA%\Atrium\settings.json`；命名管道 `Atrium.Core.<会话>`，预览只改内存、保存原子写入、客户端断开撤销预览，见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md) | 有效 | V13 |
 | D20 | 分发：v0.1 为便携 zip（`tools/build.ps1`：Core + Guard + Settings），CI 产出构件；安装器、开机启动、签名与升级延后到 M4 | 有效 | V13 |
 | D21 | 预设：液态参照 macOS Liquid Glass——几乎不染色、中等模糊、强折射（30 DIP）、宽边缘（24 DIP）、明显色散（0.30）、锐利边缘高光与轻微鲜艳度提升；磨砂为强模糊、弱折射。数值以 `settings.cpp` 为准 | 有效 | V14 |
+| D22 | 玻璃栏布局：图标在栏内垂直居中，背后是方形底板（悬停、按下、前台应用、拖动时显示），底板到上下边的距离为 v，圆角取栏圆角减 v，与栏的圆角同心；图标默认 30 DIP，底板约为图标的 1.55 倍；拖动排序不会取消固定，拖到固定项之间的运行中应用会被固定 | 有效 | V15 |
 
 ## 已取代的方案
 

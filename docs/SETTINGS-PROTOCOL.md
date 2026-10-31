@@ -24,7 +24,7 @@
 | `margin` | number | 0–400 DIP | 10 | 与工作区底边的距离 |
 | `showClock` | bool | | true | 时钟与日期 |
 | `textColor` | string | `auto` / `light` / `dark` | `auto` | 文字颜色；`auto` 按玻璃下方的实际亮度选择 |
-| `iconSize` | number | 16–64 DIP | 36 | 任务栏图标边长 |
+| `iconSize` | number | 16–64 DIP | 30 | 任务栏图标边长 |
 | `autoWidth` | bool | | true | 宽度随内容伸缩，最大为 `width` |
 | `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
 | `pins` | array | | 见下 | 固定的应用，按顺序显示 |

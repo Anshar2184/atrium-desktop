@@ -56,6 +56,12 @@ function SetSlider($win, $name, $value) {
 function Invoke($win, $name) {
     (Find $win $name ([Windows.Automation.ControlType]::Button)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+# The settings window has a sidebar; controls of other pages are not in the UIA tree.
+function Navigate($win, $page) {
+    $item = Find $win $page ([Windows.Automation.ControlType]::ListItem)
+    $item.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Start-Sleep -Milliseconds 600
+}
 function SkipCheck($name, $detail) { "SKIP {0}: {1}" -f $name, $detail }
 function ToggleOff($win, $name) {
     $c = New-Object Windows.Automation.AndCondition(
@@ -93,11 +99,10 @@ try {
     $status = Find $win "Atrium 正在运行" ([Windows.Automation.ControlType]::Text)
     Check "connected" ($null -ne $status) "settings window shows the core as running"
 
-    # Preset -> frosted, then shape changes; all of this is a live preview.
-    $combo = Find $win "预设" ([Windows.Automation.ControlType]::ComboBox)
-    $combo.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
-    (Find $win "磨砂玻璃" ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
-    $combo.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
+    # Preset -> frosted (a tile on the material page), then shape changes; all of this is a live preview.
+    Navigate $win "材质"
+    (Find $win "磨砂玻璃" ([Windows.Automation.ControlType]::RadioButton)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Navigate $win "形状"
     SetSlider $win "圆角" 12
     SetSlider $win "高度" 64
     Start-Sleep 1.5
@@ -118,6 +123,7 @@ try {
     Check "autowidth-saved" ($saved.autoWidth -eq $false) "settings.json autoWidth=$($saved.autoWidth)"
 
     # Pins list: remove the first pin and save.
+    Navigate $win "固定的应用"
     $removes = RemoveButtons $win
     if ($removes.Count -gt 0) {
         $before = $removes.Count
@@ -136,6 +142,7 @@ try {
     }
 
     # Unsaved change, then close without saving: the core must revert it.
+    Navigate $win "材质"
     SetSlider $win "透明度" 30
     Start-Sleep 1.5
     Shot "e2e-2-unsaved-preview"

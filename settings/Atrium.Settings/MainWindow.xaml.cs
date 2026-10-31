@@ -1,16 +1,12 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Automation;
-using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage;
-using Windows.Storage.Pickers;
 using Windows.UI;
 
 namespace Atrium.Settings;
@@ -19,38 +15,77 @@ public sealed partial class MainWindow : Window
 {
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
 
-    // One slider row: setting key, UI range, and the mapping between the stored
+    // One slider card: setting key, UI range, and the mapping between the stored
     // value and the slider value (percentages are stored as 0..1).
     private sealed record SliderDef(string Title, string Description, double Min, double Max, double Step, string Unit,
+        string MinCaption, string MaxCaption, Func<double, string> Hint, Func<Illustration> Glyph,
         Func<BarSettings, double> Get, Action<BarSettings, double> Set, bool Material);
 
-    private static readonly SliderDef[] MaterialSliders =
+    private SliderDef[] MaterialSliders => new SliderDef[]
     {
-        new("透明度", "越高越通透，越低染色越重。", 0, 100, 1, "%", s => s.Transparency * 100, (s, v) => s.Transparency = v / 100, true),
-        new("模糊", "背景的模糊程度。", 0, 100, 1, "%", s => s.Blur * 100, (s, v) => s.Blur = v / 100, true),
-        new("折射强度", "边缘处背景被“弯曲”的最大距离。", 0, 60, 1, "px", s => s.Refraction, (s, v) => s.Refraction = v, true),
-        new("折射边缘宽度", "从外沿向内发生折射的宽度。", 1, 80, 1, "px", s => s.Edge, (s, v) => s.Edge = v, true),
-        new("色散", "边缘处红绿蓝通道的分离，形成彩虹边。", 0, 50, 1, "%", s => s.Dispersion * 100, (s, v) => s.Dispersion = v / 100, true),
-        new("高光", "边缘的反光强度。", 0, 100, 1, "%", s => s.Highlight * 100, (s, v) => s.Highlight = v / 100, true),
-        new("阴影", "玻璃下方的投影浓度。", 0, 100, 1, "%", s => s.Shadow * 100, (s, v) => s.Shadow = v / 100, true),
+        new("透明度", "玻璃混入多少染色。100% 如清水般通透，0% 像一块纯色亚克力。", 0, 100, 1, "%", "纯色", "通透",
+            v => v >= 90 ? "几乎无色" : v >= 70 ? "清透" : v >= 40 ? "淡淡的染色" : v >= 15 ? "浓郁的染色" : "接近纯色",
+            Illustrations.Transparency, s => s.Transparency * 100, (s, v) => s.Transparency = v / 100, true),
+        new("模糊", "背景被磨砂的程度。0% 依然清晰可辨，100% 只剩色块，像隔着一层磨砂玻璃。", 0, 100, 1, "%", "清晰", "磨砂",
+            v => v < 1 ? "完全清晰" : v < 25 ? "微微朦胧" : v < 60 ? "柔和" : v < 85 ? "磨砂" : "深度磨砂",
+            Illustrations.Blur, s => s.Blur * 100, (s, v) => s.Blur = v / 100, true),
+        new("折射强度", "边缘把背景“弯折”的距离，像水滴边缘放大背后的景物。0 就是一块平板玻璃。", 0, 60, 1, "px", "0", "60 px",
+            v => v < 1 ? "平板玻璃，无折射" : v <= 12 ? "轻微弯折" : v <= 36 ? "水滴般的边缘" : "夸张的凸透镜",
+            Illustrations.Refraction, s => s.Refraction, (s, v) => s.Refraction = v, true),
+        new("折射边缘宽度", "折射发生的范围：从外沿向内多少像素。窄像薄片，宽像厚实的凸透镜。", 1, 80, 1, "px", "1 px", "80 px",
+            v => v <= 8 ? "窄边，薄如刀片" : v <= 28 ? "适中的圆润边缘" : "宽厚的透镜边",
+            Illustrations.Edge, s => s.Edge, (s, v) => s.Edge = v, true),
+        new("色散", "边缘处红、绿、蓝分离的程度，像棱镜折出的彩虹边。0% 为纯净无色。", 0, 50, 1, "%", "0%", "50%",
+            v => v < 1 ? "无色散，纯净" : v <= 10 ? "几乎看不出" : v <= 30 ? "细腻的彩虹边" : "明显的棱镜彩边",
+            Illustrations.Dispersion, s => s.Dispersion * 100, (s, v) => s.Dispersion = v / 100, true),
+        new("高光", "边缘受光的反光强度，就像玻璃边沿被灯照亮的那条亮线。", 0, 100, 1, "%", "无", "强烈",
+            v => v < 1 ? "没有反光" : v < 35 ? "含蓄" : v < 75 ? "清晰的亮边" : "强烈的镜面光",
+            Illustrations.Highlight, s => s.Highlight * 100, (s, v) => s.Highlight = v / 100, true),
+        new("阴影", "玻璃下方投影的浓度。越浓，玻璃栏看起来离桌面越“悬浮”。", 0, 100, 1, "%", "无", "浓",
+            v => v < 1 ? "没有投影" : v < 25 ? "若有若无" : v < 55 ? "轻盈悬浮" : "厚重的投影",
+            Illustrations.Shadow, s => s.Shadow * 100, (s, v) => s.Shadow = v / 100, true),
     };
 
-    private static readonly SliderDef[] LayoutSliders =
+    private SliderDef[] LayoutSliders => new SliderDef[]
     {
-        new("圆角", "超过高度的一半时即为胶囊形。", 0, 80, 1, "px", s => s.CornerRadius, (s, v) => s.CornerRadius = v, false),
-        new("最大宽度", "开启“自动宽度”时，玻璃栏按内容收缩，最宽不超过此值；不会超过屏幕工作区。", 300, 2400, 10, "px", s => s.Width, (s, v) => s.Width = v, false),
-        new("高度", "", 32, 120, 1, "px", s => s.Height, (s, v) => s.Height = v, false),
-        new("底部间距", "与工作区底边（系统任务栏上方）的距离。", 0, 200, 1, "px", s => s.Margin, (s, v) => s.Margin = v, false),
-        new("图标大小", "任务栏图标的边长。", 16, 64, 1, "px", s => s.IconSize, (s, v) => s.IconSize = v, false),
+        new("圆角", "角的弯曲程度。超过高度的一半时即为胶囊形。", 0, 80, 1, "px", "直角", "80 px",
+            v => v < 1 ? "直角" : v >= _current.Height / 2 ? "完整的胶囊形" : v < 12 ? "微圆角" : "圆润",
+            Illustrations.Corner, s => s.CornerRadius, (s, v) => s.CornerRadius = v, false),
+        new("最大宽度", "开启“自动宽度”时，玻璃栏按内容收缩，最宽不超过此值；不会超过屏幕工作区。", 300, 2400, 10, "px", "300 px", "2400 px",
+            v => v >= 1920 ? "宽于一块 1080p 屏幕" : $"约占 1080p 屏幕宽度的 {Math.Round(v / 19.2)}%",
+            Illustrations.Width, s => s.Width, (s, v) => s.Width = v, false),
+        new("高度", "玻璃栏的整体厚度，图标的留白与时钟的字号也随之变化。", 32, 120, 1, "px", "32 px", "120 px",
+            v => v < 44 ? "纤薄" : v <= 68 ? "标准" : "厚实",
+            Illustrations.Height, s => s.Height, (s, v) => s.Height = v, false),
+        new("底部间距", "与工作区底边（系统任务栏上方）的距离。", 0, 200, 1, "px", "贴底", "200 px",
+            v => v < 1 ? "贴着底边" : v <= 16 ? "贴近底边" : v <= 60 ? "悬浮" : "高高悬浮",
+            Illustrations.Margin, s => s.Margin, (s, v) => s.Margin = v, false),
+        new("图标大小", "任务栏图标的边长。系统任务栏的图标是 24 px，小一点会让玻璃栏更轻盈。", 16, 64, 1, "px", "16 px", "64 px",
+            v => v < 24 ? "比系统图标更小" : v < 25 ? "与系统任务栏相同" : v <= 36 ? "略大于系统图标" : "大图标",
+            Illustrations.IconSize, s => s.IconSize, (s, v) => s.IconSize = v, false),
+    };
+
+    private static readonly (string Overline, string Title, string Subtitle)[] PageInfo =
+    {
+        ("01 · MATERIAL", "材质", "玻璃的质感：通透、模糊、折射与光。"),
+        ("02 · SHAPE", "形状", "玻璃栏的轮廓与位置：圆角、尺寸与间距。"),
+        ("03 · PINNED", "固定的应用", "拖动卡片排序，决定它们在玻璃栏上的先后。"),
+        ("04 · CONTENT", "内容", "栏上显示什么，以及文字如何适应背景。"),
+        ("05 · ABOUT", "关于", "一条悬浮在桌面底部的玻璃任务栏。"),
     };
 
     private readonly CoreClient _client = new();
-    private readonly List<(SliderDef Def, Slider Slider, TextBlock Value)> _rows = new();
+    private readonly List<(SliderDef Def, SliderCard Card)> _rows = new();
+    private readonly List<(uint Rgb, Button Button, FrameworkElement Ring)> _tintButtons = new();
     private BarSettings _saved = new();
     private BarSettings _current = new();
     private bool _loading;
     private bool _previewBusy, _previewPending;
     private bool _closingConfirmed;
+    private FrameworkElement[] _pages = Array.Empty<FrameworkElement>();
+    private Action<Color>? _setTintGlyph;
+    private Illustration? _autoWidthGlyph, _clockGlyph, _runningGlyph;
+    private int _flashId;
 
     public MainWindow()
     {
@@ -59,43 +94,159 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "atrium.ico"));
         double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
-        AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(760 * scale), (int)(820 * scale)));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(1120 * scale), (int)(780 * scale)));
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.PreferredMinimumWidth = (int)(900 * scale);
+            presenter.PreferredMinimumHeight = (int)(640 * scale);
+        }
         AppWindow.Closing += OnClosing;
 
-        foreach (var d in MaterialSliders) MaterialPanel.Children.Add(CreateRow(d));
-        // The auto-width card sits right after the width row.
-        for (int i = 0; i < LayoutSliders.Length; i++)
-            LayoutPanel.Children.Insert(i < 2 ? i : i + 1, CreateRow(LayoutSliders[i]));
-        PathText.Text = "设置文件：" + CoreClient.SettingsPath;
+        _pages = new FrameworkElement[] { PageMaterial, PageShape, PagePins, PageContent, PageAbout };
+        BuildCards();
+        InitPins();
+        InitHero();
+        PathText.Text = CoreClient.SettingsPath;
+        var v = typeof(MainWindow).Assembly.GetName().Version;
+        VersionText.Text = "版本 " + (v?.ToString(3) ?? "0.2.0");
+        ShowStatus(false);
+        Nav.SelectedIndex = 0;
         _ = ConnectAndLoadAsync();
     }
 
-    private Grid CreateRow(SliderDef d)
+    // ---- Pages ----
+
+    private void OnNavChanged(object sender, SelectionChangedEventArgs e)
     {
-        var card = new Grid { Style = (Style)Application.Current.Resources["CardStyle"], ColumnSpacing = 16 };
-        card.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        card.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
-        card.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = d.Title });
-        if (d.Description.Length > 0)
-            text.Children.Add(new TextBlock { Text = d.Description, Style = (Style)Application.Current.Resources["CardDescriptionStyle"] });
-        var slider = new Slider { Minimum = d.Min, Maximum = d.Max, StepFrequency = d.Step, VerticalAlignment = VerticalAlignment.Center };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(slider, d.Title);
-        slider.SetValue(Grid.ColumnProperty, 1);
-        var value = new TextBlock { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, TextAlignment = TextAlignment.Right };
-        value.SetValue(Grid.ColumnProperty, 2);
-        card.Children.Add(text);
-        card.Children.Add(slider);
-        card.Children.Add(value);
-        _rows.Add((d, slider, value));
-        slider.ValueChanged += (_, e) => OnSliderChanged(d, value, e.NewValue);
+        if (Nav.SelectedIndex >= 0) ShowPage(Nav.SelectedIndex);
+    }
+
+    private void ShowPage(int index)
+    {
+        for (int i = 0; i < _pages.Length; i++)
+            _pages[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+        var info = PageInfo[index];
+        HeaderOverline.Text = info.Overline;
+        HeaderTitle.Text = info.Title;
+        HeaderSubtitle.Text = info.Subtitle;
+        HeroFrame.Visibility = index < 2 ? Visibility.Visible : Visibility.Collapsed;
+        if (index < 2) UpdateHero();
+        AnimateIn(_pages[index]);
+        AnimateIn(Header);
+    }
+
+    // Fade and rise a few pixels; the transitions are attached one tick later so the start values stick.
+    private void AnimateIn(UIElement e)
+    {
+        e.OpacityTransition = null;
+        e.TranslationTransition = null;
+        e.Opacity = 0;
+        e.Translation = new Vector3(0, 10, 0);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            e.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(240) };
+            e.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(300) };
+            e.Opacity = 1;
+            e.Translation = Vector3.Zero;
+        });
+    }
+
+    // ---- Cards ----
+
+    private void BuildCards()
+    {
+        foreach (var d in MaterialSliders)
+            MaterialGrid.Children.Insert(MaterialGrid.Children.Count - 1, CreateCard(d));
+        // The auto-width card sits right after the width card.
+        var layout = LayoutSliders;
+        for (int i = 0; i < layout.Length; i++)
+            LayoutGrid.Children.Insert(i < 2 ? i : i + 1, CreateCard(layout[i]));
+
+        var tint = Illustrations.Tint();
+        TintGlyphHost.Child = tint.Root;
+        _setTintGlyph = tint.SetColor;
+        BuildTintSwatches();
+
+        _autoWidthGlyph = Illustrations.AutoWidth();
+        AutoWidthGlyphHost.Child = _autoWidthGlyph.Root;
+        _clockGlyph = Illustrations.ClockToggle();
+        ClockGlyphHost.Child = _clockGlyph.Root;
+        _runningGlyph = Illustrations.RunningToggle();
+        RunningGlyphHost.Child = _runningGlyph.Root;
+
+        AutoWidthCard.GotFocus += (_, _) => OnEngage("最大宽度", true);
+        AutoWidthCard.LostFocus += (_, _) => OnEngage("最大宽度", false);
+    }
+
+    private SliderCard CreateCard(SliderDef d)
+    {
+        var card = new SliderCard();
+        var glyph = d.Glyph();
+        card.Configure(d.Title, d.Description, d.Min, d.Max, d.Step, d.Unit, d.MinCaption, d.MaxCaption, d.Hint, glyph.Root, glyph.Update);
+        card.UserValueChanged += v => OnSliderChanged(d, v);
+        card.Engaged += on => OnEngage(d.Title, on);
+        _rows.Add((d, card));
         return card;
     }
 
+    private static readonly (string Name, uint Rgb)[] TintChoices =
+    {
+        ("白色", 0xFFFFFF), ("暖白", 0xFFE6C8), ("冷蓝", 0xD3E6FF), ("玫瑰", 0xFFD0DC), ("薄荷", 0xCCF4E0), ("石墨", 0x2E3138),
+    };
+
+    private void BuildTintSwatches()
+    {
+        foreach (var (name, rgb) in TintChoices)
+        {
+            var ring = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 30, Height = 30, Style = (Style)Application.Current.Resources["GlyphAccentStyle"], StrokeThickness = 2, Opacity = 0 };
+            ring.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
+            var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
+            {
+                Width = 22, Height = 22, Fill = new SolidColorBrush(TintColor(rgb)),
+                Stroke = new SolidColorBrush(Color.FromArgb(48, 128, 128, 128)), StrokeThickness = 1,
+            };
+            var button = new Button
+            {
+                Content = new Grid { Width = 30, Height = 30, Children = { dot, ring } },
+                Width = 36, Height = 36, Padding = new Thickness(0), CornerRadius = new CornerRadius(18),
+                Style = (Style)Application.Current.Resources["SubtleButtonStyle"],
+            };
+            AutomationProperties.SetName(button, "染色 " + name);
+            ToolTipService.SetToolTip(button, name);
+            var captured = rgb;
+            button.Click += (_, _) => SetTint(captured);
+            _tintButtons.Add((rgb, button, ring));
+            TintSwatches.Children.Add(button);
+        }
+    }
+
+    private void SetTint(uint rgb)
+    {
+        _current.Tint = rgb;
+        MarkCustom();
+        var c = TintColor(rgb);
+        _loading = true;
+        TintPicker.Color = c;
+        _loading = false;
+        ShowTint();
+        Changed();
+    }
+
+    private void ShowTint()
+    {
+        var c = TintColor(_current.Tint);
+        TintSwatch.Background = new SolidColorBrush(c);
+        TintHex.Text = "#" + _current.Tint.ToString("X6", System.Globalization.CultureInfo.InvariantCulture);
+        _setTintGlyph?.Invoke(c);
+        foreach (var (rgb, _, ring) in _tintButtons) ring.Opacity = rgb == _current.Tint ? 1 : 0;
+    }
+
+    // ---- Connection ----
+
     private async Task ConnectAndLoadAsync()
     {
-        bool connected = await _client.ConnectAsync(800);
+        // ATRIUM_SETTINGS_OFFLINE=1: never talk to a running core (development aid).
+        bool connected = Environment.GetEnvironmentVariable("ATRIUM_SETTINGS_OFFLINE") != "1" && await _client.ConnectAsync(800);
         var (saved, current) = await _client.GetAsync();
         _saved = saved;
         _current = current;
@@ -104,22 +255,33 @@ public sealed partial class MainWindow : Window
         UpdateButtons();
     }
 
+    private static readonly SolidColorBrush RunningBrush = new(Color.FromArgb(255, 76, 194, 106));
+    private static readonly SolidColorBrush IdleBrush = new(Color.FromArgb(255, 150, 150, 156));
+
     private void ShowStatus(bool connected)
     {
         if (connected)
         {
-            Status.Severity = InfoBarSeverity.Success;
-            Status.Title = "Atrium 正在运行";
-            Status.Message = "修改会实时显示在玻璃栏上。";
+            StatusDot.Fill = RunningBrush;
+            StatusTitle.Text = "Atrium 正在运行";
+            StatusMessage.Text = "修改会实时显示在玻璃栏上。";
             StartCoreButton.Visibility = Visibility.Collapsed;
         }
         else
         {
-            Status.Severity = InfoBarSeverity.Informational;
-            Status.Title = "Atrium 未运行";
-            Status.Message = "可以继续修改并保存，下次启动时生效。";
+            StatusDot.Fill = IdleBrush;
+            StatusTitle.Text = "Atrium 未运行";
+            StatusMessage.Text = "可以继续修改并保存，下次启动时生效。";
             StartCoreButton.Visibility = CoreExe() != null ? Visibility.Visible : Visibility.Collapsed;
         }
+    }
+
+    private void ShowMessage(InfoBarSeverity severity, string title, string message)
+    {
+        Status.Severity = severity;
+        Status.Title = title;
+        Status.Message = message;
+        Status.IsOpen = true;
     }
 
     private static string? CoreExe()
@@ -148,33 +310,34 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---- Controls <-> settings ----
+
     private void LoadIntoControls()
     {
         _loading = true;
-        foreach (var (d, slider, value) in _rows)
-        {
-            slider.Value = Math.Clamp(d.Get(_current), d.Min, d.Max);
-            value.Text = Format(d, slider.Value);
-        }
-        PresetBox.SelectedIndex = _current.Preset switch { "liquid" => 0, "frosted" => 1, _ => 2 };
+        foreach (var (d, card) in _rows)
+            card.SetValue(d.Get(_current));
+        (_current.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
         ClockSwitch.IsOn = _current.ShowClock;
         AutoWidthSwitch.IsOn = _current.AutoWidth;
         RunningSwitch.IsOn = _current.ShowRunning;
+        _autoWidthGlyph?.Update(_current.AutoWidth ? 1 : 0);
+        _clockGlyph?.Update(_current.ShowClock ? 1 : 0);
+        _runningGlyph?.Update(_current.ShowRunning ? 1 : 0);
         TextColorBox.SelectedIndex = _current.TextColor switch { "light" => 1, "dark" => 2, _ => 0 };
+        ShowTextColor();
         RebuildPins();
-        var c = TintColor(_current.Tint);
-        TintPicker.Color = c;
-        TintSwatch.Background = new SolidColorBrush(c);
+        TintPicker.Color = TintColor(_current.Tint);
+        ShowTint();
         _loading = false;
+        UpdateHero();
+        UpdateCustomSwatch();
     }
-
-    private static string Format(SliderDef d, double v) => $"{Math.Round(v)} {d.Unit}";
 
     private static Color TintColor(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
-    private void OnSliderChanged(SliderDef d, TextBlock value, double v)
+    private void OnSliderChanged(SliderDef d, double v)
     {
-        value.Text = Format(d, v);
         if (_loading) return;
         d.Set(_current, v);
         if (d.Material) MarkCustom();
@@ -184,14 +347,15 @@ public sealed partial class MainWindow : Window
     private void MarkCustom()
     {
         _current.Preset = "custom";
+        bool was = _loading;
         _loading = true;
-        PresetBox.SelectedIndex = 2;
-        _loading = false;
+        PresetCustom.IsChecked = true;
+        _loading = was;
     }
 
-    private void OnPresetChanged(object sender, SelectionChangedEventArgs e)
+    private void OnPresetChecked(object sender, RoutedEventArgs e)
     {
-        if (_loading || PresetBox.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        if (_loading || sender is not RadioButton { Tag: string tag }) return;
         if (tag == "liquid") _current.ApplyMaterial(BarSettings.Liquid());
         else if (tag == "frosted") _current.ApplyMaterial(BarSettings.Frosted());
         else _current.Preset = "custom";
@@ -201,15 +365,16 @@ public sealed partial class MainWindow : Window
 
     private void OnTintChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
-        TintSwatch.Background = new SolidColorBrush(args.NewColor);
         if (_loading) return;
         _current.Tint = ((uint)args.NewColor.R << 16) | ((uint)args.NewColor.G << 8) | args.NewColor.B;
         MarkCustom();
+        ShowTint();
         Changed();
     }
 
     private void OnClockToggled(object sender, RoutedEventArgs e)
     {
+        _clockGlyph?.Update(ClockSwitch.IsOn ? 1 : 0);
         if (_loading) return;
         _current.ShowClock = ClockSwitch.IsOn;
         Changed();
@@ -217,6 +382,7 @@ public sealed partial class MainWindow : Window
 
     private void OnAutoWidthToggled(object sender, RoutedEventArgs e)
     {
+        _autoWidthGlyph?.Update(AutoWidthSwitch.IsOn ? 1 : 0);
         if (_loading) return;
         _current.AutoWidth = AutoWidthSwitch.IsOn;
         Changed();
@@ -224,6 +390,7 @@ public sealed partial class MainWindow : Window
 
     private void OnRunningToggled(object sender, RoutedEventArgs e)
     {
+        _runningGlyph?.Update(RunningSwitch.IsOn ? 1 : 0);
         if (_loading) return;
         _current.ShowRunning = RunningSwitch.IsOn;
         Changed();
@@ -233,164 +400,25 @@ public sealed partial class MainWindow : Window
     {
         if (_loading || TextColorBox.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
         _current.TextColor = tag;
+        ShowTextColor();
         Changed();
     }
 
-    // ---- Pinned apps ----
-
-    private readonly Dictionary<string, ImageSource?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
-
-    private static string PinTitle(PinnedApp p) =>
-        p.Name.Length > 0 ? p.Name : p.Path.Length > 0 ? System.IO.Path.GetFileNameWithoutExtension(p.Path) : p.Aumid;
-
-    private void RebuildPins(int focusIndex = -1, string? focusTag = null)
+    // The two sample chips mark which text colours the current choice allows.
+    private void ShowTextColor()
     {
-        var pins = _current.Pins ?? new List<PinnedApp>();
-        PinsList.Children.Clear();
-        PinsEmpty.Visibility = pins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        for (int i = 0; i < pins.Count; i++)
-        {
-            if (i > 0)
-                PinsList.Children.Add(new Border { Height = 1, Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"] });
-            PinsList.Children.Add(CreatePinRow(pins[i], i, pins.Count));
-        }
-        if (focusIndex >= 0 && pins.Count > 0)
-        {
-            focusIndex = Math.Clamp(focusIndex, 0, pins.Count - 1);
-            var row = (Grid)PinsList.Children[focusIndex * 2];
-            var buttons = row.Children.OfType<StackPanel>().First().Children.OfType<Button>().ToList();
-            var target = buttons.FirstOrDefault(b => (string)b.Tag == focusTag && b.IsEnabled) ?? buttons.FirstOrDefault(b => b.IsEnabled);
-            target?.Focus(FocusState.Programmatic);
-        }
-    }
-
-    private Grid CreatePinRow(PinnedApp pin, int index, int count)
-    {
-        var title = PinTitle(pin);
-        var row = new Grid { Padding = new Thickness(0, 8, 0, 8), ColumnSpacing = 12, MinHeight = 48 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var icon = new Grid { Width = 32, Height = 32, VerticalAlignment = VerticalAlignment.Center };
-        var glyph = new FontIcon { Glyph = "\uECAA", FontSize = 22, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] };
-        icon.Children.Add(glyph);
-        row.Children.Add(icon);
-        _ = LoadIconAsync(pin, icon, glyph);
-
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis });
-        // Files show where they are; Store and system apps have no useful path.
-        var detail = pin.Path.Length > 0 ? pin.Path : "已安装的应用";
-        if (detail.Length > 0 && detail != title)
-            text.Children.Add(new TextBlock { Text = detail, Style = (Style)Application.Current.Resources["CardDescriptionStyle"], TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
-        text.SetValue(Grid.ColumnProperty, 1);
-        row.Children.Add(text);
-
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        buttons.SetValue(Grid.ColumnProperty, 2);
-        buttons.Children.Add(PinButton("\uE70E", "上移", title, "up", index > 0, () => MovePin(index, -1)));
-        buttons.Children.Add(PinButton("\uE70D", "下移", title, "down", index < count - 1, () => MovePin(index, 1)));
-        buttons.Children.Add(PinButton("\uE74D", "移除", title, "remove", true, () => RemovePin(index)));
-        row.Children.Add(buttons);
-        return row;
-    }
-
-    private static Button PinButton(string glyph, string verb, string title, string tag, bool enabled, Action click)
-    {
-        var b = new Button
-        {
-            Content = new FontIcon { Glyph = glyph, FontSize = 14 },
-            Width = 36, Height = 32, Padding = new Thickness(0),
-            Style = (Style)Application.Current.Resources["SubtleButtonStyle"],
-            IsEnabled = enabled, Tag = tag,
-        };
-        AutomationProperties.SetName(b, verb + " " + title);
-        ToolTipService.SetToolTip(b, verb);
-        b.Click += (_, _) => click();
-        return b;
-    }
-
-    private async Task LoadIconAsync(PinnedApp pin, Grid host, FontIcon fallback)
-    {
-        var name = ShellIcons.ParsingName(pin);
-        if (!_iconCache.TryGetValue(name, out var source))
-        {
-            var img = await ShellIcons.LoadAsync(name, 64); // 32 DIP at up to 200 % scale
-            if (img != null)
-            {
-                var bmp = new WriteableBitmap(img.Width, img.Height);
-                using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(img.Bgra, 0, img.Bgra.Length);
-                bmp.Invalidate();
-                source = bmp;
-            }
-            _iconCache[name] = source;
-        }
-        if (source == null) return;
-        host.Children.Remove(fallback);
-        host.Children.Add(new Image { Source = source, Width = 32, Height = 32 });
-    }
-
-    private void MovePin(int index, int delta)
-    {
-        var pins = _current.Pins;
-        int to = index + delta;
-        if (pins == null || index < 0 || index >= pins.Count || to < 0 || to >= pins.Count) return;
-        (pins[index], pins[to]) = (pins[to], pins[index]);
-        RebuildPins(to, delta < 0 ? "up" : "down");
-        Changed();
-    }
-
-    private void RemovePin(int index)
-    {
-        var pins = _current.Pins;
-        if (pins == null || index < 0 || index >= pins.Count) return;
-        pins.RemoveAt(index);
-        RebuildPins(index, "remove");
-        Changed();
-    }
-
-    private async void OnAddPin(object sender, RoutedEventArgs e)
-    {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        picker.FileTypeFilter.Add(".exe");
-        picker.FileTypeFilter.Add(".lnk");
-        var file = await picker.PickSingleFileAsync();
-        if (file == null) return;
-        var pins = _current.Pins ??= new List<PinnedApp>();
-        if (pins.Count >= 64)
-        {
-            Status.Severity = InfoBarSeverity.Warning;
-            Status.Title = "固定的应用已达上限";
-            Status.Message = "最多可以固定 64 个应用。";
-            return;
-        }
-        pins.Add(new PinnedApp(System.IO.Path.GetFileNameWithoutExtension(file.Path), file.Path, "", ""));
-        RebuildPins(pins.Count - 1, "remove");
-        Changed();
-    }
-
-    private async void OnImportPins(object sender, RoutedEventArgs e)
-    {
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            Title = "导入系统任务栏固定项？",
-            Content = "当前的固定列表将被 Windows 任务栏上固定的应用替换。",
-            PrimaryButtonText = "替换",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Close,
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        _current.Pins = CoreClient.ImportTaskbarPins();
-        RebuildPins();
-        Changed();
+        var accent = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
+        var none = new SolidColorBrush(Colors.Transparent);
+        ChipLight.BorderBrush = _current.TextColor is "light" or "auto" ? accent : none;
+        ChipDark.BorderBrush = _current.TextColor is "dark" or "auto" ? accent : none;
+        ChipLight.Opacity = _current.TextColor == "dark" ? 0.45 : 1;
+        ChipDark.Opacity = _current.TextColor == "light" ? 0.45 : 1;
     }
 
     private void Changed()
     {
         UpdateButtons();
+        UpdateHero();
         SchedulePreview();
     }
 
@@ -399,6 +427,21 @@ public sealed partial class MainWindow : Window
         bool dirty = !_current.SameAs(_saved);
         SaveButton.IsEnabled = dirty;
         RevertButton.IsEnabled = dirty;
+        _flashId++;
+        DirtyText.Text = "未保存的修改";
+        DirtyDot.Fill = (Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
+        DirtyLabel.Opacity = dirty ? 1 : 0;
+    }
+
+    // A short "saved" confirmation in the footer.
+    private async void FlashSaved()
+    {
+        int id = ++_flashId;
+        DirtyText.Text = "已保存";
+        DirtyDot.Fill = (Brush)Application.Current.Resources["SystemFillColorSuccessBrush"];
+        DirtyLabel.Opacity = 1;
+        await Task.Delay(1800);
+        if (id == _flashId) DirtyLabel.Opacity = 0;
     }
 
     // At most one preview in flight; the newest state is sent when it returns,
@@ -429,13 +472,13 @@ public sealed partial class MainWindow : Window
         var error = await _client.CommitAsync(_current.Clone());
         if (error != null)
         {
-            Status.Severity = InfoBarSeverity.Error;
-            Status.Title = "保存失败";
-            Status.Message = error;
+            ShowMessage(InfoBarSeverity.Error, "保存失败", error);
             return false;
         }
         _saved = _current.Clone();
+        Status.IsOpen = false;
         UpdateButtons();
+        FlashSaved();
         ShowStatus(_client.Connected);
         return true;
     }
@@ -443,6 +486,7 @@ public sealed partial class MainWindow : Window
     private async void OnRevert(object sender, RoutedEventArgs e)
     {
         _current = _saved.Clone();
+        Status.IsOpen = false;
         LoadIntoControls();
         UpdateButtons();
         await _client.CancelAsync();

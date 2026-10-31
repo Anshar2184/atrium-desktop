@@ -11,6 +11,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ namespace atrium {
 struct SceneItem {
     std::wstring key;
     D2D1_RECT_F icon{};        // icon square, window px
+    D2D1_RECT_F plate{};       // hover/active plate around the icon, same centre
     std::shared_ptr<const IconImage> image; // may be null while loading
     uint64_t imageId = 0;      // identity of `image` for the bitmap cache
     bool running = false;
@@ -33,8 +35,10 @@ struct BarScene {
     float separatorX = -1;     // < 0: none
     D2D1_RECT_F clock{};       // empty: no clock
     float timePx = 0, datePx = 0;
+    float plateRadius = 0;     // concentric with the bar's corners
     std::wstring hoverKey;     // item (or L"#clock") under the pointer
     std::wstring pressedKey;
+    std::wstring dragKey;      // item being dragged: follows the pointer, drawn on top
 };
 
 // Ink colour per region: near-black on light glass, white on dark glass.
@@ -64,13 +68,20 @@ private:
         float hover = 0;   // 0..1
         float press = 0;   // 0..1
         float appear = 0;  // 0..1, fades new items in
+        float lift = 0;    // 0..1, while dragged
+        float x = 0;       // displayed plate centre; slides to the layout position
+        bool placed = false;
     };
+    void DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const SceneItem& it, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
+                  D2D1_COLOR_F wash);
     winrt::com_ptr<IDWriteFactory3> dwrite_;
     winrt::com_ptr<ID2D1Effect> shadow_;
     std::map<std::wstring, Motion> motion_;
     std::map<uint64_t, winrt::com_ptr<ID2D1Bitmap1>> bitmaps_;
+    std::set<uint64_t> usedBitmaps_; // during one DrawContent
     std::map<std::pair<int, int>, winrt::com_ptr<IDWriteTextFormat>> formats_;
     double lastMs_ = 0;
+    D2D1_RECT_F lastBar_{};
     winrt::com_ptr<ID2D1Bitmap1> layer_;
     std::wstring layerKey_;
 };

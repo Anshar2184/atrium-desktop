@@ -11,6 +11,7 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <windowsx.h>
 
 #include <winrt/Windows.Foundation.h>
@@ -29,7 +30,9 @@ constexpr UINT WM_TRAY = WM_APP + 2;
 constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.Core.exe
 constexpr UINT kTrayId = 1;
 
-enum Command : UINT { kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose };
+enum Command : UINT {
+    kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager
+};
 
 struct App {
     HINSTANCE instance = nullptr;
@@ -88,12 +91,30 @@ void RemoveTrayIcon()
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
+// Win+<key>, a public system shortcut (D11).
+void SendWinShortcut(WORD key)
+{
+    INPUT in[4] = {};
+    for (auto& i : in)
+        i.type = INPUT_KEYBOARD;
+    in[0].ki.wVk = VK_LWIN;
+    in[1].ki.wVk = key;
+    in[2].ki.wVk = key;
+    in[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    in[3].ki.wVk = VK_LWIN;
+    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(4, in, sizeof(INPUT));
+}
+
 void ShowMenu(POINT pt)
 {
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, kCmdSettings, L"外观设置…");
-    AppendMenuW(menu, MF_STRING, kCmdToggle, g_app.bar->Visible() ? L"隐藏玻璃栏" : L"显示玻璃栏");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kCmdDesktop, L"显示桌面");
+    AppendMenuW(menu, MF_STRING, kCmdTaskManager, L"任务管理器");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kCmdToggle, g_app.bar->Visible() ? L"隐藏玻璃栏" : L"显示玻璃栏");
     AppendMenuW(menu, MF_STRING, kCmdExit, L"退出 Atrium");
     SetMenuDefaultItem(menu, kCmdSettings, FALSE);
     // Required so the menu closes when the user clicks elsewhere.
@@ -107,6 +128,12 @@ void ShowMenu(POINT pt)
         break;
     case kCmdToggle:
         g_app.bar->SetVisible(!g_app.bar->Visible());
+        break;
+    case kCmdDesktop:
+        SendWinShortcut('D');
+        break;
+    case kCmdTaskManager:
+        ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
         break;
     case kCmdExit:
         DestroyWindow(g_app.host);
@@ -131,7 +158,10 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, it->name.c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kCmdNewWindow, L"打开新窗口");
+    AppendMenuW(menu, MF_STRING, kCmdNewWindow, it->windows.empty() ? L"打开" : L"打开新窗口");
+    std::wstring location = g_app.tasks->FileLocation(key);
+    if (!location.empty())
+        AppendMenuW(menu, MF_STRING, kCmdOpenLocation, L"打开文件所在的位置");
     AppendMenuW(menu, MF_STRING, it->pinned ? kCmdUnpin : kCmdPin, it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium");
     if (!it->windows.empty())
         AppendMenuW(menu, MF_STRING, kCmdClose, it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口");
@@ -165,26 +195,62 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     case kCmdClose:
         g_app.tasks->CloseAll(key);
         break;
+    case kCmdOpenLocation:
+        if (PIDLIST_ABSOLUTE id = ILCreateFromPathW(location.c_str())) {
+            SHOpenFolderAndSelectItems(id, 0, nullptr, 0);
+            ILFree(id);
+        }
+        break;
     case kCmdSettings:
         OpenSettings();
         break;
     }
 }
 
+// An app dropped at visible position `to` (in the list without it). Pinned
+// apps reorder the pins; a running app dropped among the pins gets pinned
+// there; a pinned app dropped among the running ones goes to the end of the
+// pins (dragging never unpins, as on the Windows taskbar).
+void Reorder(const std::wstring& key, int to)
+{
+    std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
+    if (it == items.end())
+        return;
+    TaskItem dragged = *it;
+    items.erase(it);
+    to = std::clamp(to, 0, int(items.size()));
+    int pinnedLeft = int(std::count_if(items.begin(), items.end(), [](const TaskItem& t) { return t.pinned; }));
+    if (!dragged.pinned && to >= pinnedLeft) {
+        g_app.tasks->MoveRunning(key, to - pinnedLeft);
+        return;
+    }
+    // Pin index (in the current list) the item goes in front of.
+    int at = to < pinnedLeft ? items[size_t(to)].pinIndex : pinnedLeft ? items[size_t(pinnedLeft - 1)].pinIndex + 1 : 0;
+    PinnedApp fresh = dragged.pinned ? PinnedApp{} : g_app.tasks->PinFor(key);
+    g_app.server->Modify([&](Settings& s) {
+        auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+        PinnedApp pin = fresh;
+        int dest = at;
+        if (dragged.pinned) {
+            if (dragged.pinIndex < 0 || dragged.pinIndex >= int(pins.size()))
+                return;
+            pin = pins[size_t(dragged.pinIndex)];
+            pins.erase(pins.begin() + dragged.pinIndex);
+            if (dest > dragged.pinIndex)
+                --dest;
+        }
+        pins.insert(pins.begin() + std::clamp(dest, 0, int(pins.size())), pin);
+        s.pins = std::move(pins);
+    });
+    Log(L"bar: %s moved to %d%s", key.c_str(), to, dragged.pinned ? L"" : L" and pinned");
+}
+
 // The clock opens the Windows calendar and notifications (Win+N), like the
 // system clock does (D11: public shortcuts only).
 void OpenCalendar()
 {
-    INPUT in[4] = {};
-    for (auto& i : in)
-        i.type = INPUT_KEYBOARD;
-    in[0].ki.wVk = VK_LWIN;
-    in[1].ki.wVk = 'N';
-    in[2].ki.wVk = 'N';
-    in[2].ki.dwFlags = KEYEVENTF_KEYUP;
-    in[3].ki.wVk = VK_LWIN;
-    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(4, in, sizeof(INPUT));
+    SendWinShortcut('N');
 }
 
 LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -288,6 +354,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.bar->onLaunch = [](const std::wstring& key) { g_app.tasks->Launch(key); };
     g_app.bar->onItemMenu = ShowItemMenu;
     g_app.bar->onClockClick = OpenCalendar;
+    g_app.bar->onReorder = Reorder;
+    g_app.bar->onFileDragHover = [](const std::wstring& key) { g_app.tasks->Show(key); };
+    g_app.bar->canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
+    g_app.bar->onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
     g_app.bar->onContextMenu = ShowMenu;
     g_app.bar->onCloseRequest = [] { PostMessageW(g_app.host, WM_CLOSE, 0, 0); };
     ApplySettings(settings);

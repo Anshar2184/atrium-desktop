@@ -1312,6 +1312,79 @@ struct TaskModel::Impl {
         p.aumid = m->second.aumid;
         return p;
     }
+
+    // Exe that starts the item, unless it is a packaged app (those are only
+    // started through their AUMID).
+    std::wstring DesktopExe(const std::wstring& key) const
+    {
+        auto m = meta.find(key);
+        if (m == meta.end() || m->second.exePath.empty() || Lower(m->second.exePath).find(L"\\windowsapps\\") != std::wstring::npos)
+            return {};
+        return m->second.exePath;
+    }
+
+    std::wstring Aumid(const std::wstring& key) const
+    {
+        auto m = meta.find(key);
+        return m == meta.end() ? std::wstring() : m->second.aumid;
+    }
+
+    void Show(const std::wstring& key)
+    {
+        const TaskItem* t = Find(key);
+        if (t && !t->windows.empty() && !t->active)
+            BringToFront(t->windows.front());
+    }
+
+    void MoveRunning(const std::wstring& key, int to)
+    {
+        auto it = std::find(order.begin(), order.end(), key);
+        if (it == order.end())
+            return;
+        order.erase(it);
+        order.insert(order.begin() + std::clamp<std::ptrdiff_t>(to, 0, std::ptrdiff_t(order.size())), key);
+        if (Rebuild()) {
+            notify = true;
+            ArmTimer();
+        }
+    }
+
+    bool OpenFiles(const std::wstring& key, const std::vector<std::wstring>& files)
+    {
+        if (files.empty())
+            return false;
+        if (std::wstring exe = DesktopExe(key); !exe.empty()) {
+            std::wstring args;
+            for (const auto& f : files)
+                args += (args.empty() ? L"\"" : L" \"") + f + L"\"";
+            Log(L"tasks: opening %zu file(s) with %s", files.size(), exe.c_str());
+            return Exec(exe, args, {});
+        }
+        std::wstring aumid = Aumid(key);
+        if (aumid.empty())
+            return false;
+        winrt::com_ptr<IApplicationActivationManager> aam;
+        if (FAILED(CoCreateInstance(CLSID_ApplicationActivationManager, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(aam.put()))))
+            return false;
+        std::vector<PIDLIST_ABSOLUTE> ids;
+        for (const auto& f : files) {
+            PIDLIST_ABSOLUTE id = nullptr;
+            if (SUCCEEDED(SHParseDisplayName(f.c_str(), nullptr, &id, 0, nullptr)))
+                ids.push_back(id);
+        }
+        winrt::com_ptr<IShellItemArray> array;
+        bool ok = !ids.empty() &&
+                  SUCCEEDED(SHCreateShellItemArrayFromIDLists(UINT(ids.size()), const_cast<PCIDLIST_ABSOLUTE_ARRAY>(ids.data()), array.put()));
+        DWORD pid = 0;
+        ok = ok && SUCCEEDED(aam->ActivateForFile(aumid.c_str(), array.get(), L"open", &pid));
+        if (ok)
+            Log(L"tasks: opening %zu file(s) with %s", ids.size(), aumid.c_str());
+        for (auto id : ids)
+            CoTaskMemFree(id);
+        if (!ok)
+            Log(L"tasks: opening files with %s failed", aumid.c_str());
+        return ok;
+    }
 };
 
 TaskModel::Impl* TaskModel::Impl::self = nullptr;
@@ -1390,6 +1463,52 @@ PinnedApp TaskModel::PinFor(const std::wstring& key) const
 {
     try {
         return impl_->PinFor(key);
+    } catch (...) {
+        return {};
+    }
+}
+
+void TaskModel::Show(const std::wstring& key)
+{
+    try {
+        impl_->Show(key);
+    } catch (...) {
+        Log(L"tasks: Show failed");
+    }
+}
+
+void TaskModel::MoveRunning(const std::wstring& key, int toIndex)
+{
+    try {
+        impl_->MoveRunning(key, toIndex);
+    } catch (...) {
+        Log(L"tasks: MoveRunning failed");
+    }
+}
+
+bool TaskModel::CanOpenFiles(const std::wstring& key) const
+{
+    try {
+        return !impl_->DesktopExe(key).empty() || !impl_->Aumid(key).empty();
+    } catch (...) {
+        return false;
+    }
+}
+
+bool TaskModel::OpenFiles(const std::wstring& key, const std::vector<std::wstring>& files)
+{
+    try {
+        return impl_->OpenFiles(key, files);
+    } catch (...) {
+        Log(L"tasks: OpenFiles failed");
+        return false;
+    }
+}
+
+std::wstring TaskModel::FileLocation(const std::wstring& key) const
+{
+    try {
+        return impl_->DesktopExe(key);
     } catch (...) {
         return {};
     }

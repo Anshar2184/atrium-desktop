@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Atrium.Settings.Mark"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="False">
+
+    <!-- The Atrium mark: a glass capsule floating on a colour field. Drawn on a 64 px canvas, scaled by Width. -->
+    <Viewbox Stretch="Uniform">
+        <Grid Width="64" Height="64">
+            <Border CornerRadius="18">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#FF8B5CF6" Offset="0" />
+                        <GradientStop Color="#FF3B82F6" Offset="0.55" />
+                        <GradientStop Color="#FF22D3EE" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+            </Border>
+            <Ellipse Width="30" Height="30" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6,0,0" Fill="#33FFFFFF" />
+            <Border Width="44" Height="22" CornerRadius="11" VerticalAlignment="Bottom" Margin="0,0,0,13"
+                    BorderThickness="1.5" BorderBrush="#B3FFFFFF">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#66FFFFFF" Offset="0" />
+                        <GradientStop Color="#1FFFFFFF" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <StackPanel Orientation="Horizontal" Spacing="5" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Ellipse Width="5" Height="5" Fill="#E6FFFFFF" />
+                    <Ellipse Width="5" Height="5" Fill="#E6FFFFFF" />
+                    <Ellipse Width="5" Height="5" Fill="#E6FFFFFF" />
+                    <Ellipse Width="5" Height="5" Fill="#99FFFFFF" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Viewbox>
+</UserControl>

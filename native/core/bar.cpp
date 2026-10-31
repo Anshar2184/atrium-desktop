@@ -5,6 +5,7 @@
 #include "render/glass_renderer.h"
 
 #include <commctrl.h>
+#include <shellapi.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
 #include <winrt/Windows.Foundation.h>
@@ -27,6 +28,8 @@ constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
 constexpr UINT_PTR kTooltipTimer = 1;
 constexpr UINT kTooltipDelayMs = 450;
+constexpr UINT_PTR kFileHoverTimer = 2;
+constexpr UINT kFileHoverDelayMs = 600;
 
 int Px(double dip, float scale) { return int(std::lround(dip * scale)); }
 
@@ -103,6 +106,63 @@ void RegisterClasses(HINSTANCE instance)
 
 } // namespace
 
+// OLE drop target on the input window: files dragged over an app bring it to
+// the front after a moment; dropping opens them with that app.
+struct BarDropTarget : winrt::implements<BarDropTarget, IDropTarget> {
+    Bar* bar;
+    bool files = false;
+    explicit BarDropTarget(Bar* b) : bar(b) {}
+
+    DWORD Effect(POINTL pt)
+    {
+        std::wstring key = bar->FileDragOver(POINT{pt.x, pt.y});
+        return files && !key.empty() && bar->canOpenFiles && bar->canOpenFiles(key) ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+    }
+    HRESULT __stdcall DragEnter(IDataObject* data, DWORD, POINTL pt, DWORD* effect) override
+    {
+        FORMATETC fe{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        files = data && data->QueryGetData(&fe) == S_OK;
+        *effect = Effect(pt);
+        return S_OK;
+    }
+    HRESULT __stdcall DragOver(DWORD, POINTL pt, DWORD* effect) override
+    {
+        *effect = Effect(pt);
+        return S_OK;
+    }
+    HRESULT __stdcall DragLeave() override
+    {
+        bar->FileDragLeave();
+        return S_OK;
+    }
+    HRESULT __stdcall Drop(IDataObject* data, DWORD, POINTL pt, DWORD* effect) override
+    {
+        *effect = Effect(pt);
+        std::wstring key = bar->fileHoverKey_;
+        bar->FileDragLeave();
+        if (*effect == DROPEFFECT_NONE || !data)
+            return S_OK;
+        FORMATETC fe{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        STGMEDIUM sm{};
+        if (FAILED(data->GetData(&fe, &sm)))
+            return S_OK;
+        std::vector<std::wstring> paths;
+        if (auto drop = static_cast<HDROP>(GlobalLock(sm.hGlobal))) {
+            UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < count && i < 64; ++i) {
+                std::wstring p(DragQueryFileW(drop, i, nullptr, 0) + 1, L'\0');
+                p.resize(DragQueryFileW(drop, i, p.data(), UINT(p.size())));
+                paths.push_back(std::move(p));
+            }
+            GlobalUnlock(sm.hGlobal);
+        }
+        ReleaseStgMedium(&sm);
+        if (!paths.empty() && bar->onDropFiles)
+            bar->onDropFiles(key, paths);
+        return S_OK;
+    }
+};
+
 Bar::Bar(HINSTANCE instance, bool debugCapturable, bool debugLayout) : debugCapturable_(debugCapturable), debugLayout_(debugLayout)
 {
     RegisterClasses(instance);
@@ -145,6 +205,16 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, bool debugLayout) : debugCapt
     if (!debugCapturable_)
         SetWindowDisplayAffinity(tooltip_, WDA_EXCLUDEFROMCAPTURE); // it may overlap the glass
 
+    // Drag and drop needs OLE on this (STA) thread; balanced in the destructor.
+    oleReady_ = SUCCEEDED(OleInitialize(nullptr));
+    if (oleReady_) {
+        dropTarget_ = winrt::make<BarDropTarget>(this);
+        if (FAILED(RegisterDragDrop(input_, dropTarget_.get()))) {
+            Log(L"bar: RegisterDragDrop failed; dropping files on apps is unavailable");
+            dropTarget_ = nullptr;
+        }
+    }
+
     render_ = std::thread([this] { RenderThread(); });
 }
 
@@ -153,12 +223,17 @@ Bar::~Bar()
     SetEvent(quit_);
     if (render_.joinable())
         render_.join();
+    if (dropTarget_)
+        RevokeDragDrop(input_);
+    dropTarget_ = nullptr;
     DestroyWindow(tooltip_);
     DestroyWindow(input_);
     DestroyWindow(visual_);
     CloseHandle(wake_);
     CloseHandle(quit_);
     CloseHandle(frame_);
+    if (oleReady_)
+        OleUninitialize();
 }
 
 LRESULT CALLBACK Bar::VisualProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -201,6 +276,16 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             onCloseRequest();
         return 0;
     case WM_MOUSEMOVE: {
+        if (dragging_) {
+            UpdateDrag(pt);
+            return 0;
+        }
+        // A press on an app that moves past the system drag threshold starts a drag.
+        if (pressedLeft_ && !pressed_.empty() && pressed_ != kClockKey && (w & MK_LBUTTON) &&
+            (std::abs(pt.x - pressPt_.x) > GetSystemMetrics(SM_CXDRAG) || std::abs(pt.y - pressPt_.y) > GetSystemMetrics(SM_CYDRAG))) {
+            BeginDrag(pt);
+            return 0;
+        }
         if (!tracking_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, h, 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
@@ -218,15 +303,21 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TIMER:
         if (w == kTooltipTimer) {
             KillTimer(h, kTooltipTimer);
-            if (pressed_.empty())
+            if (pressed_.empty() && !dragging_)
                 ShowTooltip();
+            return 0;
+        }
+        if (w == kFileHoverTimer) {
+            KillTimer(h, kFileHoverTimer);
+            if (!fileHoverKey_.empty() && fileHoverKey_ != kClockKey && onFileDragHover)
+                onFileDragHover(fileHoverKey_);
             return 0;
         }
         break;
     case WM_MOUSELEAVE:
         tracking_ = false;
         HideTooltip();
-        if (!scene_.hoverKey.empty() || !pressed_.empty()) {
+        if (!dragging_ && (!scene_.hoverKey.empty() || !pressed_.empty())) {
             scene_.hoverKey.clear();
             scene_.pressedKey.clear();
             pressed_.clear();
@@ -237,29 +328,47 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_MBUTTONDOWN:
         HideTooltip();
         pressed_ = HitTest(pt);
+        pressedLeft_ = m == WM_LBUTTONDOWN;
+        pressPt_ = pt;
         scene_.pressedKey = pressed_;
         SetCapture(h);
         Publish();
         return 0;
     case WM_LBUTTONUP:
     case WM_MBUTTONUP: {
+        if (dragging_) {
+            // Dropped well above or below the bar: cancel, like the system taskbar.
+            int mid = int((scene_.bar.top + scene_.bar.bottom) / 2);
+            EndDrag(std::abs(pt.y - mid) <= int(scene_.bar.bottom - scene_.bar.top));
+            ReleaseCapture();
+            return 0;
+        }
         ReleaseCapture();
         std::wstring key = HitTest(pt);
         bool same = !pressed_.empty() && key == pressed_;
         pressed_.clear();
+        pressedLeft_ = false;
         scene_.pressedKey.clear();
         Publish();
         if (!same)
             return 0;
+        // Shift+click starts a new instance, as on the Windows taskbar.
+        bool launch = m == WM_MBUTTONUP || (w & MK_SHIFT);
         if (key == kClockKey) {
             if (m == WM_LBUTTONUP && onClockClick)
                 onClockClick();
-        } else if (m == WM_LBUTTONUP ? bool(onActivate) : bool(onLaunch)) {
-            (m == WM_LBUTTONUP ? onActivate : onLaunch)(key);
+        } else if (launch ? bool(onLaunch) : bool(onActivate)) {
+            (launch ? onLaunch : onActivate)(key);
         }
         return 0;
     }
+    case WM_CAPTURECHANGED:
+        if (dragging_ && reinterpret_cast<HWND>(l) != h)
+            EndDrag(false); // capture taken away (e.g. a system menu opened)
+        return 0;
     case WM_RBUTTONUP: {
+        if (dragging_)
+            return 0;
         std::wstring key = HitTest(pt);
         POINT screen = pt;
         ClientToScreen(h, &screen);
@@ -271,6 +380,90 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     }
     return DefWindowProcW(h, m, w, l);
+}
+
+void Bar::BeginDrag(POINT pt)
+{
+    int from = -1;
+    for (int i = 0; i < int(scene_.items.size()); ++i)
+        if (scene_.items[size_t(i)].key == pressed_)
+            from = i;
+    if (from < 0)
+        return;
+    const auto& plate = scene_.items[size_t(from)].plate;
+    dragging_ = true;
+    dragKey_ = pressed_;
+    dragFrom_ = dragInsert_ = from;
+    grabDx_ = pressPt_.x - int((plate.left + plate.right) / 2);
+    dragX_ = pt.x;
+    dragY_ = pt.y;
+    scene_.pressedKey.clear();
+    HideTooltip();
+    Relayout();
+}
+
+void Bar::UpdateDrag(POINT pt)
+{
+    dragX_ = pt.x;
+    dragY_ = pt.y;
+    // Insertion point: the slot whose centre is nearest to the dragged plate's.
+    float centre = float(pt.x - grabDx_);
+    int slot = int(std::lround((centre - float(appsLeft_) - float(plate_) / 2) / float(pitch_)));
+    dragInsert_ = std::clamp(slot, 0, std::max(shown_ - 1, 0));
+    Relayout();
+}
+
+void Bar::EndDrag(bool commit)
+{
+    if (!dragging_)
+        return;
+    dragging_ = false;
+    std::wstring key = dragKey_;
+    dragKey_.clear();
+    pressed_.clear();
+    pressedLeft_ = false;
+    scene_.pressedKey.clear();
+    int from = -1;
+    for (int i = 0; i < shown_ && i < int(items_.size()); ++i)
+        if (items_[size_t(i)].key == key)
+            from = i;
+    bool moved = commit && from >= 0 && dragInsert_ >= 0 && dragInsert_ != from && dragInsert_ < int(items_.size());
+    if (moved) {
+        // Show the new order right away; the model confirms it a moment later
+        // with the same order, which then needs no relayout.
+        TaskItem t = std::move(items_[size_t(from)]);
+        items_.erase(items_.begin() + from);
+        items_.insert(items_.begin() + dragInsert_, std::move(t));
+    }
+    scene_.hoverKey = moved ? key : scene_.hoverKey;
+    Relayout(); // the dropped icon slides from the pointer into its slot
+    if (moved && onReorder)
+        onReorder(key, dragInsert_);
+}
+
+std::wstring Bar::FileDragOver(POINT screen)
+{
+    POINT pt{screen.x - window_.left, screen.y - window_.top};
+    std::wstring key = HitTest(pt);
+    if (key == kClockKey)
+        key.clear();
+    if (key != fileHoverKey_) {
+        fileHoverKey_ = key;
+        scene_.hoverKey = key;
+        KillTimer(input_, kFileHoverTimer);
+        if (!key.empty())
+            SetTimer(input_, kFileHoverTimer, kFileHoverDelayMs, nullptr);
+        Publish();
+    }
+    return key;
+}
+
+void Bar::FileDragLeave()
+{
+    KillTimer(input_, kFileHoverTimer);
+    fileHoverKey_.clear();
+    scene_.hoverKey.clear();
+    Publish();
 }
 
 void Bar::Apply(const Settings& s)
@@ -315,14 +508,16 @@ void Bar::Relayout()
     const RECT& wa = mi.rcWork;
     const Settings& st = settings_;
 
-    // Metrics (px). Icons sit with equal space above and to the side; each app
-    // gets a slot a little wider than its icon.
+    // Metrics (px). Every icon sits centred on a square plate (hover and
+    // active highlight); the plate has the same gap `v` to the top and bottom
+    // edge, and its corner radius is the bar's minus that gap, so plate and
+    // bar corners are concentric.
     const int inset = Px(kInsetDip, s);
     const int barH = Px(st.height, s);
-    const int icon = std::min(Px(st.iconSize, s), barH - Px(10, s));
-    int slot = int(std::lround(icon * 1.34));
-    const int edge = std::max((barH - icon) / 2 - (slot - icon) / 2, Px(6, s));
-    const int sepGap = Px(10, s);
+    const int icon = std::clamp(Px(st.iconSize, s), Px(12, s), barH - Px(16, s));
+    int plate = std::max(icon + Px(4, s), std::min(barH - Px(12, s), int(std::lround(icon * 1.55))));
+    int gap = std::max(Px(4, s), int(std::lround(icon * 0.18)));
+    const int sepGap = Px(8, s);
 
     // Clock block sized for its widest possible text.
     float timePx = float(barH) * 0.25f, datePx = float(barH) * 0.19f;
@@ -332,48 +527,84 @@ void Bar::Relayout()
         ClockStrings(time, date);
         float w = std::max(TextWidth(dwrite_.get(), WidestDigits(time), timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD),
                            TextWidth(dwrite_.get(), WidestDigits(date), datePx, DWRITE_FONT_WEIGHT_NORMAL));
-        clockW = int(std::ceil(w)) + Px(20, s);
+        clockW = int(std::ceil(w)) + Px(22, s);
     }
 
     int n = int(items_.size());
-    auto contentWidth = [&](int count, int slotW) {
-        int w = 2 * edge + count * slotW;
+    auto padFor = [&](int p) { return (barH - p) / 2 + Px(4, s); }; // ends: plate gap plus a little air
+    auto contentWidth = [&](int count, int p, int g) {
+        int w = 2 * padFor(p) + (count ? count * p + (count - 1) * g : 0);
         if (clockW)
             w += (count ? 2 * sepGap : 0) + clockW;
         return std::max(w, barH * 2); // an empty bar is still a pleasant capsule
     };
     const int maxW = std::max(barH * 2, std::min(Px(st.width, s), int(wa.right - wa.left) - 2 * inset));
-    // Too many apps: tighten the slots first, then drop the ones that do not fit.
-    while (n > 0 && contentWidth(n, slot) > maxW && slot > icon + Px(4, s))
-        --slot;
-    while (n > 0 && contentWidth(n, slot) > maxW)
+    // Too many apps: tighten the gaps, then the plates, then drop the ones that do not fit.
+    while (n > 0 && contentWidth(n, plate, gap) > maxW && gap > Px(2, s))
+        --gap;
+    while (n > 0 && contentWidth(n, plate, gap) > maxW && plate > icon + Px(4, s))
+        --plate;
+    while (n > 0 && contentWidth(n, plate, gap) > maxW)
         --n;
-    const int barW = st.autoWidth ? std::min(contentWidth(n, slot), maxW) : maxW;
+    const int barW = st.autoWidth ? std::min(contentWidth(n, plate, gap), maxW) : maxW;
+    const int pad = padFor(plate);
+    const int v = (barH - plate) / 2;
+    const int pitch = plate + gap;
+    const int radius = std::min(Px(st.cornerRadius, s), std::min(barW, barH) / 2);
 
     const int winW = barW + 2 * inset, winH = barH + 2 * inset;
     const int x = wa.left + (wa.right - wa.left - winW) / 2;
     const int y = wa.bottom - Px(st.margin, s) - barH - inset;
 
+    // Display order: during a drag the dragged app leaves its slot and the
+    // others close up around the insertion point.
+    std::vector<int> order(size_t(std::max(n, 0)));
+    for (int i = 0; i < n; ++i)
+        order[size_t(i)] = i;
+    int dragIndex = -1;
+    if (dragging_) {
+        for (int i = 0; i < n; ++i)
+            if (items_[size_t(i)].key == dragKey_)
+                dragIndex = i;
+        if (dragIndex < 0) {
+            dragging_ = false; // the app went away mid-drag
+            dragKey_.clear();
+        } else {
+            dragInsert_ = std::clamp(dragInsert_, 0, n - 1);
+            order.erase(order.begin() + dragIndex);
+            order.insert(order.begin() + dragInsert_, dragIndex);
+        }
+    }
+
     // Scene in window coordinates.
     BarScene scene;
     scene.scale = s;
     scene.bar = D2D1::RectF(float(inset), float(inset), float(inset + barW), float(inset + barH));
-    scene.hoverKey = scene_.hoverKey;
+    scene.plateRadius = float(std::clamp(radius - v, Px(3, s), plate / 2));
+    scene.hoverKey = dragging_ ? std::wstring() : scene_.hoverKey;
     scene.pressedKey = scene_.pressedKey;
+    scene.dragKey = dragging_ ? dragKey_ : std::wstring();
     hits_.clear();
-    const int clockRight = inset + barW - edge;
+    const int clockRight = inset + barW - pad;
     const int clockLeft = clockRight - clockW;
     // Apps are centred in the space left of the clock (matters when autoWidth is off).
-    const int appsSpace = (clockW ? clockLeft - (n ? 2 * sepGap : 0) : inset + barW - edge) - (inset + edge);
-    const int appsLeft = inset + edge + std::max(0, (appsSpace - n * slot) / 2);
-    const float iconTop = float(inset) + float(barH - icon) / 2 - 2 * s; // room for the indicator
+    const int appsSpace = (clockW ? clockLeft - (n ? 2 * sepGap : 0) : inset + barW - pad) - (inset + pad);
+    const int appsW = n ? n * plate + (n - 1) * gap : 0;
+    const int appsLeft = inset + pad + std::max(0, (appsSpace - appsW) / 2);
+    const float plateTop = float(inset + v);
+    const float iconTop = float(inset) + float(barH - icon) / 2;
     std::map<std::wstring, CachedIcon> keep;
-    for (int i = 0; i < n; ++i) {
+    for (int k = 0; k < n; ++k) {
+        const int i = order[size_t(k)];
         const TaskItem& t = items_[size_t(i)];
         SceneItem it;
         it.key = t.key;
-        float left = float(appsLeft + i * slot) + float(slot - icon) / 2;
-        it.icon = D2D1::RectF(left, iconTop, left + float(icon), iconTop + float(icon));
+        float left = float(appsLeft + k * pitch);
+        if (i == dragIndex) // follows the pointer, kept within the app strip
+            left = std::clamp(float(dragX_ - grabDx_) - float(plate) / 2, float(appsLeft - gap), float(appsLeft + appsW - plate + gap));
+        it.plate = D2D1::RectF(left, plateTop, left + float(plate), plateTop + float(plate));
+        float iconLeft = left + float(plate - icon) / 2;
+        it.icon = D2D1::RectF(iconLeft, iconTop, iconLeft + float(icon), iconTop + float(icon));
         it.running = !t.windows.empty();
         it.active = t.active;
         it.attention = t.attention;
@@ -392,34 +623,53 @@ void Bar::Relayout()
             keep[t.key] = c;
         }
         scene.items.push_back(std::move(it));
-        hits_.push_back({t.key, RECT{appsLeft + i * slot, inset, appsLeft + (i + 1) * slot, inset + barH}});
+        // Hit cells split the gaps; the first and last reach the bar's ends.
+        int hl = k == 0 ? inset : appsLeft + k * pitch - gap / 2;
+        int hr = k == n - 1 ? (clockW ? clockLeft - sepGap : inset + barW) : appsLeft + k * pitch + plate + (gap - gap / 2);
+        hits_.push_back({t.key, RECT{hl, inset, hr, inset + barH}});
     }
     icons_ = std::move(keep);
+    appsLeft_ = appsLeft;
+    pitch_ = pitch;
+    plate_ = plate;
+    gap_ = gap;
+    shown_ = n;
     if (clockW) {
-        scene.clock = D2D1::RectF(float(clockLeft), float(inset) + 6 * s, float(clockRight), float(inset + barH) - 6 * s);
+        scene.clock = D2D1::RectF(float(clockLeft), plateTop, float(clockRight), plateTop + float(plate));
         scene.timePx = timePx;
         scene.datePx = datePx;
         if (n)
             scene.separatorX = float(clockLeft - sepGap);
-        hits_.push_back({kClockKey, RECT{clockLeft, inset, clockRight, inset + barH}});
+        hits_.push_back({kClockKey, RECT{clockLeft - (n ? sepGap : pad), inset, inset + barW, inset + barH}});
     }
     if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
     scene_ = std::move(scene);
 
-    SetWindowPos(visual_, HWND_TOPMOST, x, y, winW, winH, SWP_NOACTIVATE | (visible_ ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
-    // Input window right below the visual one, region = the rounded shape.
-    SetWindowPos(input_, visual_, x, y, winW, winH, SWP_NOACTIVATE | (visible_ ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
-    int r = std::min(Px(st.cornerRadius, s), std::min(barW, barH) / 2);
-    SetWindowRgn(input_, CreateRoundRectRgn(inset, inset, inset + barW + 1, inset + barH + 1, 2 * r, 2 * r), TRUE);
+    // The window only changes when the bar's size does (not on every drag move).
+    RECT win{x, y, x + winW, y + winH};
+    if (!dragging_ || !EqualRect(&win, &applied_) || visible_ != appliedVisible_) {
+        SetWindowPos(visual_, HWND_TOPMOST, x, y, winW, winH, SWP_NOACTIVATE | (visible_ ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        // Input window right below the visual one, region = the rounded shape.
+        SetWindowPos(input_, visual_, x, y, winW, winH, SWP_NOACTIVATE | (visible_ ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        applied_ = win;
+        appliedVisible_ = visible_;
+    }
+    if (appliedRgn_[0] != barW || appliedRgn_[1] != barH || appliedRgn_[2] != radius || appliedRgn_[3] != inset) {
+        SetWindowRgn(input_, CreateRoundRectRgn(inset, inset, inset + barW + 1, inset + barH + 1, 2 * radius, 2 * radius), TRUE);
+        appliedRgn_[0] = barW;
+        appliedRgn_[1] = barH;
+        appliedRgn_[2] = radius;
+        appliedRgn_[3] = inset;
+    }
 
-    window_ = RECT{x, y, x + winW, y + winH};
+    window_ = win;
     monitor_ = mi.rcMonitor;
     hmonitor_ = mon;
     scale_ = s;
     UpdateTooltips();
     Publish();
-    if (debugLayout_)
+    if (debugLayout_ && !dragging_)
         for (const auto& hit : hits_)
             Log(L"layout: %s %ld,%ld,%ld,%ld", hit.key.c_str(), x + hit.rect.left, y + hit.rect.top, x + hit.rect.right, y + hit.rect.bottom);
 }

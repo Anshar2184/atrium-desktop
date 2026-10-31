@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Atrium.Settings.SliderCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalContentAlignment="Stretch"
+    IsTabStop="False">
+
+    <Grid>
+        <Border x:Name="Surface" Style="{StaticResource CardSurfaceStyle}">
+            <Border.BackgroundTransition>
+                <BrushTransition Duration="0:0:0.2" />
+            </Border.BackgroundTransition>
+            <Grid RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="GlyphHost" Width="48" Height="40" CornerRadius="10"
+                            Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                            VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="TitleText" Style="{StaticResource CardTitleStyle}" />
+                        <TextBlock x:Name="HintText" Style="{StaticResource HintStyle}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" x:Name="ValueText" Style="{StaticResource ValueStyle}"
+                               VerticalAlignment="Center" TextAlignment="Right" IsTextScaleFactorEnabled="False">
+                        <Run x:Name="ValueRun" /><Run x:Name="UnitRun" FontSize="13" FontWeight="Normal"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </TextBlock>
+                </Grid>
+
+                <TextBlock Grid.Row="1" x:Name="DescriptionText" Style="{StaticResource CardDescriptionStyle}" />
+
+                <Grid Grid.Row="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Slider x:Name="Track" IsThumbToolTipEnabled="False" ValueChanged="OnTrackChanged" />
+                    <Grid Grid.Row="1" Margin="2,-2,2,0">
+                        <TextBlock x:Name="MinCaption" Style="{StaticResource CaptionTertiaryStyle}" HorizontalAlignment="Left" />
+                        <TextBlock x:Name="MaxCaption" Style="{StaticResource CaptionTertiaryStyle}" HorizontalAlignment="Right" />
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+        <Border x:Name="Ring" CornerRadius="12" BorderThickness="1.5" Opacity="0" IsHitTestVisible="False"
+                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}">
+            <Border.OpacityTransition>
+                <ScalarTransition Duration="0:0:0.2" />
+            </Border.OpacityTransition>
+        </Border>
+    </Grid>
+</UserControl>

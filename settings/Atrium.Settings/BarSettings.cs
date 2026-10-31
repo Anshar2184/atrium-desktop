@@ -22,7 +22,7 @@ internal sealed class BarSettings
     public double Width { get; set; } = 1200;
     public double Height { get; set; } = 60;
     public double Margin { get; set; } = 10;
-    public double IconSize { get; set; } = 36;
+    public double IconSize { get; set; } = 30;
     public bool AutoWidth { get; set; } = true;
     public bool ShowClock { get; set; } = true;
     public bool ShowRunning { get; set; } = true;

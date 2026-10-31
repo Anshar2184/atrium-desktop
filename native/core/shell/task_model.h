@@ -72,6 +72,16 @@ public:
     void CloseAll(const std::wstring& key);
     // A pin for a running unpinned item (to append to settings).
     PinnedApp PinFor(const std::wstring& key) const;
+    // Brings the group's most recent window to the front (never minimizes or
+    // launches); used while files are dragged over the item.
+    void Show(const std::wstring& key);
+    // Moves a running unpinned group to `toIndex` among the unpinned groups.
+    void MoveRunning(const std::wstring& key, int toIndex);
+    // Files dropped on an item: open them with that app.
+    bool CanOpenFiles(const std::wstring& key) const;
+    bool OpenFiles(const std::wstring& key, const std::vector<std::wstring>& files);
+    // The desktop exe behind an item ("open file location"); empty for packaged apps.
+    std::wstring FileLocation(const std::wstring& key) const;
 
     // The user's current Windows taskbar pins (desktop apps, from
     // %APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar).

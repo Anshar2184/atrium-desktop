@@ -13,6 +13,7 @@
 
 #include <windows.h>
 #include <dwrite_3.h>
+#include <ole2.h>
 
 #include <functional>
 #include <map>
@@ -48,6 +49,14 @@ public:
     std::function<void(const std::wstring& key, POINT)> onItemMenu; // right click on an app
     std::function<void(POINT)> onContextMenu;                 // right click elsewhere on the bar
     std::function<void()> onClockClick;
+    // Drag and drop of an app to visible position `toIndex` (0-based, in the
+    // list without the dragged item). The bar already shows the new order.
+    std::function<void(const std::wstring& key, int toIndex)> onReorder;
+    // Files dragged from Explorer: hovering an app brings it to the front,
+    // dropping opens the files with it.
+    std::function<void(const std::wstring& key)> onFileDragHover;
+    std::function<bool(const std::wstring& key)> canOpenFiles;
+    std::function<void(const std::wstring& key, const std::vector<std::wstring>& files)> onDropFiles;
     std::function<void()> onCloseRequest; // WM_CLOSE on a bar window (taskkill, logoff)
 
 private:
@@ -81,6 +90,12 @@ private:
     void HideTooltip();
     void ShowTooltip();      // above the hovered item, after a short delay
     std::wstring TooltipText(const std::wstring& key) const;
+    void BeginDrag(POINT client);
+    void UpdateDrag(POINT client);
+    void EndDrag(bool commit);
+    friend struct BarDropTarget;
+    std::wstring FileDragOver(POINT screen); // returns the app under the point
+    void FileDragLeave();
     void RenderThread();
     bool RenderSession(); // returns false to stop, true to rebuild (device lost, monitor changed)
 
@@ -99,6 +114,22 @@ private:
     bool visible_ = true;
     bool tracking_ = false;
     std::wstring pressed_;
+    bool pressedLeft_ = false;
+    POINT pressPt_{};
+    // Drag reorder (client px). The dragged item follows the pointer; the
+    // others make room at `dragInsert_`.
+    bool dragging_ = false;
+    std::wstring dragKey_;
+    int dragFrom_ = -1, dragInsert_ = -1;
+    int dragX_ = 0, dragY_ = 0, grabDx_ = 0;
+    // App strip metrics of the last layout (client px).
+    int appsLeft_ = 0, pitch_ = 1, plate_ = 0, gap_ = 0, shown_ = 0;
+    RECT applied_{};      // last window rect given to SetWindowPos
+    int appliedRgn_[4]{}; // bar width, height, radius and inset of the last region
+    bool appliedVisible_ = false;
+    std::wstring fileHoverKey_;
+    winrt::com_ptr<IDropTarget> dropTarget_;
+    bool oleReady_ = false;
     RECT window_{};
     RECT monitor_{};
     HMONITOR hmonitor_ = nullptr;
