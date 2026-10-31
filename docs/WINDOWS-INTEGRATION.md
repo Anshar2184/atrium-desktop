@@ -1,5 +1,7 @@
 # WINDOWS-INTEGRATION
 
+> 有效决策以 [DECISIONS](DECISIONS.md) 为准；标注 **已取代** 的段落只作历史记录。
+
 ## 1. 能力分级
 
 “文档/源码可行”表示已取得证据，不表示已在本机执行。2026-10-31 已在一台预览版机器上执行首轮原型，下表之后的结论以 [VERIFICATION](VERIFICATION.md) 为准：任务栏隐藏与 128 ms 崩溃恢复、隐藏状态下的系统入口、转发式托盘桥接、点击后切换前台、DWM 缩略图、公开窗口方式的桌面组件均已通过；启动前已存在且不响应 `TaskbarCreated` 的托盘图标、实时通知事件仍有限制。
@@ -8,9 +10,9 @@
 | --- | --- | --- | --- |
 | 不终止 Explorer 替换栏 | 自建 AppBar；参考实现可隐藏原生窗口 | 多屏工作区、自动隐藏竞争、系统更新重建 | 无公开“把第三方注册为完整系统任务栏”契约 |
 | 开始/系统控制 | 键盘快捷键和设置 URI；原生服务继续存在 | 焦点、修饰键、弹出位置、自动隐藏交互 | 无受保证的任意坐标原生开始菜单托管 API |
-| 托盘 | 应用可向系统通知区域添加自己的图标 | ManagedShell 共存/接管、老应用与提权应用 | Shell_NotifyIcon 不是第三方图标枚举/接管 API |
-| 通知 | UserNotificationListener 读取/删除授权范围内通知 | MSIX 身份、撤权、去重和事件时序 | 不提供通用 pre-toast 拦截或任意动作重放 |
-| 桌面组件 | 普通 HWND、Z-order、桌面壁纸查询 | Win+D、WorkerW、Explorer 重启、输入和 DPI | Explorer 桌面层嵌入无稳定公开扩展契约 |
+| 托盘 | 应用可向系统通知区域添加自己的图标；转发式桥接正常与失败路径已测（V5.9） | Explorer 重启、真实应用兼容矩阵、提权应用 | Shell_NotifyIcon 不是第三方图标枚举/接管 API |
+| 通知（延后，D15） | UserNotificationListener 读取授权范围内通知（未打包可读，V8） | 包身份对照、撤权、去重和事件时序 | 不提供通用 pre-toast 拦截或任意动作重放 |
+| 桌面组件 | 普通 HWND + WinEvent 状态机，Win+D/显示桌面按钮/桌面图标已测（V7.4） | 多屏、虚拟桌面、Explorer 重启 | Explorer 桌面层嵌入无稳定公开扩展契约 |
 | 崩溃恢复 | 独立进程等待/显示窗口/撤回状态 | 强杀、卡死、睡眠、更新时序 | 同时终止 Guard/Core 与系统失效无即时保证 |
 
 ## 2. 任务栏与工作区
@@ -39,16 +41,20 @@ Explorer 兼容适配器可识别当前 shell PID 下 `Shell_TrayWnd` 和 `Shell
 
 公开 [Shell_NotifyIcon](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyicona) 是客户端提交协议；没有据此获得全局图标清单、回调、菜单和历史状态的受支持服务端。裁剪/重挂 Explorer 的托盘子窗口依赖内部布局、跨进程输入、DPI，不作为首选。
 
-P04 比较两条明确路线：
+P04 比较两条明确路线（结论：采用第 3 条，见 D12）：
 
 1. **保留 Explorer 持有托盘。** Atrium 提供“系统托盘”按钮临时恢复原栏，用户仍用原生图标/菜单。兼容性最佳，但打破连续一体式视觉，是公开承认的折衷。
-2. **可选 ManagedShell 桥接。** 独立 C#/WPF dispatcher process 将图标数据/状态映射为 DTO，由 Core 绘制，鼠标动作在 bridge 转回。测试它是否能在不注入、不替换 Explorer 条件下正确拿到原有及新图标；审核 ITrayNotify、toolbar memory、TrayService 的实际运行路径。旧枚举路径在现代 Win11 可能不再成立。
+2. **已取代：可选 ManagedShell 桥接。** 独立 C#/WPF dispatcher process 将图标数据/状态映射为 DTO，由 Core 绘制，鼠标动作在 bridge 转回。测试它是否能在不注入、不替换 Explorer 条件下正确拿到原有及新图标；审核 ITrayNotify、toolbar memory、TrayService 的实际运行路径。旧枚举路径在现代 Win11 可能不再成立。
 
 bridge 一旦启用不是无害的只读服务：它可能更改 Explorer auto-tray 等设置或参与消息分发。必须列出实际修改、保存/恢复对应状态，并验证 bridge 崩溃时客户端图标重新注册和 Explorer 收到图标。仅显示原栏不一定恢复已经被接管丢失的 tray 状态。`TaskbarCreated` 广播是兼容恢复手段，不保证所有旧客户端都响应。P04 中任何常用应用必须重启才恢复图标，则不可作为默认可靠模式。
+
+3. **自写转发式桥接（D12，现行）。** Core 内创建同类名窗口接收 `Shell_NotifyIcon` 消息，拷贝负载后由每个目标一个转发线程投递给 Explorer，桥接线程最多等 500 ms；Explorer 的结果原样返回应用，失败或超时一律返回 FALSE（超时后 Explorer 可能仍处理该消息，结果不确定，应用通常会在下一次 `TaskbarCreated` 时重新注册）。不改 Explorer 的 Z 序或设置；启动时向非 Explorer 的窗口逐个投递 `TaskbarCreated` 以收集现有图标；拿不到的旧图标提供“打开系统溢出区”兜底。正常路径、目标卡死、目标退出、突发、桥接中途退出均已测（V5.9）；Explorer 重启与真实应用兼容矩阵待测。
 
 不能同时运行两个互相竞争的 tray host。要求全托盘嵌入而不接受任何私有兼容层时，当前约束下不可承诺满足。Seelen 的 hook DLL 证明有更侵入的路径，但不进入本方案。
 
 ## 5. 通知
+
+> **延后（D15）**：首版不做通知中心，本节保留为后续设计。已知：本机未打包进程可读取通知、订阅 `NotificationChanged` 失败（V8），包身份方案未对照验证。
 
 默认模式：右下角灵动岛形态显示 Atrium 自己的事件，第三方系统通知在授权后供用户主动展开查看；默认不对每个第三方 Toast 再自动弹一份。这样避免在无法可靠知道系统已展示情况时产生双重提醒。
 
@@ -66,11 +72,13 @@ Listener 提供的数据不等同完整可执行 toast XML/应用回调。第三
 
 ## 6. 小组件与 Explorer 桌面
 
-公开基线是无任务栏项、不抢焦点的非 topmost HWND，保持普通应用之下；用户编辑时才临时提高自有编辑层，退出立即降低。仅 `HWND_BOTTOM` 不能保证在桌面图标前可见，也不保证 Win+D 后仍在原位。若公开模式在 Win+D 隐藏，可接受为降级，但不能标为已完成原生桌面层需求。
+**现行方案（D14）**：组件是无任务栏项、不抢焦点的顶层窗口。WinEvent 监听前台切换、最小化开始、最小化结束；桌面模式 = 所有应用窗口都已最小化且前台不是应用窗口，此时把组件置顶，离开时取消置顶并压底。只看“前台是桌面”会在用户点桌面空白处时把组件提到应用上方，前台已是桌面时按 Win+D 也不会产生前台事件，两者都已在 V7.4 修正和验证。
 
-兼容实验 `DesktopHostAdapter` 探测当前 Explorer 的 Progman/WorkerW/SHELLDLL_DefView 关系，必要时研究社区的 0x052C 行为；它不是公开接口。不得固定一个层级/第几个 WorkerW。Rainmeter System.cpp 明确区分 24H2 前后结构，证明需结构探测与版本回归。[Rainmeter 源码](https://github.com/rainmeter/rainmeter/blob/master/Library/System.cpp)。
+以下为原设计。公开基线是无任务栏项、不抢焦点的非 topmost HWND，保持普通应用之下；用户编辑时才临时提高自有编辑层，退出立即降低。仅 `HWND_BOTTOM` 不能保证在桌面图标前可见，也不保证 Win+D 后仍在原位。若公开模式在 Win+D 隐藏，可接受为降级，但不能标为已完成原生桌面层需求。
 
-若使用 SetParent，处理 WS_CHILD/WS_POPUP、坐标转换、跨进程 DPI 影响和父窗口消失；其公开调用并不保证 Explorer 父级长期有效。[SetParent 契约](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setparent)。child 模式默认壁纸玻璃，原因见渲染文档。Explorer 重启立即废弃旧父句柄并隐藏组件，等新结构稳定后重建；失败恢复普通窗口/关闭桌面组件，不能持续顶置遮挡应用。
+**已取代（D14）**：兼容实验 `DesktopHostAdapter` 探测当前 Explorer 的 Progman/WorkerW/SHELLDLL_DefView 关系，必要时研究社区的 0x052C 行为；它不是公开接口。不得固定一个层级/第几个 WorkerW。Rainmeter System.cpp 明确区分 24H2 前后结构，证明需结构探测与版本回归。[Rainmeter 源码](https://github.com/rainmeter/rainmeter/blob/master/Library/System.cpp)。
+
+**已取代（D14）**：若使用 SetParent，处理 WS_CHILD/WS_POPUP、坐标转换、跨进程 DPI 影响和父窗口消失；其公开调用并不保证 Explorer 父级长期有效。[SetParent 契约](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setparent)。child 模式默认壁纸玻璃，原因见渲染文档。Explorer 重启立即废弃旧父句柄并隐藏组件，等新结构稳定后重建；失败恢复普通窗口/关闭桌面组件，不能持续顶置遮挡应用。
 
 位置按 monitor ID、DIP、锚点保存，外屏拔除将不可见组件收拢到主屏安全范围；保留原屏布局供重连恢复。第一阶段时钟/日期和本地月历；天气需要 provider/缓存/错误状态，音乐走 GSMTC；不预建任意脚本插件执行系统。Win+D、显示桌面按钮、虚拟桌面切换、锁屏、桌面图标点击/拖动与 Explorer 重启必须逐项测试。
 
@@ -88,7 +96,9 @@ stateDiagram-v2
     Restoring --> NativeVisible: 显示Explorer + 撤销AppBar + 校验
 ```
 
-Guard 持 Core 进程句柄（不是只看 PID），获取 UI/render 的单调进展计数。正常每秒确认一次；初始建议 UI 3 秒无响应触发恢复，正在合法休眠不计时，唤醒后给 5 秒恢复窗口。故障恢复目标见 P07。启动调试器时用显式开发模式，不能为避免误报去掉生产 watchdog。
+**已实现（D10，V4.9）**：`native/guard` 中的原生 Guard 读取 Core 每一步前写入的恢复状态文件（阶段、用户原自动隐藏设置、可见性、Core PID 与启动时间），等待 Core 进程句柄并读取共享内存心跳；3 秒无进展判定卡死，先恢复再结束 Core；恢复由命名互斥量串行化且幂等；Guard 丢失时 Core 调用 `--restore`；两者都死时下次启动按状态文件恢复。T1–T6 已在“用户原设置非自动隐藏”的配置下通过。尚未覆盖：渲染线程单独卡死（需要渲染线程也参与心跳）、Explorer 重启、睡眠唤醒。
+
+原设计：Guard 持 Core 进程句柄（不是只看 PID），获取 UI/render 的单调进展计数。正常每秒确认一次；初始建议 UI 3 秒无响应触发恢复，正在合法休眠不计时，唤醒后给 5 秒恢复窗口。故障恢复目标见 P07。启动调试器时用显式开发模式，不能为避免误报去掉生产 watchdog。
 
 恢复时先撤销接管租约、禁止后续隐藏动作，显示当前 Explorer taskbar，然后释放 Atrium AppBar 和恢复自己更改的自动隐藏等状态，再检查每屏工作区。Core 活着但卡死时 Guard 可在完成显示原栏后终止自己的 Core 以释放残留窗口/AppBar；不能只靠向卡死 Core 发退出消息。Guard 的独立恢复代码只复用极小 Win32 helper，不依赖渲染或托盘库。
 

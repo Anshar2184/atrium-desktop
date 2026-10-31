@@ -9,26 +9,17 @@
 | T01 | Core 为 C++20 / Win32 / C++/WinRT | HWND、GPU、WinRT 可直接互操作；成本是内存/COM 与自绘无障碍开发。Rust 可行，但不为当前需求额外引入语言和绑定维护 | D01、D03、R04–R07；高 |
 | T02 | D3D11，feature level 11_0 为首版目标 | capture 与 D2D 互操作直接；D3D12 的显式同步、descriptor、资源状态对小面积合成收益不明确。只有实测 CPU 提交瓶颈才重开 | D01、D02、D04；高 |
 | T03 | Core 仅采用 DirectComposition 宿主 | 自己绘制纹理，DComp 管 visual、clip、opacity 和 HWND 合成。它不是玻璃引擎，也不提供任意背景 SRV | D01、D08；高 |
-| T04 | WGC 为首选候选，DXGI Duplication 做同接口 A/B 验证 | WGC 便于 FP16/HDR，Win32 monitor interop；边框授权、帧队列和实际功耗需测。DXGI 提供明确脏矩形但输出/适配器约束更强。只在证据证明必要时保留第二生产后端 | D02–D06；中 |
+| T04 | **已取代 → D03**（WGC 生产、DXGI 仅对照）：WGC 为首选候选，DXGI Duplication 做同接口 A/B 验证 | WGC 便于 FP16/HDR，Win32 monitor interop；边框授权、帧队列和实际功耗需测。DXGI 提供明确脏矩形但输出/适配器约束更强。只在证据证明必要时保留第二生产后端 | D02–D06；中 |
 | T05 | 一套 SDF 形状和 HLSL 管线，两种材质参数集 | Liquid 是实时纹理的屏幕空间近似光学折射，不是物理光线追踪。不能以堆色散替代视觉验证 | R04–R07 源码；高（方法），中（最终视觉） |
-| T06 | 不把 ManagedShell 默认装入原生 Core | 它是 C#/WPF 库，托盘涉及私有 COM/窗口协议。若 P04 通过可用独立 .NET 桥接复用；C++/CLI 会耦合运行时与崩溃域，不推荐 | R01、R02；高（边界），中低（兼容） |
-| T07 | 默认通知补充面板，原生 Toast 保留 | App SDK 的发送能力不是全局拦截器。监听模式不能无损代理任意动作 | D09、D10、R03；高 |
-| T08 | 桌面组件公开 top-level 模式先行，WorkerW 实验隔离 | 公开 Z-order 不保证 Win+D 持续可见；嵌入满足桌面层更接近但私有且受 DPI/自捕获限制 | D13、R08；高（风险），中低（嵌入） |
+| T06 | **已取代 → D12**（自写转发式桥接，不用 ManagedShell）：不把 ManagedShell 默认装入原生 Core | 它是 C#/WPF 库，托盘涉及私有 COM/窗口协议。若 P04 通过可用独立 .NET 桥接复用；C++/CLI 会耦合运行时与崩溃域，不推荐 | R01、R02；高（边界），中低（兼容） |
+| T07 | **已取代 → D15**（通知中心延后）：默认通知补充面板，原生 Toast 保留 | App SDK 的发送能力不是全局拦截器。监听模式不能无损代理任意动作 | D09、D10、R03；高 |
+| T08 | **已取代 → D14**（只用公开窗口 + 事件状态机）：桌面组件公开 top-level 模式先行，WorkerW 实验隔离 | 公开 Z-order 不保证 Win+D 持续可见；嵌入满足桌面层更接近但私有且受 DPI/自捕获限制 | D13、R08；高（风险），中低（嵌入） |
 | T09 | Settings 选 C# / WinUI 3 | 原生控件、键盘/无障碍效率较好；引入 .NET + App SDK，但按需启动不计入空闲常驻。若团队坚持单语言可改 C++/WinRT WinUI 3，接受 XAML 工具链成本 | R09、D03；中高 |
 | T10 | CMake 管 native；MSBuild/NuGet 管 WinUI 和包 | 不硬把 WinUI XAML 编译塞进 CMake；顶层脚本编排二者。vcpkg manifest 固定 baseline，依赖尽少 | R09 构建与 Issues；高 |
-| T11 | 签名 MSIX 包为身份验证主线 | 身份使通知权限和部署可测试，但不等于所有 capability 已获批；先用本地测试签名验证。external-location identity package 为传统安装器后备 | D09、D11；中，P05 决定 |
-| T12 | 原生 Guard 常驻，先恢复后重启 | 多一个很小的进程换取 Core 崩溃后恢复；无 Windows 服务，无管理员运行。双进程一起终止不保证即时恢复 | R01/R02 的隐藏行为 + 自主故障域设计；高（必要性），中（时限待测） |
+| T11 | **已取代 → D15**（延后）：签名 MSIX 包为身份验证主线 | 身份使通知权限和部署可测试，但不等于所有 capability 已获批；先用本地测试签名验证。external-location identity package 为传统安装器后备 | D09、D11；中，P05 决定 |
+| T12 | **已实现 → D10**：原生 Guard 常驻，先恢复后重启 | 多一个很小的进程换取 Core 崩溃后恢复；无 Windows 服务，无管理员运行。双进程一起终止不保证即时恢复 | R01/R02 的隐藏行为 + 自主故障域设计；高（必要性），中（时限待测） |
 
-### 首轮验证后的修订（2026-10-31）
-
-| ID | 修订 | 依据 |
-| --- | --- | --- |
-| T04 | WGC 定为生产后端；DXGI 只做对照。设备必须建在输出适配器上，否则双显卡笔记本上 DXGI 复制返回 `DXGI_ERROR_UNSUPPORTED` | VERIFICATION 1.10 |
-| T05 | 信心升为高（方法与性能）：核显 0.16 ms/帧；最终视觉仍待设计验收 | VERIFICATION 1.3 |
-| T06 | 不引入 ManagedShell 运行时：其 `TrayService` 处理过的图标不转发 Explorer，并改动 Explorer 任务栏置顶属性；其旧版托盘读取路径在 Win11 上无效。改为自写转发式桥接 | VERIFICATION 5.x |
-| T08 | 桌面组件只用公开顶层窗口 + 前台事件，WorkerW 实验不再需要 | VERIFICATION 7.x |
-| T11 | 通知读取不依赖打包；实时 `NotificationChanged` 需要包身份，首版不做通知中心 | VERIFICATION 8.x |
-| 新增 | 可视表面拆为可点穿显示窗口 + 区域输入窗口；截图可见模式采用逐窗口捕获重建背景 | VERIFICATION 2、3 |
+> 下表是 2026-10-31 首次评审时的选型记录。之后的有效决策以 [DECISIONS](DECISIONS.md) 为准，被取代的行已在行首标注。
 
 ## 2. 渲染与合成 API 不是同一层的选项
 
@@ -79,7 +70,7 @@ WGC/DXGI 通常取得完整输出，裁 ROI 降低的是后续拷贝/滤波量�
 | hicccc77/electron-liquid-glass | native capture.cc/renderer.cc/panel 构成 DXGI+D3D11+DComp；确有位移采样；README ~6 ms 为作者特定实验，且多屏跟随第一个可见 panel | MIT；研究调度/ROI；不带入 Electron。capture.cc 显式偏好 BGRA，不把“支持 Windows”解释成完整 HDR/多 GPU 支持 |
 | WindowsAppSDK-Samples | SceneGraph、Notifications、Windowing、Mica、部署示例；样例自身明确包含早期原型 | MIT；可直接参考官方互操作/打包样例，不整体依赖 samples，不把 Windows Widgets 示例视为任意桌面小组件宿主 |
 
-生产可依赖候选只有 Windows SDK/系统 API、稳定版 App SDK/.NET、少量固定版本基础库，以及 **经 P04 验证后** 的 ManagedShell。其他玻璃项目均不是首版运行时依赖。MIT/Apache 也要保留版权及适用 NOTICE、核查资产与传递依赖；GPL/AGPL 并非“禁止使用”，此处是产品许可尚未确定时的复用边界，不作法律结论。
+生产可依赖候选只有 Windows SDK/系统 API、稳定版 App SDK/.NET、少量固定版本基础库，（**已取代**：原文还包括“经 P04 验证后的 ManagedShell”，P04 后改为自写桥接，见 D12）。其他玻璃项目均不是首版运行时依赖。MIT/Apache 也要保留版权及适用 NOTICE、核查资产与传递依赖；GPL/AGPL 并非“禁止使用”，项目许可证已定为 MIT（D17），此处是复用边界，不作法律结论。
 
 ## 6. Issues 转化成测试，而非口碑评分
 

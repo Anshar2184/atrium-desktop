@@ -1,0 +1,95 @@
+{
+  "probe": "p07b-recovery-transaction",
+  "startedAt": "2026-10-31T19:14:05.5165212+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "guard": "Atrium.Guard.exe",
+  "realUserState": "Snap { AutoHide = True, Visible = True, WorkArea = [0,0,3200,2000] }",
+  "verdicts": {
+    "T1-kill-core": {
+      "verdict": "Passed",
+      "note": "state restored to the user's configuration in 271 ms by core-exit; after == before: True; core exited: True"
+    },
+    "T2-core-hang": {
+      "verdict": "Passed",
+      "note": "state restored to the user's configuration in 3560 ms by core-hang; after == before: True; core exited: True"
+    },
+    "T3-startup-failure": {
+      "verdict": "Passed",
+      "note": "state restored to the user's configuration in 2549 ms by core-hang; after == before: True; core exited: True"
+    },
+    "T4-reentrant-restore": {
+      "verdict": "Passed",
+      "note": "state restored to the user's configuration in 396 ms by manual; after == before: True; core exited: True"
+    },
+    "T5-guard-killed": {
+      "verdict": "Passed",
+      "note": "state restored to the user's configuration in 366 ms by manual; after == before: True; core exited: True"
+    },
+    "T6-both-killed-next-start": {
+      "verdict": "Passed",
+      "note": "state restored to the user's configuration in 1155 ms by manual; after == before: True; core exited: True"
+    },
+    "user-state-restored": {
+      "verdict": "Passed",
+      "note": "real user configuration before/after: Snap { AutoHide = True, Visible = True, WorkArea = [0,0,3200,2000] } / Snap { AutoHide = True, Visible = True, WorkArea = [0,0,3200,2000] }"
+    }
+  },
+  "scenarios": [
+    {
+      "scenario": "T1-kill-core",
+      "before": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "duringTakeover": "Snap { AutoHide = True, Visible = False, WorkArea = [0,0,3200,2000] }",
+      "after": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "restoredMs": 270.8,
+      "restoredBy": "core-exit",
+      "log": "RESTORE done from=active reason=core-exit ms=251.5"
+    },
+    {
+      "scenario": "T2-core-hang",
+      "before": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "duringTakeover": "Snap { AutoHide = True, Visible = False, WorkArea = [0,0,3200,2000] }",
+      "after": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "restoredMs": 3559.8,
+      "restoredBy": "core-hang",
+      "log": "RESTORE done from=active reason=core-hang ms=239.0 | TERMINATED hung core"
+    },
+    {
+      "scenario": "T3-startup-failure",
+      "before": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "duringTakeover": "Snap { AutoHide = True, Visible = True, WorkArea = [0,0,3200,2000] }",
+      "after": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "restoredMs": 2548.8,
+      "restoredBy": "core-hang",
+      "log": "RESTORE done from=autohide-changed reason=core-hang ms=243.5 | TERMINATED hung core"
+    },
+    {
+      "scenario": "T4-reentrant-restore",
+      "before": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "duringTakeover": "Snap { AutoHide = True, Visible = False, WorkArea = [0,0,3200,2000] }",
+      "after": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "restoredMs": 396.2,
+      "restoredBy": "manual",
+      "log": "RESTORE done from=active reason=manual ms=244.3 | RESTORE nothing-to-do phase=restored reason=core-exit"
+    },
+    {
+      "scenario": "T5-guard-killed",
+      "before": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "duringTakeover": "Snap { AutoHide = True, Visible = False, WorkArea = [0,0,3200,2000] }",
+      "after": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "restoredMs": 365.6,
+      "restoredBy": "manual",
+      "log": "GUARD-LOST | RESTORE done from=active reason=manual ms=248.4 | RESTORE nothing-to-do phase=restored reason=manual"
+    },
+    {
+      "scenario": "T6-both-killed-next-start",
+      "before": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "duringTakeover": "Snap { AutoHide = True, Visible = False, WorkArea = [0,0,3200,2000] }",
+      "after": "Snap { AutoHide = False, Visible = True, WorkArea = [0,0,3200,1904] }",
+      "restoredMs": 1155.3,
+      "restoredBy": "manual",
+      "log": ""
+    }
+  ],
+  "final": "Snap { AutoHide = True, Visible = True, WorkArea = [0,0,3200,2000] }",
+  "finishedAt": "2026-10-31T19:14:38.0616752+08:00"
+}

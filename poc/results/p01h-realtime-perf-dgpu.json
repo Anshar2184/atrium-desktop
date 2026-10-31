@@ -1,0 +1,97 @@
+{
+  "probe": "p01h-realtime-perf-dgpu",
+  "startedAt": "2026-10-31T19:28:31.1707048+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "presents": 575,
+  "skippedUnchanged": 2,
+  "presentsPerSecond": 57.5,
+  "ms.sourceToArrival": {
+    "p50": -10.35,
+    "p95": -7.93,
+    "p99": -5.66,
+    "max": -3.641
+  },
+  "ms.arrivalToCopied": {
+    "p50": 0.069,
+    "p95": 0.146,
+    "p99": 0.226,
+    "max": 0.268
+  },
+  "ms.copiedToRenderStart": {
+    "p50": 0.001,
+    "p95": 0.003,
+    "p99": 0.113,
+    "max": 694.97
+  },
+  "ms.update(roiCopy+mips)": {
+    "p50": 0.172,
+    "p95": 0.264,
+    "p99": 0.344,
+    "max": 0.869
+  },
+  "ms.compare": {
+    "p50": 0.932,
+    "p95": 1.814,
+    "p99": 2.815,
+    "max": 9.943
+  },
+  "ms.drawCpu": {
+    "p50": 0.039,
+    "p95": 0.066,
+    "p99": 0.184,
+    "max": 1.698
+  },
+  "ms.drawToGpuDone": {
+    "p50": 0.225,
+    "p95": 1.002,
+    "p99": 1.067,
+    "max": 3.215
+  },
+  "ms.presentCall": {
+    "p50": 0.228,
+    "p95": 0.336,
+    "p99": 0.456,
+    "max": 0.67
+  },
+  "ms.frameWork(update..presentReturn)": {
+    "p50": 1.576,
+    "p95": 3.038,
+    "p99": 3.912,
+    "max": 11.59
+  },
+  "ms.sourceToPresentReturn": {
+    "p50": -8.564,
+    "p95": -5.342,
+    "p99": -1.437,
+    "max": 688.296
+  },
+  "ms.arrivalToPresentReturn": {
+    "p50": 1.649,
+    "p95": 3.11,
+    "p99": 3.979,
+    "max": 700.464
+  },
+  "frames.contentLag": {
+    "p50": 0,
+    "p95": 1,
+    "p99": 1,
+    "max": 1
+  },
+  "note": "SystemRelativeTime of WGC frames is ~10-12 ms LATER than the callback arrival on this machine, i.e. it behaves like the composition's target vblank, not a render-complete time, so source-based latencies are negative and not used for verdicts. Present return is not photon time: DWM shows the frame at a later vblank (one more refresh period is a reasonable estimate). drawToGpuDone is measured by waiting on an event query right after the draw.",
+  "verdicts": {
+    "frame-work-p95": {
+      "verdict": "Failed",
+      "note": "per-frame work from backdrop update to Present return: p95 3.038 ms, p99 3.912 ms (budget 3 ms)"
+    },
+    "arrival-to-present-p95": {
+      "verdict": "Passed",
+      "note": "capture callback arrival to Present return: p50 1.649 ms, p95 3.11 ms, max 700.464 ms (budget one 60 Hz period)"
+    },
+    "content-lag": {
+      "verdict": "Passed",
+      "note": "drawn backdrop lags the live counter by p50 0 / p95 1 frames at present time"
+    }
+  },
+  "finishedAt": "2026-10-31T19:28:42.4524105+08:00"
+}

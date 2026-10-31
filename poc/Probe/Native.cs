@@ -170,6 +170,9 @@ internal static unsafe partial class Native
     [DllImport("kernel32.dll")] public static extern uint GetTickCount();
     [DllImport("gdi32.dll")] public static extern IntPtr CreateSolidBrush(uint color);
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern bool TextOut(IntPtr hdc, int x, int y, string s, int n);
+    [DllImport("gdi32.dll")] public static extern uint SetTextColor(IntPtr hdc, uint color);
+    [DllImport("gdi32.dll")] public static extern int SetBkMode(IntPtr hdc, int mode);
     [DllImport("gdi32.dll")] public static extern uint GetPixel(IntPtr hdc, int x, int y);
     [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
     [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);

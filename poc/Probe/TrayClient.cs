@@ -56,9 +56,10 @@ internal static unsafe class TrayClient
             cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATA>(), hWnd = hwnd, uID = 1, uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage = CallbackMsg, hIcon = LoadIcon(IntPtr.Zero, new IntPtr(32516)), szTip = tip, szInfo = "", szInfoTitle = "",
         };
-        bool added = Shell_NotifyIcon(NIM_ADD, ref s_nid);
+        bool deferAdd = a.Length > 4 && a[4] == "noadd";
+        bool added = !deferAdd && Shell_NotifyIcon(NIM_ADD, ref s_nid);
         s_nid.uVersion = 4;
-        Shell_NotifyIcon(NIM_SETVERSION, ref s_nid);
+        if (!deferAdd) Shell_NotifyIcon(NIM_SETVERSION, ref s_nid);
         Console.WriteLine($"HWND {hwnd.ToInt64()} ADDED {added}");
         Console.Out.Flush();
         string? cmd = null;
@@ -70,6 +71,28 @@ internal static unsafe class TrayClient
             Pump();
             var c = Interlocked.Exchange(ref cmd, null);
             if (c == "QUIT") break;
+            if (c == "ADD")
+            {
+                var t = System.Diagnostics.Stopwatch.StartNew();
+                bool ok = Shell_NotifyIcon(NIM_ADD, ref s_nid);
+                Console.WriteLine($"ADD ok={ok} ms={t.Elapsed.TotalMilliseconds:F0}");
+                Console.Out.Flush();
+            }
+            if (c != null && c.StartsWith("BURST "))
+            {
+                // NIM_MODIFY n times with a sequence number in the tooltip.
+                int n = int.Parse(c[6..]), ok = 0, fail = 0; double max = 0;
+                var nid = s_nid; nid.uFlags = NIF_TIP;
+                for (int i = 0; i < n; i++)
+                {
+                    nid.szTip = "seq " + i;
+                    var t = System.Diagnostics.Stopwatch.StartNew();
+                    if (Shell_NotifyIcon(1 /* NIM_MODIFY */, ref nid)) ok++; else fail++;
+                    max = Math.Max(max, t.Elapsed.TotalMilliseconds);
+                }
+                Console.WriteLine($"BURST ok={ok} fail={fail} maxms={max:F0}");
+                Console.Out.Flush();
+            }
             if (c == "RECT")
             {
                 var id = new NOTIFYICONIDENTIFIER { cbSize = (uint)Marshal.SizeOf<NOTIFYICONIDENTIFIER>(), hWnd = hwnd, uID = 1 };

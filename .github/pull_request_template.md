@@ -10,6 +10,6 @@
 
 ## Checklist
 
-- [ ] `dotnet build poc/Atrium.Poc.sln -c Release` passes
+- [ ] `dotnet build poc/Atrium.Poc.sln -c Release` and the native CMake build pass
 - [ ] No injection into Explorer/DWM, no system files touched, no security features disabled
 - [ ] No personal content in screenshots or results

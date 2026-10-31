@@ -66,6 +66,17 @@ internal sealed class GlassRenderer : IDisposable
     private readonly Queue<(ID3D11Query Disjoint, ID3D11Query T0, ID3D11Query T1)> _pending = new();
     private readonly Stack<(ID3D11Query, ID3D11Query, ID3D11Query)> _free = new();
     public List<double> GpuMs { get; } = new();
+
+    // Exact echo detection: the ROI as it was when last presented.
+    private readonly ID3D11Texture2D _presented;
+    private readonly ID3D11ShaderResourceView _presentedSrv;
+    private readonly ID3D11ComputeShader _cs;
+    private readonly ID3D11Buffer _cmpCb, _cmpOut, _cmpStaging;
+    private readonly ID3D11UnorderedAccessView _cmpUav;
+    private readonly int _tilesX, _tilesY;
+    private bool _hasPresented;
+    public const int TileSize = 16;
+    public long PresentedFrameId { get; private set; }
     public int Presents;
 
     public GlassRenderer(Gpu gpu, IntPtr hwnd, int w, int h)
@@ -87,6 +98,27 @@ internal sealed class GlassRenderer : IDisposable
             BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget, MiscFlags = ResourceOptionFlags.GenerateMips,
         });
         _roiSrv = dev.CreateShaderResourceView(_roi);
+
+        _presented = dev.CreateTexture2D(new Texture2DDescription
+        {
+            Width = rw, Height = rh, MipLevels = 1, ArraySize = 1, Format = Format.B8G8R8A8_UNorm,
+            SampleDescription = new SampleDescription(1, 0), Usage = ResourceUsage.Default, BindFlags = BindFlags.ShaderResource,
+        });
+        _presentedSrv = dev.CreateShaderResourceView(_presented);
+        var csSrc = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Shaders", "compare.hlsl"));
+        _cs = dev.CreateComputeShader(Compiler.Compile(csSrc, "CS", "compare.hlsl", "cs_5_0", ShaderFlags.OptimizationLevel3, EffectFlags.None).Span);
+        _tilesX = (int)(rw + TileSize - 1) / TileSize; _tilesY = (int)(rh + TileSize - 1) / TileSize;
+        uint n = (uint)(2 + _tilesX * _tilesY);
+        _cmpCb = dev.CreateBuffer(new BufferDescription(16, BindFlags.ConstantBuffer, ResourceUsage.Default));
+        _cmpOut = dev.CreateBuffer(new BufferDescription(n * 4, BindFlags.UnorderedAccess, ResourceUsage.Default, CpuAccessFlags.None, ResourceOptionFlags.BufferStructured, 4));
+        _cmpStaging = dev.CreateBuffer(new BufferDescription(n * 4, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+        _cmpUav = dev.CreateUnorderedAccessView(_cmpOut, new UnorderedAccessViewDescription
+        {
+            ViewDimension = UnorderedAccessViewDimension.Buffer, Format = Format.Unknown,
+            Buffer = new BufferUnorderedAccessView { FirstElement = 0, NumElements = n },
+        });
+        var cp = new uint[] { rw, rh, (uint)_tilesX, TileSize };
+        _gpu.Context.UpdateSubresource(cp, _cmpCb);
 
         if (hwnd != IntPtr.Zero)
         {
@@ -137,6 +169,26 @@ internal sealed class GlassRenderer : IDisposable
         ctx.PSSetShaderResource(0, null!);
     }
 
+    public long PendingFrameId; // id of the capture frame currently in the ROI
+
+    // Two-step variant used for timing: draw into the back buffer, then present.
+    public void Draw(GlassParams p)
+    {
+        if (_swap == null) return;
+        using var back = _swap.GetBuffer<ID3D11Texture2D>(0);
+        using var rtv = _gpu.Device.CreateRenderTargetView(back);
+        Draw(rtv, p);
+        _gpu.Context.CopySubresourceRegion(_presented, 0, 0, 0, 0, _roi, 0);
+        _hasPresented = true;
+        PresentedFrameId = PendingFrameId;
+    }
+
+    public void PresentDrawn()
+    {
+        _swap?.Present(1, PresentFlags.None);
+        Presents++;
+    }
+
     public void RenderAndPresent(GlassParams p)
     {
         if (_swap == null) return;
@@ -151,6 +203,9 @@ internal sealed class GlassRenderer : IDisposable
         ctx.End(q.Item3);
         ctx.End(q.Item1);
         _pending.Enqueue(q);
+        ctx.CopySubresourceRegion(_presented, 0, 0, 0, 0, _roi, 0);
+        _hasPresented = true;
+        PresentedFrameId = PendingFrameId;
         _swap.Present(1, PresentFlags.None);
         Presents++;
         Collect();
@@ -170,35 +225,40 @@ internal sealed class GlassRenderer : IDisposable
         }
     }
 
-    private byte[]? _lastSig;
-    public const int SigMip = 3;
+    // Reads back part of the ROI exactly as it was used for the last present.
+    public byte[] ReadPresented(int x, int y, int w, int h) => _gpu.ReadBack(_presented, x, y, w, h, out _);
 
-    // Reads a coarse mip of the backdrop ROI and reports whether it differs from
-    // the previous call. Used to tell our own present echo from real changes.
-    public bool BackdropChanged(double threshold, out double diff)
+    public readonly record struct Comparison(bool Changed, uint ChangedPixels, uint MaxDiff, int ChangedTiles, double Ms);
+
+    // Compares the current ROI with the ROI that was last presented (not with the
+    // previous capture frame), so slow drifts accumulate until they are drawn.
+    public Comparison CompareWithPresented()
     {
+        if (!_hasPresented) return new Comparison(true, 0, 255, 0, 0);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var ctx = _gpu.Context;
+        ctx.ClearUnorderedAccessView(_cmpUav, new Vortice.Mathematics.Int4(0, 0, 0, 0));
+        ctx.CSSetShader(_cs);
+        ctx.CSSetShaderResources(0, new[] { _roiSrv, _presentedSrv });
+        ctx.CSSetUnorderedAccessView(0, _cmpUav);
+        ctx.CSSetConstantBuffer(0, _cmpCb);
         var d = _roi.Description;
-        uint sw = Math.Max(1u, d.Width >> SigMip), sh = Math.Max(1u, d.Height >> SigMip);
-        using var staging = _gpu.CreateStaging(sw, sh);
-        _gpu.Context.CopySubresourceRegion(staging, 0, 0, 0, 0, _roi, (uint)SigMip);
-        var map = _gpu.Context.Map(staging, 0, MapMode.Read);
-        var sig = new byte[sw * sh * 4];
+        ctx.Dispatch((d.Width + 15) / 16, (d.Height + 15) / 16, 1);
+        ctx.CSSetShaderResources(0, new ID3D11ShaderResourceView[] { null!, null! });
+        ctx.CSSetUnorderedAccessView(0, null!);
+        ctx.CopyResource(_cmpStaging, _cmpOut);
+        var map = ctx.Map(_cmpStaging, 0, MapMode.Read);
         try
         {
-            for (int row = 0; row < sh; row++)
-                Marshal.Copy(map.DataPointer + (nint)(row * map.RowPitch), sig, (int)(row * sw * 4), (int)(sw * 4));
+            unsafe
+            {
+                uint* p = (uint*)map.DataPointer;
+                int tiles = 0;
+                for (int i = 0; i < _tilesX * _tilesY; i++) if (p[2 + i] != 0) tiles++;
+                return new Comparison(p[0] > 0, p[0], p[1], tiles, sw.Elapsed.TotalMilliseconds);
+            }
         }
-        finally { _gpu.Context.Unmap(staging, 0); }
-        diff = 0;
-        if (_lastSig != null && _lastSig.Length == sig.Length)
-        {
-            int max = 0;
-            for (int i = 0; i < sig.Length; i++) max = Math.Max(max, Math.Abs(sig[i] - _lastSig[i]));
-            diff = max;
-        }
-        else diff = 255;
-        _lastSig = sig;
-        return diff > threshold;
+        finally { ctx.Unmap(_cmpStaging, 0); }
     }
 
     // Pure GPU cost without swap-chain waits: n iterations of (ROI copy + mips)
@@ -275,6 +335,7 @@ internal sealed class GlassRenderer : IDisposable
         foreach (var q in _pending) { q.Disjoint.Dispose(); q.T0.Dispose(); q.T1.Dispose(); }
         foreach (var q in _free) { q.Item1.Dispose(); q.Item2.Dispose(); q.Item3.Dispose(); }
         _visual?.Dispose(); _target?.Dispose(); _dcomp?.Dispose(); _swap?.Dispose();
+        _cmpUav.Dispose(); _cmpOut.Dispose(); _cmpStaging.Dispose(); _cmpCb.Dispose(); _cs.Dispose(); _presentedSrv.Dispose(); _presented.Dispose();
         _roiSrv.Dispose(); _roi.Dispose(); _vs.Dispose(); _ps.Dispose(); _cb.Dispose(); _sampler.Dispose(); _blend.Dispose();
     }
 }

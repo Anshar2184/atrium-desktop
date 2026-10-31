@@ -23,19 +23,14 @@ atrium-desktop/
     config/                    # schema、migration、atomic store、pipe protocol
   settings/
     Atrium.Settings/           # C# WinUI 3 csproj / XAML
-  packaging/                   # MSIX、manifest、identity、签名与升级规则
-  poc/
-    capture-glass/             # P01
-    composition-host/          # P02
-    taskbar-recovery/          # P03、P07
-    shell-tray/                # P04；需要时才有 .NET 子工程
-    notification-listener/     # P05，自有测试发送器
-    desktop-host/              # P06
+  packaging/                   # 安装、签名与升级；MSIX 身份随通知中心延后（D15）
+  poc/                         # 已存在：C# 验证探测（Probe、TrayProbe）与 results/
+  native/guard/                # 已存在：原生 Atrium.Guard（D10）
   tests/                       # 纯数据单测和手动验收脚本/清单
   tools/                       # build.ps1、采集测量结果、验证包
 ```
 
-仅当 P04 批准 ManagedShell 时，增加 `bridge/Atrium.ShellBridge/`；它不是必建目录。不建立 plugins SDK、跨平台 renderer interface、service bus 或多个玻璃框架。
+**已取代**：原计划“P04 批准 ManagedShell 时增加 `bridge/Atrium.ShellBridge/`”。现在托盘是 `native/shell` 内的转发模块（D12），不建独立 bridge 进程。不建立 plugins SDK、跨平台 renderer interface、service bus 或多个玻璃框架。
 
 ## 2. 构建与依赖
 
@@ -68,7 +63,6 @@ flowchart TD
     Core --> Platform
     Guard[guard executable] --> Recovery[最小 recovery helper]
     Settings[Settings] -.版本化 IPC.-> Core
-    Bridge[可选 ShellBridge] -.托盘 DTO / actions.-> Core
 ```
 
 不存在 render → shell 或 config → WinUI 依赖。shared model 只包含数据与小型 enum，不变成承载所有功能的“通用框架”。
@@ -83,8 +77,8 @@ flowchart TD
 | Renderer | attach(HWND, OutputKey)、submit(SceneSnapshot)、detach | 仅渲染线程用 GPU；不可变 snapshot；资源不得跨 device generation 使用 |
 | ShellModel | snapshot / events，activate(WindowKey)、launch(PinnedId) | WindowKey 不只 HWND，含 PID/创建代次；应用启动与窗口激活分开 |
 | TaskbarLease | prepare → activate → release | 写恢复记录后才能隐藏；Guard 授权过期必须释放；操作可幂等回滚 |
-| DesktopHostAdapter | probe → attach / detach → status | 返回 PublicTopLevel / ExperimentalDesktopChild / Unsupported，不假装总可用 |
-| NotificationModel | snapshot + delta、dismissLocal、requestSystemDismiss | 系统删除单独语义；权限错误不是“没有通知” |
+| DesktopLayer | onForeground / onMinimizeStart / onMinimizeEnd → raise / lower | 桌面模式 = 所有应用窗口已最小化且前台不是应用窗口（D14）；**已取代**：原 `DesktopHostAdapter` 的 WorkerW 子窗口模式 |
+| NotificationModel | snapshot + delta、dismissLocal、requestSystemDismiss | 系统删除单独语义；权限错误不是“没有通知”。**延后**（D15） |
 | ConfigStore | previewPatch、commit(expectedRevision)、cancel | 一次写者；冲突显式返回；迁移可回退 |
 | HealthSnapshot | uiProgress、renderProgress、state、generation | 真实进展；静止时线程主动确认可响应；睡眠和隐藏有明确状态 |
 

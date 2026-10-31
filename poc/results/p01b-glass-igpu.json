@@ -1,53 +1,53 @@
 {
   "probe": "p01b-glass-igpu",
-  "startedAt": "2026-10-31T17:57:33.9384642+08:00",
+  "startedAt": "2026-10-31T19:31:24.6625321+08:00",
   "os": "Microsoft Windows NT 10.0.26300.0",
-  "idleSecondsAtStart": 59.5,
+  "idleSecondsAtStart": 560.9,
   "window": "850,1776,1500,196",
   "adapter": "Intel(R) Arc(TM) Graphics",
   "wgc.border": "IsBorderRequired=false accepted",
   "wgc.dirty": "DirtyRegionMode=ReportOnly",
   "phase0.captureFps": 2,
-  "phase1.presentFps": 59.7,
-  "phase1.captureFps": 14.2,
-  "phase1.cpuPercentOfMachine": 0.23,
+  "phase1.presentFps": 60.5,
+  "phase1.captureFps": 16.2,
+  "phase1.cpuPercentOfMachine": 0.28,
   "phase1.frameAgeMs.p50": 47,
   "phase1.frameAgeMs.p95": 125,
-  "phase2.captureFps": 53.1,
-  "phase2.presentFps": 53.1,
-  "phase2.cpuPercentOfMachine": 0.41,
-  "phase2.dirty.onlyInsideGlass": 256,
-  "phase2.dirty.elsewhere": 10,
+  "phase2.captureFps": 48.1,
+  "phase2.presentFps": 47.9,
+  "phase2.cpuPercentOfMachine": 0.21,
+  "phase2.dirty.onlyInsideGlass": 230,
+  "phase2.dirty.elsewhere": 11,
   "phase2.dirty.none": 0,
-  "phase2b.captureFps": 8.3,
-  "phase2b.presentFps": 4.2,
-  "phase2b.cpuPercentOfMachine": 0.04,
-  "phase2b.echoSkipped": 24,
+  "phase2b.captureFps": 6,
+  "phase2b.presentFps": 2,
+  "phase2b.cpuPercentOfMachine": 0.02,
+  "phase2b.echoSkipped": 12,
   "phase2b.insideButChangedDrawn": 12,
-  "phase2b.outsideDrawn": 13,
-  "phase2b.signatureMs.p95": 4.144,
-  "phase2b.arrivalToPresentMs.p50": 15,
+  "phase2b.outsideDrawn": 0,
+  "phase2b.signatureMs.p95": 1.674,
+  "phase2b.arrivalToPresentMs.p50": 0,
   "phase2b.arrivalToPresentMs.p95": 16,
-  "bench.throughputMsPerFrame": 0.158,
+  "bench.throughputMsPerFrame": 0.147,
   "bench.updateMs.p50": 0,
   "bench.updateMs.p95": 0,
   "bench.drawMs.p50": 0,
   "bench.drawMs.p95": 0,
   "gpuMs.note": "gpuMs.* brackets the draw into the swap-chain buffer and can include waiting for DWM to release it; bench.* is the pure GPU cost",
-  "gpuMs.samples": 663,
-  "gpuMs.p50": 15.053,
-  "gpuMs.p95": 16.716,
-  "gpuMs.p99": 23.034,
-  "privateMB": 134,
-  "workingSetMB": 131,
+  "gpuMs.samples": 629,
+  "gpuMs.p50": 15.111,
+  "gpuMs.p95": 16.512,
+  "gpuMs.p99": 16.789,
+  "privateMB": 133,
+  "workingSetMB": 136,
   "verdicts": {
     "live-glass-renders": {
       "verdict": "Passed",
-      "note": "666 presents through D3D11 + DirectComposition with WDA exclusion"
+      "note": "631 presents through D3D11 + DirectComposition with WDA exclusion"
     },
     "gpu-budget": {
       "verdict": "Passed",
-      "note": "pure GPU cost 0.15771666666666667 ms per frame (timestamp p95 0, throughput 0.158) for ROI copy+mips+glass draw of a 1500x196 bar (target <= 3 ms)"
+      "note": "pure GPU cost 0.147044 ms per frame (timestamp p95 0, throughput 0.147) for ROI copy+mips+glass draw of a 1500x196 bar (target <= 3 ms)"
     },
     "backdrop-age": {
       "verdict": "Inconclusive",
@@ -55,12 +55,12 @@
     },
     "no-self-echo": {
       "verdict": "Failed",
-      "note": "static phase: 256 capture frames dirty only inside the glass vs 10 elsewhere; capture 53.1 fps vs 2 fps without glass"
+      "note": "static phase: 230 capture frames dirty only inside the glass vs 11 elsewhere; capture 48.1 fps vs 2 fps without glass"
     },
     "echo-filter": {
       "verdict": "Passed",
-      "note": "with filter: capture 8.3 fps, 24 echo frames skipped, 12 real changes under the glass drawn (12 colour flips), 13 outside changes"
+      "note": "with filter: capture 6 fps, 12 echo frames skipped, 12 real changes under the glass drawn (12 colour flips), 0 outside changes"
     }
   },
-  "finishedAt": "2026-10-31T17:57:55.8282066+08:00"
+  "finishedAt": "2026-10-31T19:31:46.5707424+08:00"
 }

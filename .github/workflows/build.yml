@@ -18,3 +18,12 @@ jobs:
           global-json-file: global.json
       - name: Build probes
         run: dotnet build poc/Atrium.Poc.sln -c Release
+
+  native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: cmake --preset win-x64 -S native
+      - name: Build guard
+        run: cmake --build native/build/win-x64 --config Release

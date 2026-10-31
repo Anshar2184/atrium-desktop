@@ -1,0 +1,59 @@
+{
+  "probe": "p01f-echo-slow-changes",
+  "startedAt": "2026-10-31T19:03:47.2392555+08:00",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "adapter": "Intel(R) Arc(TM) Graphics",
+  "gradient.presents": 99,
+  "gradient.lagSteps.p50": 1,
+  "gradient.lagSteps.p95": 2,
+  "gradient.finalPresentedStep": 120,
+  "cursor.toggles": 6,
+  "cursor.delayMs": [
+    30.1,
+    46.9,
+    45.3,
+    46.2,
+    46.5,
+    46
+  ],
+  "text.scrollSteps": 60,
+  "text.distinctPresentedStates": 56,
+  "transient.shown": 4,
+  "transient.captured": 3,
+  "transient.ghostAfter100ms": false,
+  "presents": 168,
+  "compares": 258,
+  "stalenessPresents": 1,
+  "compareMs.p50": 0.863,
+  "compareMs.p95": 2.226,
+  "quiet.captureFrames": 14,
+  "quiet.presents": 1,
+  "finalPresentedEqualsScreen": true,
+  "verdicts": {
+    "slow-gradient": {
+      "verdict": "Passed",
+      "note": "+1 per frame for 120 frames: final drawn step 120/120, lag p95 2 steps"
+    },
+    "one-pixel-cursor": {
+      "verdict": "Passed",
+      "note": "1 px line toggles drawn within (ms): [30.1,46.9,45.3,46.2,46.5,46]"
+    },
+    "low-contrast-scroll": {
+      "verdict": "Passed",
+      "note": "56 distinct drawn states for 60 one-pixel scroll steps of 4-level contrast text"
+    },
+    "transient-no-ghost": {
+      "verdict": "Passed",
+      "note": "one-frame content captured 3/4 times and never left on the glass afterwards"
+    },
+    "quiet-no-echo": {
+      "verdict": "Passed",
+      "note": "quiet 3 s: 1 presents for 14 capture frames"
+    },
+    "final-state": {
+      "verdict": "Passed",
+      "note": "after all changes stop, the drawn backdrop equals the current screen exactly"
+    }
+  },
+  "finishedAt": "2026-10-31T19:04:01.6091127+08:00"
+}

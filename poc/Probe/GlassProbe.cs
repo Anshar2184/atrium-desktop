@@ -145,15 +145,10 @@ internal static class GlassProbe
             lock (gpu.Context)
             {
                 feed.WithLatest(t => { glass.UpdateBackground(t, rx, ry); return 0; });
-                if (inside)
-                {
-                    var sc = Stopwatch.StartNew();
-                    bool changed = glass.BackdropChanged(6, out _);
-                    sigCost.Add(sc.Elapsed.TotalMilliseconds);
-                    if (!changed) { echoSkipped++; continue; }
-                    echoDrawn++;
-                }
-                else { glass.BackdropChanged(6, out _); outsideDrawn++; }
+                var cmp = glass.CompareWithPresented();
+                sigCost.Add(cmp.Ms);
+                if (!cmp.Changed) { if (inside) echoSkipped++; continue; }
+                if (inside) echoDrawn++; else outsideDrawn++;
                 glass.RenderAndPresent(liquid);
             }
             reactMs.Add(Environment.TickCount64 - arrived);

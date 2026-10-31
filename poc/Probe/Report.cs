@@ -37,7 +37,7 @@ internal sealed class Report
         Root["finishedAt"] = DateTimeOffset.Now.ToString("O");
         Directory.CreateDirectory(ResultsDir);
         var path = Path.Combine(ResultsDir, _name + ".json");
-        File.WriteAllText(path, Root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        File.WriteAllText(path, Root.ToJsonString(new JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(), WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
         Console.WriteLine("saved " + path);
         return path;
     }

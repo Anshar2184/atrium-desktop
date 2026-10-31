@@ -121,10 +121,13 @@ internal sealed class TrayClientProc : IDisposable
     public long Hwnd;
     public string First = "";
 
-    public static TrayClientProc Start(string exe, bool readd, string tip)
+    public static TrayClientProc Start(string exe, bool readd, string tip) => StartRaw(exe, $"trayclient 150 {(readd ? 1 : 0)} \"{tip}\"");
+
+    // Starts a child probe whose first stdout line is "HWND <n> ...".
+    public static TrayClientProc StartRaw(string exe, string args)
     {
         var c = new TrayClientProc();
-        c._p = Process.Start(new ProcessStartInfo(exe, $"trayclient 150 {(readd ? 1 : 0)} \"{tip}\"") { RedirectStandardOutput = true, RedirectStandardInput = true, UseShellExecute = false, CreateNoWindow = true })!;
+        c._p = Process.Start(new ProcessStartInfo(exe, args) { RedirectStandardOutput = true, RedirectStandardInput = true, UseShellExecute = false, CreateNoWindow = true })!;
         new Thread(() => { string? l; while ((l = c._p.StandardOutput.ReadLine()) != null) lock (c._lines) c._lines.Add(l); }) { IsBackground = true }.Start();
         var end = Environment.TickCount64 + 5000;
         while (Environment.TickCount64 < end)
@@ -134,6 +137,30 @@ internal sealed class TrayClientProc : IDisposable
         }
         return c;
     }
+
+    public int Mark() { lock (_lines) return _lines.Count; }
+    public void Send(string cmd) => _p.StandardInput.WriteLine(cmd);
+
+    // Waits (pumping this thread's messages) for a line starting with prefix after mark.
+    public string WaitFor(string prefix, int mark, int timeoutMs)
+    {
+        var end = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < end)
+        {
+            lock (_lines) { var r = _lines.Skip(mark).FirstOrDefault(l => l.StartsWith(prefix)); if (r != null) return r; }
+            Native.PumpFor(5);
+        }
+        return prefix + " timeout";
+    }
+
+    public string Command(string cmd, string prefix, int timeoutMs)
+    {
+        int mark = Mark();
+        Send(cmd);
+        return prefix.Length == 0 ? "" : WaitFor(prefix, mark, timeoutMs);
+    }
+
+    public void Kill() { if (!_p.HasExited) _p.Kill(); _p.WaitForExit(2000); }
 
     public string Rect()
     {

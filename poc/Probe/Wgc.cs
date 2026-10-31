@@ -67,8 +67,17 @@ internal static unsafe class Wgc
 
 // A capture session that keeps only the most recent frame copied into a texture
 // owned by us, so the WGC frame can be returned to the pool immediately.
+// Metadata delivered together with the texture it describes. Times are in
+// 100 ns units on the QPC time base (same base as SystemRelativeTime).
+internal sealed record FrameMeta(long Id, long SourceTime, long ArrivalTime, long CopiedTime, IReadOnlyList<Windows.Graphics.RectInt32>? Dirty)
+{
+    public static long Now() => (long)(System.Diagnostics.Stopwatch.GetTimestamp() * (10_000_000.0 / System.Diagnostics.Stopwatch.Frequency));
+}
+
 internal sealed class CaptureFeed : IDisposable
 {
+    private FrameMeta? _meta;
+    private readonly bool _reportDirty;
     private readonly Gpu _gpu;
     private readonly Direct3D11CaptureFramePool _pool;
     private readonly GraphicsCaptureSession _session;
@@ -85,6 +94,7 @@ internal sealed class CaptureFeed : IDisposable
     public CaptureFeed(Gpu gpu, GraphicsCaptureItem item, bool tryBorderless, bool reportDirty = false)
     {
         _gpu = gpu;
+        _reportDirty = reportDirty;
         Size = item.Size;
         var device = Wgc.WrapDevice(gpu.Device);
         _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
@@ -106,9 +116,12 @@ internal sealed class CaptureFeed : IDisposable
 
     private void OnFrame(Direct3D11CaptureFramePool pool, object _)
     {
+        long arrival = FrameMeta.Now();
         using var frame = pool.TryGetNextFrame();
         if (frame == null) return;
         Inspect?.Invoke(frame);
+        IReadOnlyList<Windows.Graphics.RectInt32>? dirty = null;
+        if (_reportDirty) { try { dirty = frame.DirtyRegions.ToList(); } catch { } }
         using var tex = Wgc.TextureOf(frame);
         var desc = tex.Description;
         // Lock order everywhere: device context first, then the frame slot.
@@ -125,6 +138,7 @@ internal sealed class CaptureFeed : IDisposable
                 _latest = _gpu.Device.CreateTexture2D(desc);
             }
             _gpu.Context.CopyResource(_latest, tex);
+            _meta = new FrameMeta(Frames + 1, frame.SystemRelativeTime.Ticks, arrival, FrameMeta.Now(), dirty);
         }
         if (frame.ContentSize.Width != Size.Width || frame.ContentSize.Height != Size.Height)
         {
@@ -139,6 +153,12 @@ internal sealed class CaptureFeed : IDisposable
     {
         lock (_gpu.Context)
         lock (_lock) return _latest == null ? default : f(_latest);
+    }
+
+    public T? WithLatest<T>(Func<ID3D11Texture2D, FrameMeta, T> f)
+    {
+        lock (_gpu.Context)
+        lock (_lock) return _latest == null || _meta == null ? default : f(_latest, _meta);
     }
 
     public bool WaitFrames(int count, int timeoutMs)

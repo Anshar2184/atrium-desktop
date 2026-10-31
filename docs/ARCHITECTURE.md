@@ -1,17 +1,12 @@
 # ARCHITECTURE
 
-> **2026-10-31 验证后修订**（证据见 [VERIFICATION](VERIFICATION.md)）：
-> - 托盘不再以 ManagedShell 为候选依赖，改为 Core 内自写的**转发式托盘桥接**：所有托盘消息同时转发给 Explorer，不修改 Explorer 任务栏的 Z 序；桥接线程只处理消息、绝不阻塞。
-> - 可视表面拆成两个窗口：可点穿的分层显示窗口（DComp）+ 带形状区域的隐形输入窗口；`HTTRANSPARENT` 跨进程无效。
-> - 渲染设备建在实际输出画面的适配器上（混合显卡笔记本上通常是核显）。
-> - 桌面组件只用公开顶层窗口 + 前台事件处理“显示桌面”，不嵌入 WorkerW / Progman。
-> - 接管任务栏时先把 Explorer 切到自动隐藏以释放工作区，退出时恢复用户原设置。
+> 有效决策以 [DECISIONS](DECISIONS.md) 为准，验证证据见 [VERIFICATION](VERIFICATION.md)。本文中标注 **已取代** 的内容只作历史记录。
 
 ## 1. 推荐结论与范围
 
-采用一个负责全部可视表面的 `Atrium.Core.exe`，一个不依赖 GPU 的 `Atrium.Guard.exe`，一个按需启动的 `Atrium.Settings.exe`。Shell 桥接初期是 Core 内的模块，不拆成服务。只有托盘 PoC 证明 ManagedShell 必不可少且可用时，才增加 `Atrium.ShellBridge.exe`。不创建常驻设置 WebView、插件进程群或系统服务。
+采用一个负责全部可视表面的 `Atrium.Core.exe`，一个不依赖 GPU 的 `Atrium.Guard.exe`，一个按需启动的 `Atrium.Settings.exe`。托盘桥接是 Core 内的转发模块（D12），不拆成服务。（**已取代**：原计划在 ManagedShell 通过 P04 后增加 `Atrium.ShellBridge.exe`。）不创建常驻设置 WebView、插件进程群或系统服务。
 
-Core 用 C++20、Win32、C++/WinRT；D3D11/HLSL 计算玻璃，DirectComposition 将交换链合成到窗口；Direct2D 调用 DirectWrite 绘制文字。Settings 推荐 C# / WinUI 3，用命名管道操作 Core。它不拥有 Shell 生命周期，也不拥有另一套玻璃引擎。恢复程序是独立 C++ Win32 可执行文件。
+Core 用 C++20、Win32、C++/WinRT；D3D11/HLSL 计算玻璃，DirectComposition 将交换链合成到窗口；Direct2D 调用 DirectWrite 绘制文字。Settings 推荐 C# / WinUI 3，用命名管道操作 Core。它不拥有 Shell 生命周期，也不拥有另一套玻璃引擎。恢复程序是独立 C++ Win32 可执行文件，已有可运行实现（`native/guard`，D10）。可视表面由可点穿的显示窗口和带形状区域的输入窗口组成（D08），渲染设备建在输出适配器上（D02）。首个纵切默认共存、不自动接管（D16）。
 
 **信心：高（组件组合与职责），中（真实桌面采样体验），低至中（完整 Shell 替换兼容性）。** 官方合成接口和参考源码证明设计路径存在，不证明本机组合已通过。依据见 [D01–D08、R01–R09](SOURCES.md)。
 
@@ -77,7 +72,7 @@ WGC 用 FreeThreaded frame pool 时，回调只取帧并交给有界最新帧槽
 
 ## 5. 生命周期与隐私
 
-启动顺序：Guard 就绪 → Core 建窗、渲染和输入可用 → 校验配置 → 可选授权 → 进入共存 → 请求接管租约 → 写恢复日志 → 最后隐藏系统任务栏。退出顺序相反，先恢复 Explorer，再撤销 AppBar 和关闭自绘表面。没有健康 Guard 时不得隐藏系统任务栏。
+启动顺序：Guard 就绪 → Core 建窗、渲染和输入可用 → 校验配置 → 可选授权 → 进入共存 → 请求接管租约 → 写恢复日志 → 最后隐藏系统任务栏。接管内部已验证的事务顺序见 D09：写状态 → 切自动隐藏 → 写状态 → 隐藏任务栏 → 写状态 → AppBar；Core 通过共享内存发布心跳。退出顺序相反，先恢复 Explorer，再撤销 AppBar 和关闭自绘表面。没有健康 Guard 时不得隐藏系统任务栏。
 
 Core 崩溃或 UI 卡死先恢复系统，不立即无限重启。Guard 被关闭时 Core 也主动恢复。两者被同时强杀、系统死锁或驱动挂死不能保证即时恢复；下次登录/启动修复遗留日志，并提供可从开始菜单、运行框启动的 `Atrium.Guard.exe --restore`。详见 [恢复状态机](WINDOWS-INTEGRATION.md)。
 

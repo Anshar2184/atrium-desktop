@@ -17,15 +17,17 @@ internal sealed class TestWindow : IDisposable
     public bool PaintWithGdi { get; set; }
     public Func<int, int, int>? HitTest { get; set; }
     public int Clicks;
-    public Action? OnClick;          // runs synchronously inside WM_LBUTTONDOWN
+    public Action? OnClick;
+    public Action<IntPtr, RECT>? Painter;
+    public Action? OnUser;                 // WM_USER + 5  // custom GDI paint (hdc, client rect)          // runs synchronously inside WM_LBUTTONDOWN
     public bool AllowActivate;       // answer WM_MOUSEACTIVATE with MA_ACTIVATE
 
-    public TestWindow(int x, int y, int w, int h, uint exStyle, bool gdi, uint color = 0x00FF00FF, string title = "Atrium Probe")
+    public TestWindow(int x, int y, int w, int h, uint exStyle, bool gdi, uint color = 0x00FF00FF, string title = "Atrium Probe", uint style = WS_POPUP)
     {
         Register();
         PaintWithGdi = gdi;
         GdiColor = color;
-        Hwnd = CreateWindowEx(exStyle, ClassName, title, WS_POPUP, x, y, w, h, IntPtr.Zero, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
+        Hwnd = CreateWindowEx(exStyle, ClassName, title, style, x, y, w, h, IntPtr.Zero, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
         if (Hwnd == IntPtr.Zero) throw new InvalidOperationException($"CreateWindowEx failed: {Marshal.GetLastWin32Error()}");
         s_windows[Hwnd] = this;
     }
@@ -73,6 +75,7 @@ internal sealed class TestWindow : IDisposable
                     var brush = CreateSolidBrush(self.GdiColor);
                     FillRect(hdc, ref rc, brush);
                     DeleteObject(brush);
+                    self.Painter?.Invoke(hdc, rc);
                     EndPaint(hwnd, ref ps);
                     return IntPtr.Zero;
                 }
@@ -86,6 +89,9 @@ internal sealed class TestWindow : IDisposable
                 return new IntPtr(1); // MA_ACTIVATE
             case 0x0021: // WM_MOUSEACTIVATE: never take focus from the user's app
                 return new IntPtr(3); // MA_NOACTIVATE
+            case WM_USER + 5 when self?.OnUser != null:
+                self.OnUser();
+                return IntPtr.Zero;
             case WM_LBUTTONDOWN when self != null:
                 Interlocked.Increment(ref self.Clicks);
                 self.OnClick?.Invoke();
