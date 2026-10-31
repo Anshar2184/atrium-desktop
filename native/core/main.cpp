@@ -7,11 +7,16 @@
 #include "resource.h"
 #include "settings.h"
 #include "settings_server.h"
+#include "shell/app_catalog.h"
 #include "shell/task_model.h"
+#include "shell/notification_listener.h"
+#include "ui/notifications.h"
+#include "ui/start_menu.h"
 
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <UIAutomation.h>
 #include <windowsx.h>
 
 #include <winrt/Windows.Foundation.h>
@@ -19,6 +24,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -28,6 +34,9 @@ constexpr wchar_t kHostClass[] = L"AtriumCoreHost";
 constexpr wchar_t kInstanceMutex[] = L"Local\\Atrium.Core";
 constexpr UINT WM_TRAY = WM_APP + 2;
 constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.Core.exe
+constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
+constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
+constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
@@ -41,6 +50,10 @@ struct App {
     std::unique_ptr<Bar> bar;
     std::unique_ptr<SettingsServer> server;
     std::unique_ptr<TaskModel> tasks;
+    std::unique_ptr<AppCatalog> catalog;
+    std::unique_ptr<StartMenu> start;
+    std::unique_ptr<Notifications> notes;
+    std::unique_ptr<NotificationListener> listener;
 };
 
 App g_app;
@@ -91,19 +104,143 @@ void RemoveTrayIcon()
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
-// Win+<key>, a public system shortcut (D11).
-void SendWinShortcut(WORD key)
+// Win+<key> (or Win+Ctrl+<key>), a public system shortcut (D11).
+void SendWinShortcut(WORD key, bool ctrl = false)
 {
-    INPUT in[4] = {};
-    for (auto& i : in)
+    std::vector<INPUT> in;
+    auto add = [&](WORD vk, bool up) {
+        INPUT i{};
         i.type = INPUT_KEYBOARD;
-    in[0].ki.wVk = VK_LWIN;
-    in[1].ki.wVk = key;
-    in[2].ki.wVk = key;
-    in[2].ki.dwFlags = KEYEVENTF_KEYUP;
-    in[3].ki.wVk = VK_LWIN;
-    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(4, in, sizeof(INPUT));
+        i.ki.wVk = vk;
+        i.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+        in.push_back(i);
+    };
+    add(VK_LWIN, false);
+    if (ctrl)
+        add(VK_CONTROL, false);
+    add(key, false);
+    add(key, true);
+    if (ctrl)
+        add(VK_CONTROL, true);
+    add(VK_LWIN, true);
+    SendInput(UINT(in.size()), in.data(), sizeof(INPUT));
+}
+
+// The system tray's hidden icons. Win+B (public shortcut) puts the keyboard
+// focus on the system taskbar's notification area; if that focus is the
+// "show hidden icons" button, it is invoked through UI Automation. Otherwise
+// (no hidden icons, other shell) the tray simply keeps the focus.
+void OpenTray()
+{
+    SendWinShortcut('B');
+    SetTimer(g_app.host, kTrayTimer, 350, nullptr);
+}
+
+void OpenTrayStep2()
+{
+    KillTimer(g_app.host, kTrayTimer);
+    winrt::com_ptr<IUIAutomation> uia;
+    winrt::com_ptr<IUIAutomationElement> focus;
+    if (FAILED(CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()))) ||
+        FAILED(uia->GetFocusedElement(focus.put())) || !focus) {
+        Log(L"tray: no focused element after Win+B");
+        return;
+    }
+    BSTR id = nullptr;
+    focus->get_CurrentAutomationId(&id);
+    std::wstring automationId = id ? id : L"";
+    SysFreeString(id);
+    winrt::com_ptr<IUIAutomationInvokePattern> invoke;
+    if (automationId == L"SystemTrayIcon" &&
+        SUCCEEDED(focus->GetCurrentPatternAs(UIA_InvokePatternId, IID_PPV_ARGS(invoke.put()))) && invoke && SUCCEEDED(invoke->Invoke())) {
+        Log(L"tray: opened the hidden icons");
+        return;
+    }
+    Log(L"tray: focus is on '%s', left there (no hidden-icons button)", automationId.c_str());
+}
+
+void OpenSystem(const std::wstring& what)
+{
+    if (what == L"network")
+        ShellExecuteW(nullptr, L"open", L"ms-availablenetworks:", nullptr, nullptr, SW_SHOWNORMAL);
+    else if (what == L"volume")
+        SendWinShortcut('V', true); // Win+Ctrl+V: sound output in quick settings
+    else if (what == L"battery")
+        ShellExecuteW(nullptr, L"open", L"ms-settings:batterysaver", nullptr, nullptr, SW_SHOWNORMAL);
+    else if (what == L"tray")
+        OpenTray();
+    Log(L"start: system entry %s", what.c_str());
+}
+
+// Test and automation commands from a second process: Atrium.Core.exe --command <verb> [argument]
+void RunCommand(const std::wstring& line)
+{
+    size_t sp = line.find(L' ');
+    std::wstring verb = line.substr(0, sp), arg = sp == std::wstring::npos ? L"" : line.substr(sp + 1);
+    while (!arg.empty() && iswspace(arg.back()))
+        arg.pop_back();
+    while (!verb.empty() && iswspace(verb.back()))
+        verb.pop_back();
+    Log(L"command: %s", line.c_str());
+    if (verb == L"start")
+        g_app.start->Visible() ? g_app.start->Close(false) : g_app.start->Open(g_app.bar->BarRect(), GetForegroundWindow());
+    else if (verb == L"start-type")
+        g_app.start->Type(arg);
+    else if (verb == L"start-key" && !arg.empty())
+        SendMessageW(g_app.start->Hwnd(), WM_CHAR, arg == L"enter" ? 13 : arg == L"esc" ? 27 : arg == L"back" ? 8 : arg[0], 0);
+    else if (verb == L"start-state")
+        g_app.start->LogState();
+    else if (verb == L"notify") {
+        // notify <app>|<title>|<body>|<action>
+        std::vector<std::wstring> f;
+        size_t from = 0;
+        for (;;) {
+            size_t bar = arg.find(L'|', from);
+            f.push_back(arg.substr(from, bar == std::wstring::npos ? std::wstring::npos : bar - from));
+            if (bar == std::wstring::npos)
+                break;
+            from = bar + 1;
+        }
+        f.resize(4);
+        Notice n;
+        n.source = L"test";
+        n.app = f[0];
+        n.appId = f[0];
+        n.title = f[1];
+        n.body = f[2];
+        n.action = f[3];
+        g_app.notes->Post(std::move(n));
+    } else if (verb == L"notify-state")
+        g_app.notes->LogState();
+    else if (verb == L"notify-open")
+        g_app.notes->ToggleCenter();
+    else if (verb == L"notify-clear")
+        g_app.notes->Clear();
+    else if (verb == L"notify-quiet")
+        g_app.notes->SetQuietOverride(_wtoi(arg.c_str()));
+    else if (verb == L"notify-probe") {
+        // Blocking WinRT calls are not allowed on this STA thread.
+        std::wstring result;
+        std::thread([&] {
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+            result = NotificationListener::Probe();
+            winrt::uninit_apartment();
+        }).join();
+        Log(L"listener: probe %s", result.c_str());
+    }
+}
+
+void ToggleStart(RECT)
+{
+    if (g_app.start->Visible()) {
+        g_app.start->Close(false);
+        return;
+    }
+    // A click on the logo while the menu is open first deactivates (closes) it;
+    // that click must not open it again.
+    if (GetTickCount64() - g_app.start->LastClosed() < 400)
+        return;
+    g_app.start->Open(g_app.bar->BarRect(), g_app.bar->PreviousForeground());
 }
 
 void ShowMenu(POINT pt)
@@ -141,9 +278,37 @@ void ShowMenu(POINT pt)
     }
 }
 
+// What clicking a notification does: open its link, or bring its app to the
+// front (start it if it is not running).
+bool RunNoticeAction(const Notice& n)
+{
+    if (n.action.rfind(L"uri:", 0) == 0) {
+        std::wstring target = n.action.substr(4);
+        return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+    }
+    if (n.action.rfind(L"app:", 0) == 0) {
+        std::wstring aumid = n.action.substr(4), key = aumid;
+        for (auto& c : key)
+            c = wchar_t(towlower(c));
+        for (const TaskItem& t : g_app.tasks->Snapshot())
+            if (t.key == key && !t.windows.empty()) {
+                g_app.tasks->Show(key);
+                return true;
+            }
+        std::wstring path = L"shell:AppsFolder\\" + aumid;
+        return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+    }
+    return true; // nothing to run: the click just dismisses it
+}
+
 // Applies settings to the bar and the task model.
 void ApplySettings(const Settings& s)
 {
+    g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody);
+    if (s.notifyListener && !g_app.listener)
+        g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
+    else if (!s.notifyListener && g_app.listener)
+        g_app.listener.reset();
     g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
     g_app.tasks->SetShowRunning(s.showRunning);
     g_app.bar->Apply(s);
@@ -205,6 +370,56 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
         OpenSettings();
         break;
     }
+}
+
+// 32-bit premultiplied DIB for a menu item image.
+HBITMAP MenuBitmap(const IconImage& img)
+{
+    if (img.empty())
+        return nullptr;
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = img.width;
+    bi.bmiHeader.biHeight = -img.height;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (bmp && bits)
+        memcpy(bits, img.bgra.data(), img.bgra.size());
+    return bmp;
+}
+
+// The overflow entry: the apps that did not fit, as a menu above the entry.
+void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
+{
+    std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    HMENU menu = CreatePopupMenu();
+    std::vector<HBITMAP> bitmaps;
+    int px = GetSystemMetrics(SM_CXSMICON);
+    for (size_t i = 0; i < keys.size(); ++i) {
+        auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == keys[i]; });
+        std::wstring name = it != items.end() ? it->name : keys[i];
+        if (it != items.end() && !it->windows.empty())
+            name += it->windows.size() > 1 ? L"  \u00B7 " + std::to_wstring(it->windows.size()) : L"  \u00B7";
+        MENUITEMINFOW mi{sizeof(mi)};
+        mi.fMask = MIIM_ID | MIIM_STRING | MIIM_BITMAP;
+        mi.wID = UINT(1000 + i);
+        mi.dwTypeData = name.data();
+        mi.hbmpItem = MenuBitmap(g_app.tasks->Icon(keys[i], px));
+        if (mi.hbmpItem)
+            bitmaps.push_back(mi.hbmpItem);
+        InsertMenuItemW(menu, UINT(i), TRUE, &mi);
+    }
+    SetForegroundWindow(g_app.host);
+    UINT cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_CENTERALIGN, (anchor.left + anchor.right) / 2,
+                                anchor.top - 8, g_app.host, nullptr);
+    DestroyMenu(menu);
+    for (HBITMAP b : bitmaps)
+        DeleteObject(b);
+    PostMessageW(g_app.host, WM_NULL, 0, 0);
+    if (cmd >= 1000 && cmd < 1000 + keys.size())
+        g_app.tasks->Activate(keys[cmd - 1000]);
 }
 
 // An app dropped at visible position `to` (in the list without it). Pinned
@@ -278,6 +493,29 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_OPEN_SETTINGS:
         OpenSettings();
         return 0;
+    case WM_COPYDATA: {
+        auto* cd = reinterpret_cast<const COPYDATASTRUCT*>(l);
+        if (cd && cd->dwData == 0xA7C0 && cd->cbData % sizeof(wchar_t) == 0 && cd->cbData < 8192)
+            RunCommand(std::wstring(static_cast<const wchar_t*>(cd->lpData), cd->cbData / sizeof(wchar_t)));
+        return TRUE;
+    }
+    case WM_NOTICE:
+        if (auto* n = reinterpret_cast<Notice*>(l)) {
+            if (g_app.notes && g_app.listener)
+                g_app.notes->Post(*n);
+            delete n;
+        }
+        return 0;
+    case WM_CATALOG:
+        if (g_app.start)
+            g_app.start->Refresh();
+        return 0;
+    case WM_TIMER:
+        if (w == kTrayTimer) {
+            OpenTrayStep2();
+            return 0;
+        }
+        break;
     case WM_ATRIUM_SETTINGS:
         ApplySettings(g_app.server->Current());
         return 0;
@@ -319,6 +557,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
             CloseHandle(process);
         return wait == WAIT_OBJECT_0 ? 0 : 1;
     }
+    // `Atrium.Core.exe --command <verb> [argument]` hands a command to the running instance.
+    if (const wchar_t* c = wcsstr(cmdLine, L"--command ")) {
+        HWND other = FindWindowW(kHostClass, nullptr);
+        if (!other)
+            return 2;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(other, &pid);
+        AllowSetForegroundWindow(pid);
+        std::wstring text(c + 10);
+        COPYDATASTRUCT cd{0xA7C0, DWORD(text.size() * sizeof(wchar_t)), text.data()};
+        DWORD_PTR result = 0;
+        return SendMessageTimeoutW(other, WM_COPYDATA, 0, LPARAM(&cd), SMTO_ABORTIFHUNG, 5000, &result) ? 0 : 1;
+    }
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // Already running: launching it again opens the settings instead.
@@ -348,13 +599,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         Log(L"core: imported %zu Windows taskbar pins", settings.pins->size());
     }
     g_app.bar = std::make_unique<Bar>(instance, wcsstr(cmdLine, L"--debug-capturable") != nullptr, wcsstr(cmdLine, L"--debug-layout") != nullptr);
-    g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] { g_app.bar->SetItems(g_app.tasks->Snapshot()); });
+    g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
+        g_app.bar->SetItems(g_app.tasks->Snapshot());
+        if (g_app.start)
+            g_app.start->Refresh();
+    });
+    g_app.catalog = std::make_unique<AppCatalog>(g_app.host, WM_CATALOG);
+    g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
+    g_app.start->onSystem = OpenSystem;
+    g_app.notes = std::make_unique<Notifications>(instance);
+    g_app.notes->bellRect = [] { return g_app.bar->EntryRect(L"#notify"); };
+    g_app.notes->barRect = [] { return g_app.bar->BarRect(); };
+    g_app.notes->onUnread = [](int n) { g_app.bar->SetUnread(n); };
+    g_app.notes->onActivate = RunNoticeAction;
     g_app.bar->iconProvider = [](const std::wstring& key, int px) { return g_app.tasks->Icon(key, px); };
     g_app.bar->onActivate = [](const std::wstring& key) { g_app.tasks->Activate(key); };
     g_app.bar->onLaunch = [](const std::wstring& key) { g_app.tasks->Launch(key); };
     g_app.bar->onItemMenu = ShowItemMenu;
     g_app.bar->onClockClick = OpenCalendar;
     g_app.bar->onReorder = Reorder;
+    g_app.bar->onOverflow = ShowOverflow;
+    g_app.bar->onStartClick = ToggleStart;
+    g_app.bar->onNotifyClick = [](RECT) { g_app.notes->ToggleCenter(); };
     g_app.bar->onFileDragHover = [](const std::wstring& key) { g_app.tasks->Show(key); };
     g_app.bar->canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
     g_app.bar->onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
@@ -363,6 +629,27 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ApplySettings(settings);
     g_app.bar->SetItems(g_app.tasks->Snapshot());
     g_app.server = std::make_unique<SettingsServer>(g_app.host, settings);
+    g_app.start->onPin = [](const PinnedApp& pin) {
+        g_app.server->Modify([&](Settings& s) {
+            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+            if (std::find(pins.begin(), pins.end(), pin) == pins.end() && pins.size() < 64)
+                pins.push_back(pin);
+            s.pins = std::move(pins);
+        });
+    };
+    g_app.start->onUnpin = [](const std::wstring& key) {
+        std::vector<TaskItem> items = g_app.tasks->Snapshot();
+        auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key && t.pinned; });
+        if (it == items.end())
+            return;
+        int index = it->pinIndex;
+        g_app.server->Modify([&](Settings& s) {
+            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+            if (index >= 0 && index < int(pins.size()))
+                pins.erase(pins.begin() + index);
+            s.pins = std::move(pins);
+        });
+    };
     AddTrayIcon();
 
     MSG msg;
@@ -371,6 +658,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         DispatchMessageW(&msg);
     }
     g_app.server.reset();
+    g_app.listener.reset();
+    g_app.notes.reset();
+    g_app.start.reset();
+    g_app.catalog.reset();
     g_app.tasks.reset();
     g_app.bar.reset();
     Log(L"core: exited");

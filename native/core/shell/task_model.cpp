@@ -1389,6 +1389,15 @@ struct TaskModel::Impl {
 
 TaskModel::Impl* TaskModel::Impl::self = nullptr;
 
+bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out)
+{
+    try {
+        return ShellImage(parsingName, sizePx, out);
+    } catch (...) {
+        return false;
+    }
+}
+
 // ---- TaskModel: every entry point is exception-safe -----------------------------
 
 TaskModel::TaskModel(HWND uiWindow, std::function<void()> onChanged)

@@ -65,12 +65,19 @@ public sealed partial class MainWindow : Window
             Illustrations.IconSize, s => s.IconSize, (s, v) => s.IconSize = v, false),
     };
 
+    private SliderDef[] NotifySliders => new SliderDef[]
+    {
+        new("通知停留时间", "新通知弹出后停留多久；鼠标停在卡片上时不会消失。", 3, 30, 1, "s", "3 s", "30 s",
+            v => v <= 4 ? "一闪而过" : v <= 10 ? "适中" : "从容阅读",
+            Illustrations.NotifyTimeout, s => s.NotifyTimeout, (s, v) => s.NotifyTimeout = v, false),
+    };
+
     private static readonly (string Overline, string Title, string Subtitle)[] PageInfo =
     {
         ("01 · MATERIAL", "材质", "玻璃的质感：通透、模糊、折射与光。"),
         ("02 · SHAPE", "形状", "玻璃栏的轮廓与位置：圆角、尺寸与间距。"),
         ("03 · PINNED", "固定的应用", "拖动卡片排序，决定它们在玻璃栏上的先后。"),
-        ("04 · CONTENT", "内容", "栏上显示什么，以及文字如何适应背景。"),
+        ("04 · CONTENT", "内容", "栏上显示什么、文字如何适应背景，以及通知。"),
         ("05 · ABOUT", "关于", "一条悬浮在桌面底部的玻璃任务栏。"),
     };
 
@@ -161,6 +168,8 @@ public sealed partial class MainWindow : Window
         var layout = LayoutSliders;
         for (int i = 0; i < layout.Length; i++)
             LayoutGrid.Children.Insert(i < 2 ? i : i + 1, CreateCard(layout[i]));
+        foreach (var d in NotifySliders)
+            NotifyGrid.Children.Insert(0, CreateCard(d));
 
         var tint = Illustrations.Tint();
         TintGlyphHost.Child = tint.Root;
@@ -321,6 +330,8 @@ public sealed partial class MainWindow : Window
         ClockSwitch.IsOn = _current.ShowClock;
         AutoWidthSwitch.IsOn = _current.AutoWidth;
         RunningSwitch.IsOn = _current.ShowRunning;
+        HideBodySwitch.IsOn = _current.NotifyHideBody;
+        ListenerSwitch.IsOn = _current.NotifyListener;
         _autoWidthGlyph?.Update(_current.AutoWidth ? 1 : 0);
         _clockGlyph?.Update(_current.ShowClock ? 1 : 0);
         _runningGlyph?.Update(_current.ShowRunning ? 1 : 0);
@@ -393,6 +404,20 @@ public sealed partial class MainWindow : Window
         _runningGlyph?.Update(RunningSwitch.IsOn ? 1 : 0);
         if (_loading) return;
         _current.ShowRunning = RunningSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnHideBodyToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.NotifyHideBody = HideBodySwitch.IsOn;
+        Changed();
+    }
+
+    private void OnListenerToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.NotifyListener = ListenerSwitch.IsOn;
         Changed();
     }
 

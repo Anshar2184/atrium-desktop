@@ -67,6 +67,7 @@ void Settings::Clamp()
     c(height, 32, 160, d.height);
     c(margin, 0, 400, d.margin);
     c(iconSize, 16, 64, d.iconSize);
+    c(notifyTimeout, 3, 30, d.notifyTimeout);
     tint &= 0xFFFFFF;
     if (textColor != L"light" && textColor != L"dark")
         textColor = L"auto";
@@ -101,6 +102,9 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
     o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
     o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
+    num(L"notifyTimeout", notifyTimeout);
+    o.SetNamedValue(L"notifyHideBody", json::JsonValue::CreateBooleanValue(notifyHideBody));
+    o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
     if (pins) {
         json::JsonArray a;
         for (const auto& p : *pins) {
@@ -152,6 +156,9 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"showClock", s.showClock);
     flag(L"autoWidth", s.autoWidth);
     flag(L"showRunning", s.showRunning);
+    num(L"notifyTimeout", s.notifyTimeout);
+    flag(L"notifyHideBody", s.notifyHideBody);
+    flag(L"notifyListener", s.notifyListener);
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
         s.textColor = std::wstring(o.GetNamedString(L"textColor"));
     if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {

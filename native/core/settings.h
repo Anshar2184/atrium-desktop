@@ -37,6 +37,10 @@ struct Settings {
     bool showClock = true;
     bool showRunning = true;
     std::wstring textColor = L"auto"; // auto | light | dark
+    // Notifications (Atrium's own cards above the bell).
+    double notifyTimeout = 6;        // seconds a popup stays (3..30)
+    bool notifyHideBody = false;     // privacy: no message text; cards excluded from screen capture
+    bool notifyListener = false;     // experimental: mirror Windows notifications (UserNotificationListener)
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;
 

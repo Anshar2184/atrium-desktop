@@ -30,6 +30,12 @@ add_executable(atrium_core WIN32
     settings.cpp
     settings_server.cpp
     shell/task_model.cpp
+    shell/app_catalog.cpp
+    shell/system_status.cpp
+    ui/surface.cpp
+    ui/start_menu.cpp
+    ui/notifications.cpp
+    shell/notification_listener.cpp
     render/bar_painter.cpp
     render/capture.cpp
     render/glass_renderer.cpp
@@ -48,7 +54,7 @@ target_include_directories(atrium_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 set(atrium_task_libs windowsapp dwmapi version propsys shlwapi ole32 oleaut32 uuid shell32 user32 gdi32)
 target_link_libraries(atrium_core PRIVATE
     windowsapp d3d11 dxgi dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32
-    dwmapi version propsys shlwapi oleaut32 uuid)
+    dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof)
 
 # Console probe for the task model (not part of the default build):
 #   atrium_task_probe.exe <seconds> <icon-dir> [--selftest]

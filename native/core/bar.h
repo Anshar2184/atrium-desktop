@@ -42,6 +42,14 @@ public:
     void Relayout();
     void SetVisible(bool visible);
     bool Visible() const { return visible_; }
+    // Unread notifications, shown as a badge on the bell.
+    void SetUnread(int count);
+    // Screen rectangle of an entry ("#start", "#notify", an app key); empty if not shown.
+    RECT EntryRect(const std::wstring& key) const;
+    // Screen rectangle of the glass shape.
+    RECT BarRect() const;
+    // The window that had the foreground before a click on the logo activated the bar.
+    HWND PreviousForeground() const { return previousForeground_; }
 
     std::function<IconImage(const std::wstring& key, int px)> iconProvider;
     std::function<void(const std::wstring& key)> onActivate;  // left click on an app
@@ -49,6 +57,11 @@ public:
     std::function<void(const std::wstring& key, POINT)> onItemMenu; // right click on an app
     std::function<void(POINT)> onContextMenu;                 // right click elsewhere on the bar
     std::function<void()> onClockClick;
+    // Bar entries; `anchor` is the entry's rectangle on screen (popups open above it).
+    std::function<void(RECT anchor)> onStartClick;  // the Atrium logo
+    std::function<void(RECT anchor)> onNotifyClick; // the notification bell
+    // The overflow entry: apps that did not fit, in bar order.
+    std::function<void(const std::vector<std::wstring>& keys, RECT anchor)> onOverflow;
     // Drag and drop of an app to visible position `toIndex` (0-based, in the
     // list without the dragged item). The bar already shows the new order.
     std::function<void(const std::wstring& key, int toIndex)> onReorder;
@@ -124,6 +137,9 @@ private:
     int dragX_ = 0, dragY_ = 0, grabDx_ = 0;
     // App strip metrics of the last layout (client px).
     int appsLeft_ = 0, pitch_ = 1, plate_ = 0, gap_ = 0, shown_ = 0;
+    std::vector<std::wstring> hidden_; // apps behind the overflow entry
+    int unread_ = 0;
+    HWND previousForeground_ = nullptr;
     RECT applied_{};      // last window rect given to SetWindowPos
     int appliedRgn_[4]{}; // bar width, height, radius and inset of the last region
     bool appliedVisible_ = false;

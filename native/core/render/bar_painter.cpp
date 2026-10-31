@@ -41,13 +41,12 @@ BarPainter::BarPainter(ID2D1DeviceContext2* d2d, IDWriteFactory3* dwrite)
     winrt::check_hresult(d2d->CreateEffect(CLSID_D2D1Shadow, shadow_.put()));
 }
 
-IDWriteTextFormat* BarPainter::Format(float px, DWRITE_FONT_WEIGHT weight)
+IDWriteTextFormat* BarPainter::Format(float px, DWRITE_FONT_WEIGHT weight, const wchar_t* family)
 {
-    auto key = std::make_pair(int(std::lround(px * 4)), int(weight));
+    auto key = std::make_tuple(int(std::lround(px * 4)), int(weight), std::wstring(family));
     auto& f = formats_[key];
     if (!f) {
-        dwrite_->CreateTextFormat(L"Segoe UI Variable Text", nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"",
-                                  f.put());
+        dwrite_->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put());
         if (f) {
             f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -107,6 +106,8 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     };
     for (const auto& it : scene.items)
         step(it.key, &it.plate);
+    for (const auto& it : scene.extras)
+        step(it.key, &it.plate);
     step(L"#clock", nullptr);
     for (auto it = motion_.begin(); it != motion_.end();)
         it = alive.count(it->first) ? std::next(it) : motion_.erase(it);
@@ -158,6 +159,8 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
     d2d->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE); // premultiplied target: no ClearType
 
     usedBitmaps_.clear();
+    for (const auto& it : scene.extras) // the bell follows the clock's ink, the others the apps'
+        DrawItem(d2d, scene, it, brush.get(), it.key == L"#notify" ? inkFor(darkText) : ink, it.key == L"#notify" ? washFor(darkText) : wash);
     for (const auto& it : scene.items)
         if (it.key != scene.dragKey)
             DrawItem(d2d, scene, it, brush.get(), ink, wash);
@@ -231,7 +234,14 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float k = (1 + 0.06f * hover + 0.08f * lift) * (1 - 0.08f * m.press) * (0.85f + 0.15f * m.appear);
     float up = -1.5f * s * hover - 2.0f * s * lift;
     d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(cx, cy)) * D2D1::Matrix3x2F::Translation(0, up));
-    if (ID2D1Bitmap1* bmp = BitmapFor(d2d, it)) {
+    if (it.key == L"#start") {
+        DrawMark(d2d, icon, m.appear);
+    } else if (!it.glyph.empty()) {
+        if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+            brush->SetColor(ink);
+            d2d->DrawText(it.glyph.c_str(), UINT32(it.glyph.size()), f, icon, brush);
+        }
+    } else if (ID2D1Bitmap1* bmp = BitmapFor(d2d, it)) {
         usedBitmaps_.insert(it.imageId);
         shadow_->SetInput(0, bmp);
         shadow_->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, (1.6f + 1.6f * lift) * s);
@@ -251,6 +261,18 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         brush->SetColor(c);
         d2d->FillRoundedRectangle(D2D1::RoundedRect(icon, size * 0.22f, size * 0.22f), brush);
     }
+    // Count badge (unread notifications): a small accent disc on the icon's corner.
+    if (it.badge > 0) {
+        float d = std::max(9.f * s, size * 0.46f);
+        float bx = icon.right - d * 0.35f, by = icon.top + d * 0.15f;
+        brush->SetColor(D2D1::ColorF(0.04f, 0.52f, 1.0f, 1.0f));
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bx, by), d / 2, d / 2), brush);
+        std::wstring n = it.badge > 9 ? L"9+" : std::to_wstring(it.badge);
+        if (IDWriteTextFormat* f = Format(d * 0.62f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
+            brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
+            d2d->DrawText(n.c_str(), UINT32(n.size()), f, D2D1::RectF(bx - d, by - d / 2, bx + d, by + d / 2), brush);
+        }
+    }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());
 
     // Running indicator, centred between the icon and the plate's lower edge:
@@ -265,6 +287,35 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         c.a *= 1 - lift;
         brush->SetColor(c);
         d2d->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(cx - w / 2, y, cx + w / 2, y + h), h / 2, h / 2), brush);
+    }
+}
+
+// The Atrium mark (as in the settings app): a glass capsule on a violet-to-cyan
+// tile.
+void BarPainter::DrawMark(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity)
+{
+    float w = r.right - r.left, h = r.bottom - r.top;
+    D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(0x8B5CF6, opacity)}, {0.55f, D2D1::ColorF(0x3B82F6, opacity)}, {1.f, D2D1::ColorF(0x22D3EE, opacity)}};
+    winrt::com_ptr<ID2D1GradientStopCollection> coll;
+    winrt::com_ptr<ID2D1LinearGradientBrush> grad;
+    if (FAILED(d2d->CreateGradientStopCollection(stops, 3, coll.put())) ||
+        FAILED(d2d->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(r.left, r.top), D2D1::Point2F(r.right, r.bottom)),
+                                              coll.get(), grad.put())))
+        return;
+    d2d->FillRoundedRectangle(D2D1::RoundedRect(r, w * 0.28f, h * 0.28f), grad.get());
+    winrt::com_ptr<ID2D1SolidColorBrush> b;
+    d2d->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.20f * opacity), b.put());
+    d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(r.left + w * 0.36f, r.top + h * 0.33f), w * 0.23f, h * 0.23f), b.get());
+    D2D1_RECT_F cap = D2D1::RectF(r.left + w * 0.16f, r.top + h * 0.46f, r.right - w * 0.16f, r.top + h * 0.80f);
+    float cr = (cap.bottom - cap.top) / 2;
+    b->SetColor(D2D1::ColorF(1, 1, 1, 0.30f * opacity));
+    d2d->FillRoundedRectangle(D2D1::RoundedRect(cap, cr, cr), b.get());
+    b->SetColor(D2D1::ColorF(1, 1, 1, 0.75f * opacity));
+    d2d->DrawRoundedRectangle(D2D1::RoundedRect(cap, cr, cr), b.get(), std::max(1.f, w * 0.025f));
+    float cy = (cap.top + cap.bottom) / 2, dot = w * 0.04f;
+    for (int i = 0; i < 4; ++i) {
+        b->SetColor(D2D1::ColorF(1, 1, 1, (i < 3 ? 0.9f : 0.6f) * opacity));
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(r.left + w * (0.335f + 0.11f * float(i)), cy), dot, dot), b.get());
     }
 }
 

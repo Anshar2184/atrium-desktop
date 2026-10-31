@@ -42,6 +42,11 @@ struct TaskItem {
     uint64_t iconVersion = 0;  // changes when the icon should be fetched again
 };
 
+// Icon of a shell item (a path or "shell:AppsFolder\\<id>") through
+// IShellItemImageFactory, square, premultiplied. Blocking; call it off the UI
+// thread. COM must be initialised on the calling thread.
+bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out);
+
 class TaskModel {
 public:
     // Calls `onChanged` on the UI thread (coalesced, at most every ~30 ms)

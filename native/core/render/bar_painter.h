@@ -13,6 +13,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace atrium {
@@ -26,12 +27,15 @@ struct SceneItem {
     bool running = false;
     bool active = false;
     bool attention = false;
+    std::wstring glyph;        // Segoe Fluent Icons glyph instead of an image (bar entries)
+    int badge = 0;             // > 0: count badge on the icon (unread notifications)
 };
 
 struct BarScene {
     D2D1_RECT_F bar{};         // the glass shape inside the window
     float scale = 1;
-    std::vector<SceneItem> items;
+    std::vector<SceneItem> items;  // apps only (drag and drop works on these)
+    std::vector<SceneItem> extras; // Atrium logo (#start), overflow (#more), notifications (#notify)
     float separatorX = -1;     // < 0: none
     D2D1_RECT_F clock{};       // empty: no clock
     float timePx = 0, datePx = 0;
@@ -62,7 +66,8 @@ public:
 private:
     void DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date);
     ID2D1Bitmap1* BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& item);
-    IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT weight);
+    IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT weight, const wchar_t* family = L"Segoe UI Variable Text");
+    void DrawMark(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
 
     struct Motion {
         float hover = 0;   // 0..1
@@ -79,7 +84,7 @@ private:
     std::map<std::wstring, Motion> motion_;
     std::map<uint64_t, winrt::com_ptr<ID2D1Bitmap1>> bitmaps_;
     std::set<uint64_t> usedBitmaps_; // during one DrawContent
-    std::map<std::pair<int, int>, winrt::com_ptr<IDWriteTextFormat>> formats_;
+    std::map<std::tuple<int, int, std::wstring>, winrt::com_ptr<IDWriteTextFormat>> formats_;
     double lastMs_ = 0;
     D2D1_RECT_F lastBar_{};
     winrt::com_ptr<ID2D1Bitmap1> layer_;

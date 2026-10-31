@@ -265,6 +265,18 @@ internal static class Illustrations
         return (c, col => drop.Fill = new SolidColorBrush(col));
     }
 
+    // A notification card whose time bar runs out: longer bar, longer stay.
+    public static Illustration NotifyTimeout()
+    {
+        var c = NewCanvas();
+        c.Children.Add(Rect("GlyphInkStyle", 4, 7, 40, 26, 7));
+        c.Children.Add(Rect("GlyphInkFillStyle", 10, 13, 18, 3, 1.5, 0.8));
+        c.Children.Add(Rect("GlyphInkFillStyle", 10, 19, 26, 2.5, 1.25, 0.35));
+        var bar = Rect("GlyphAccentFillStyle", 10, 26, 28, 2.5, 1.25);
+        c.Children.Add(bar);
+        return Wrap(c, v => Place(bar, 10, 26, 4 + 24 * v, 2.5, 1.25));
+    }
+
     public static Illustration ClockToggle()
     {
         var c = NewCanvas();

@@ -27,6 +27,9 @@ internal sealed class BarSettings
     public bool ShowClock { get; set; } = true;
     public bool ShowRunning { get; set; } = true;
     public string TextColor { get; set; } = "auto"; // auto | light | dark
+    public double NotifyTimeout { get; set; } = 6;    // seconds a popup stays
+    public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
+    public bool NotifyListener { get; set; }           // experimental: mirror Windows notifications
     // Null = the key was absent (never saved); the core then imports the Windows pins.
     public List<PinnedApp>? Pins { get; set; }
 
@@ -76,6 +79,9 @@ internal sealed class BarSettings
             ["autoWidth"] = AutoWidth,
             ["showRunning"] = ShowRunning,
             ["textColor"] = TextColor,
+            ["notifyTimeout"] = NotifyTimeout,
+            ["notifyHideBody"] = NotifyHideBody,
+            ["notifyListener"] = NotifyListener,
         };
         if (Pins != null)
         {
@@ -114,6 +120,9 @@ internal sealed class BarSettings
         s.ShowClock = Flag("showClock", f.ShowClock);
         s.AutoWidth = Flag("autoWidth", f.AutoWidth);
         s.ShowRunning = Flag("showRunning", f.ShowRunning);
+        s.NotifyTimeout = Math.Clamp(Num("notifyTimeout", f.NotifyTimeout), 3, 30);
+        s.NotifyHideBody = Flag("notifyHideBody", f.NotifyHideBody);
+        s.NotifyListener = Flag("notifyListener", f.NotifyListener);
         s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
             ? (tcs is "light" or "dark" ? tcs : "auto")
             : f.TextColor;

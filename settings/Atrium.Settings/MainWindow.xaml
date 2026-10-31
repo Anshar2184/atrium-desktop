@@ -374,7 +374,9 @@
 
                         <!-- 04 Content -->
                         <ScrollViewer x:Name="PageContent" Visibility="Collapsed">
-                            <local:ResponsiveGrid MinCellWidth="340" Gap="16" MaxWidth="960" Margin="40,24,40,32">
+                            <StackPanel MaxWidth="960" Margin="40,24,40,32" Spacing="12">
+                            <TextBlock Text="玻璃栏" Style="{StaticResource SectionLabelStyle}" />
+                            <local:ResponsiveGrid MinCellWidth="340" Gap="16">
                                 <Border Style="{StaticResource CardSurfaceStyle}">
                                     <Grid RowSpacing="12">
                                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
@@ -458,6 +460,51 @@
                                     </Grid>
                                 </Border>
                             </local:ResponsiveGrid>
+
+                            <TextBlock Text="通知" Style="{StaticResource SectionLabelStyle}" Margin="0,12,0,0" />
+                            <local:ResponsiveGrid x:Name="NotifyGrid" MinCellWidth="340" Gap="16">
+                                <!-- The timeout card is inserted first in code. -->
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE72E;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1" Text="隐藏通知正文" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
+                                            <ToggleSwitch x:Name="HideBodySwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
+                                                          AutomationProperties.Name="隐藏通知正文" VerticalAlignment="Center" Toggled="OnHideBodyToggled" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="卡片只显示应用和标题，正文显示为“内容已隐藏”；通知窗口同时不会出现在截图和屏幕共享里。演示模式下自动隐藏。" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE7E7;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                <TextBlock Text="显示 Windows 通知" Style="{StaticResource CardTitleStyle}" />
+                                                <TextBlock Text="实验" Style="{StaticResource HintStyle}" />
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="ListenerSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
+                                                          AutomationProperties.Name="显示 Windows 通知" VerticalAlignment="Center" Toggled="OnListenerToggled" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="把其他应用的通知也显示为 Atrium 卡片。Windows 自己的通知横幅仍会出现（Atrium 不会关闭你的系统通知），所以同一条通知会看到两次。需要在 Windows 隐私设置中允许访问通知。" />
+                                    </Grid>
+                                </Border>
+                            </local:ResponsiveGrid>
+                            </StackPanel>
                         </ScrollViewer>
 
                         <!-- 05 About -->

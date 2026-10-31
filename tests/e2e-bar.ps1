@@ -5,7 +5,7 @@
   the calendar from the clock, reorder pins by drag and drop, cancel a drag by
   dropping away from the bar, pin a running app by dragging it among the
   pins, bring an app to the front by holding a dragged file over it, and open
-  a dropped file with a pinned app.
+  a dropped file with a pinned app, and the overflow entry of a narrow bar.
 
 .DESCRIPTION
   Uses two test windows of its own (WinForms in child processes), moves the
@@ -187,6 +187,19 @@ try {
         "SKIP file-drag: PowerShell 7 (pwsh.exe) is not installed"
     }
     Remove-Item $drop -ErrorAction SilentlyContinue
+
+    # Overflow: a narrow bar keeps the apps that do not fit behind an entry.
+    Start-Process $Core -ArgumentList "--exit" -Wait
+    [IO.File]::WriteAllText($file, '{"showRunning":true,"showClock":true,"width":300,"pins":[' + ($pins -join ",") + ']}')
+    $script:logStart = @(Get-Content $logFile -Encoding UTF8).Count
+    Start-Process $Core -ArgumentList "--debug-layout"
+    Start-Sleep 2
+    $more = ItemRect "#more"
+    Click $more
+    $menu = [U]::FindWindow("#32768", [NullString]::Value)
+    Check "overflow-entry" ($menu -ne [IntPtr]::Zero) "a 300 DIP bar shows the overflow entry; clicking it lists the hidden apps in a menu"
+    [U]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [U]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
+    Start-Sleep 0.3
 }
 finally {
     foreach ($p in $children) { if (-not $p.HasExited) { $p.Kill() } }

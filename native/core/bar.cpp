@@ -24,6 +24,11 @@ namespace {
 constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
 constexpr wchar_t kClockKey[] = L"#clock";
+constexpr wchar_t kStartKey[] = L"#start";
+constexpr wchar_t kNotifyKey[] = L"#notify";
+constexpr wchar_t kMoreKey[] = L"#more";
+// Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
+bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
 constexpr UINT_PTR kTooltipTimer = 1;
@@ -269,8 +274,21 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     switch (m) {
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE; // never take focus from the user's app
+    case WM_MOUSEACTIVATE: {
+        // Never take focus from the user's app, except for the logo and the
+        // bell: the start menu and the notification list need the keyboard,
+        // and only the foreground process may hand the foreground to its own window.
+        POINT cur;
+        GetCursorPos(&cur);
+        ScreenToClient(h, &cur);
+        if ((HitTest(cur) == kStartKey || HitTest(cur) == kNotifyKey) && HIWORD(l) == WM_LBUTTONDOWN) {
+            previousForeground_ = GetForegroundWindow();
+            if (previousForeground_ == input_ || previousForeground_ == visual_)
+                previousForeground_ = nullptr;
+            return MA_ACTIVATE;
+        }
+        return MA_NOACTIVATE;
+    }
     case WM_CLOSE:
         if (onCloseRequest)
             onCloseRequest();
@@ -281,7 +299,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         // A press on an app that moves past the system drag threshold starts a drag.
-        if (pressedLeft_ && !pressed_.empty() && pressed_ != kClockKey && (w & MK_LBUTTON) &&
+        if (pressedLeft_ && !pressed_.empty() && !IsEntry(pressed_) && (w & MK_LBUTTON) &&
             (std::abs(pt.x - pressPt_.x) > GetSystemMetrics(SM_CXDRAG) || std::abs(pt.y - pressPt_.y) > GetSystemMetrics(SM_CYDRAG))) {
             BeginDrag(pt);
             return 0;
@@ -309,7 +327,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         if (w == kFileHoverTimer) {
             KillTimer(h, kFileHoverTimer);
-            if (!fileHoverKey_.empty() && fileHoverKey_ != kClockKey && onFileDragHover)
+            if (!fileHoverKey_.empty() && !IsEntry(fileHoverKey_) && onFileDragHover)
                 onFileDragHover(fileHoverKey_);
             return 0;
         }
@@ -354,9 +372,18 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         // Shift+click starts a new instance, as on the Windows taskbar.
         bool launch = m == WM_MBUTTONUP || (w & MK_SHIFT);
-        if (key == kClockKey) {
-            if (m == WM_LBUTTONUP && onClockClick)
+        if (IsEntry(key)) {
+            if (m != WM_LBUTTONUP)
+                return 0;
+            RECT anchor = EntryRect(key);
+            if (key == kClockKey && onClockClick)
                 onClockClick();
+            else if (key == kStartKey && onStartClick)
+                onStartClick(anchor);
+            else if (key == kNotifyKey && onNotifyClick)
+                onNotifyClick(anchor);
+            else if (key == kMoreKey && onOverflow)
+                onOverflow(hidden_, anchor);
         } else if (launch ? bool(onLaunch) : bool(onActivate)) {
             (launch ? onLaunch : onActivate)(key);
         }
@@ -372,7 +399,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         std::wstring key = HitTest(pt);
         POINT screen = pt;
         ClientToScreen(h, &screen);
-        if (!key.empty() && key != kClockKey && onItemMenu)
+        if (!key.empty() && !IsEntry(key) && onItemMenu)
             onItemMenu(key, screen);
         else if (onContextMenu)
             onContextMenu(screen);
@@ -445,7 +472,7 @@ std::wstring Bar::FileDragOver(POINT screen)
 {
     POINT pt{screen.x - window_.left, screen.y - window_.top};
     std::wstring key = HitTest(pt);
-    if (key == kClockKey)
+    if (IsEntry(key))
         key.clear();
     if (key != fileHoverKey_) {
         fileHoverKey_ = key;
@@ -530,23 +557,35 @@ void Bar::Relayout()
         clockW = int(std::ceil(w)) + Px(22, s);
     }
 
-    int n = int(items_.size());
+    // Left to right: [logo] [apps ... (overflow)] | [clock] [bell]. The logo,
+    // the overflow entry and the bell use the same plates as the apps.
+    const int total = int(items_.size());
+    int n = total;
+    bool more = false;
     auto padFor = [&](int p) { return (barH - p) / 2 + Px(4, s); }; // ends: plate gap plus a little air
-    auto contentWidth = [&](int count, int p, int g) {
-        int w = 2 * padFor(p) + (count ? count * p + (count - 1) * g : 0);
-        if (clockW)
-            w += (count ? 2 * sepGap : 0) + clockW;
-        return std::max(w, barH * 2); // an empty bar is still a pleasant capsule
+    auto contentWidth = [&](int count, int p, int g, bool overflow) {
+        int slots = count + (overflow ? 1 : 0);
+        int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
+        w += slots ? slots * p + (slots - 1) * g : 0;    // apps
+        w += 2 * sepGap + (clockW ? clockW + g : 0) + p; // separator, clock, bell
+        return std::max(w, barH * 2);
     };
     const int maxW = std::max(barH * 2, std::min(Px(st.width, s), int(wa.right - wa.left) - 2 * inset));
-    // Too many apps: tighten the gaps, then the plates, then drop the ones that do not fit.
-    while (n > 0 && contentWidth(n, plate, gap) > maxW && gap > Px(2, s))
+    // Too many apps: tighten the gaps, then the plates; what still does not fit
+    // goes behind the overflow entry (never silently dropped).
+    while (n > 0 && contentWidth(n, plate, gap, false) > maxW && gap > Px(2, s))
         --gap;
-    while (n > 0 && contentWidth(n, plate, gap) > maxW && plate > icon + Px(4, s))
+    while (n > 0 && contentWidth(n, plate, gap, false) > maxW && plate > icon + Px(4, s))
         --plate;
-    while (n > 0 && contentWidth(n, plate, gap) > maxW)
-        --n;
-    const int barW = st.autoWidth ? std::min(contentWidth(n, plate, gap), maxW) : maxW;
+    if (contentWidth(n, plate, gap, false) > maxW) {
+        more = true;
+        while (n > 0 && contentWidth(n, plate, gap, true) > maxW)
+            --n;
+    }
+    hidden_.clear();
+    for (int i = n; i < total; ++i)
+        hidden_.push_back(items_[size_t(i)].key);
+    const int barW = st.autoWidth ? std::min(contentWidth(n, plate, gap, more), maxW) : maxW;
     const int pad = padFor(plate);
     const int v = (barH - plate) / 2;
     const int pitch = plate + gap;
@@ -585,14 +624,30 @@ void Bar::Relayout()
     scene.pressedKey = scene_.pressedKey;
     scene.dragKey = dragging_ ? dragKey_ : std::wstring();
     hits_.clear();
-    const int clockRight = inset + barW - pad;
-    const int clockLeft = clockRight - clockW;
-    // Apps are centred in the space left of the clock (matters when autoWidth is off).
-    const int appsSpace = (clockW ? clockLeft - (n ? 2 * sepGap : 0) : inset + barW - pad) - (inset + pad);
-    const int appsW = n ? n * plate + (n - 1) * gap : 0;
-    const int appsLeft = inset + pad + std::max(0, (appsSpace - appsW) / 2);
     const float plateTop = float(inset + v);
     const float iconTop = float(inset) + float(barH - icon) / 2;
+    auto entry = [&](const wchar_t* key, int left, const wchar_t* glyph) {
+        SceneItem it;
+        it.key = key;
+        it.plate = D2D1::RectF(float(left), plateTop, float(left + plate), plateTop + float(plate));
+        float il = float(left) + float(plate - icon) / 2;
+        it.icon = D2D1::RectF(il, iconTop, il + float(icon), iconTop + float(icon));
+        it.glyph = glyph;
+        return it;
+    };
+    // Right group, from the right edge: bell, clock, separator.
+    const int startLeft = inset + pad;
+    const int bellLeft = inset + barW - pad - plate;
+    const int clockRight = bellLeft - (clockW ? gap : 0);
+    const int clockLeft = clockRight - clockW;
+    const int rightLeft = clockW ? clockLeft : bellLeft;
+    const int appsMin = startLeft + plate + 2 * gap;
+    const int slots = n + (more ? 1 : 0);
+    const int appsW = slots ? slots * plate + (slots - 1) * gap : 0;
+    // Apps are centred in the space between the logo and the separator (matters when autoWidth is off).
+    const int appsLeft = appsMin + std::max(0, (rightLeft - 2 * sepGap - appsMin - appsW) / 2);
+    scene.extras.push_back(entry(kStartKey, startLeft, L""));
+    hits_.push_back({kStartKey, RECT{inset, inset, appsMin - gap / 2, inset + barH}});
     std::map<std::wstring, CachedIcon> keep;
     for (int k = 0; k < n; ++k) {
         const int i = order[size_t(k)];
@@ -601,7 +656,7 @@ void Bar::Relayout()
         it.key = t.key;
         float left = float(appsLeft + k * pitch);
         if (i == dragIndex) // follows the pointer, kept within the app strip
-            left = std::clamp(float(dragX_ - grabDx_) - float(plate) / 2, float(appsLeft - gap), float(appsLeft + appsW - plate + gap));
+            left = std::clamp(float(dragX_ - grabDx_) - float(plate) / 2, float(appsLeft - gap), float(appsLeft + n * pitch - gap - plate + gap));
         it.plate = D2D1::RectF(left, plateTop, left + float(plate), plateTop + float(plate));
         float iconLeft = left + float(plate - icon) / 2;
         it.icon = D2D1::RectF(iconLeft, iconTop, iconLeft + float(icon), iconTop + float(icon));
@@ -623,10 +678,15 @@ void Bar::Relayout()
             keep[t.key] = c;
         }
         scene.items.push_back(std::move(it));
-        // Hit cells split the gaps; the first and last reach the bar's ends.
-        int hl = k == 0 ? inset : appsLeft + k * pitch - gap / 2;
-        int hr = k == n - 1 ? (clockW ? clockLeft - sepGap : inset + barW) : appsLeft + k * pitch + plate + (gap - gap / 2);
+        // Hit cells split the gaps; the last one reaches the separator.
+        int hl = k == 0 ? appsMin - gap / 2 : appsLeft + k * pitch - gap / 2;
+        int hr = k == slots - 1 ? rightLeft - sepGap : appsLeft + k * pitch + plate + (gap - gap / 2);
         hits_.push_back({t.key, RECT{hl, inset, hr, inset + barH}});
+    }
+    if (more) {
+        int left = appsLeft + n * pitch;
+        scene.extras.push_back(entry(kMoreKey, left, L"\uE712"));
+        hits_.push_back({kMoreKey, RECT{n ? left - gap / 2 : appsMin - gap / 2, inset, rightLeft - sepGap, inset + barH}});
     }
     icons_ = std::move(keep);
     appsLeft_ = appsLeft;
@@ -634,14 +694,17 @@ void Bar::Relayout()
     plate_ = plate;
     gap_ = gap;
     shown_ = n;
+    scene.separatorX = float(rightLeft - sepGap);
     if (clockW) {
         scene.clock = D2D1::RectF(float(clockLeft), plateTop, float(clockRight), plateTop + float(plate));
         scene.timePx = timePx;
         scene.datePx = datePx;
-        if (n)
-            scene.separatorX = float(clockLeft - sepGap);
-        hits_.push_back({kClockKey, RECT{clockLeft - (n ? sepGap : pad), inset, inset + barW, inset + barH}});
+        hits_.push_back({kClockKey, RECT{rightLeft - sepGap, inset, clockRight + gap / 2, inset + barH}});
     }
+    SceneItem bell = entry(kNotifyKey, bellLeft, L"\uEA8F");
+    bell.badge = unread_;
+    scene.extras.push_back(std::move(bell));
+    hits_.push_back({kNotifyKey, RECT{clockW ? clockRight + gap / 2 : rightLeft - sepGap, inset, inset + barW, inset + barH}});
     if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
     scene_ = std::move(scene);
@@ -674,8 +737,43 @@ void Bar::Relayout()
             Log(L"layout: %s %ld,%ld,%ld,%ld", hit.key.c_str(), x + hit.rect.left, y + hit.rect.top, x + hit.rect.right, y + hit.rect.bottom);
 }
 
+void Bar::SetUnread(int count)
+{
+    if (count == unread_)
+        return;
+    unread_ = count;
+    Relayout();
+}
+
+RECT Bar::EntryRect(const std::wstring& key) const
+{
+    auto rect = [&](const SceneItem& it) {
+        return RECT{window_.left + LONG(it.plate.left), window_.top + LONG(it.plate.top), window_.left + LONG(it.plate.right),
+                    window_.top + LONG(it.plate.bottom)};
+    };
+    for (const auto& it : scene_.extras)
+        if (it.key == key)
+            return rect(it);
+    for (const auto& it : scene_.items)
+        if (it.key == key)
+            return rect(it);
+    return {};
+}
+
+RECT Bar::BarRect() const
+{
+    return RECT{window_.left + LONG(scene_.bar.left), window_.top + LONG(scene_.bar.top), window_.left + LONG(scene_.bar.right),
+                window_.top + LONG(scene_.bar.bottom)};
+}
+
 std::wstring Bar::TooltipText(const std::wstring& key) const
 {
+    if (key == kStartKey)
+        return L"\u5F00\u59CB"; // 开始
+    if (key == kNotifyKey)
+        return unread_ ? std::to_wstring(unread_) + L" \u6761\u672A\u8BFB\u901A\u77E5" : L"\u901A\u77E5"; // N 条未读通知 / 通知
+    if (key == kMoreKey)
+        return L"\u53E6\u5916 " + std::to_wstring(hidden_.size()) + L" \u4E2A\u5E94\u7528"; // 另外 N 个应用
     if (key == kClockKey) {
         wchar_t buf[128] = {};
         GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_LONGDATE, nullptr, nullptr, buf, 128, nullptr);
