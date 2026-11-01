@@ -99,7 +99,7 @@ function StartCore($json) {
 }
 
 try {
-    StartCore '{"pins":[],"showRunning":true,"notifyTimeout":3}'
+    StartCore '{"notifyListener":false,"notifyWeChat":false,"pins":[],"showRunning":true,"notifyTimeout":3}'
     $a = TestWindow "Atrium Notify Test"
     FocusWindow $a
 
@@ -203,7 +203,28 @@ try {
     C notify-clear
 
     # Hidden text: setting on, cards excluded from capture.
-    StartCore '{"pins":[],"showRunning":true,"notifyTimeout":5,"notifyHideBody":true}'
+    # A real Windows toast (from PowerShell's own identity, tagged so it can be
+    # removed again) comes back as an Atrium card through the listener.
+    StartCore '{"notifyListener":true,"notifyWeChat":false,"pins":[],"showRunning":true,"notifyTimeout":3}'
+    $listening = @(NewLog | Where-Object { $_ -match "listener: (mirroring|access)" })[-1]
+    if ($listening -notmatch "mirroring") {
+        "SKIP windows-toast: $listening"
+    } else {
+        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+        [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+        $psApp = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+        $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+        $xml.LoadXml("<toast><visual><binding template='ToastGeneric'><text>Atrium toast test</text><text>mirrored</text></binding></visual></toast>")
+        $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+        $toast.Tag = 'atrium-e2e'; $toast.Group = 'atrium'
+        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($psApp).Show($toast)
+        Start-Sleep 3
+        $s = State
+        [Windows.UI.Notifications.ToastNotificationManager]::History.Remove('atrium-e2e', 'atrium', $psApp)
+        Check "windows-toast" ($s.first -eq "Atrium toast test" -and $s.popup -eq "1") "a Windows toast became the card '$($s.first)' (popup=$($s.popup)); the toast was removed from the notification centre again"
+    }
+
+    StartCore '{"notifyListener":false,"notifyWeChat":false,"pins":[],"showRunning":true,"notifyTimeout":5,"notifyHideBody":true}'
     Post "Bank" "Verification code" "Your code is 123456"
     $s = State
     $popup = [U]::FindWindow("AtriumSurface", "Atrium Notification")

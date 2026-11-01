@@ -90,7 +90,7 @@ function Click($r) {
 }
 
 try {
-    [IO.File]::WriteAllText($file, '{"pins":[],"showRunning":true,"showClock":true}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"pins":[],"showRunning":true,"showClock":true}')
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 2
     $key = "windowspowershell\v1.0\powershell.exe"
@@ -126,7 +126,7 @@ try {
     # Drag and drop, with three pins (never launched) and the test windows running.
     Start-Process $Core -ArgumentList "--exit" -Wait
     $pins = @("cmd.exe", "charmap.exe", "magnify.exe", "where.exe") | ForEach-Object { '{"name":"' + $_ + '","path":"C:\\Windows\\System32\\' + $_ + '"}' }
-    [IO.File]::WriteAllText($file, '{"showRunning":true,"showClock":true,"pins":[' + ($pins -join ",") + ']}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"showRunning":true,"showClock":true,"pins":[' + ($pins -join ",") + ']}')
     $script:logStart = @(Get-Content $logFile -Encoding UTF8).Count
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 2
@@ -190,7 +190,7 @@ try {
 
     # Overflow: a narrow bar keeps the apps that do not fit behind an entry.
     Start-Process $Core -ArgumentList "--exit" -Wait
-    [IO.File]::WriteAllText($file, '{"showRunning":true,"showClock":true,"width":300,"pins":[' + ($pins -join ",") + ']}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"showRunning":true,"showClock":true,"width":300,"pins":[' + ($pins -join ",") + ']}')
     $script:logStart = @(Get-Content $logFile -Encoding UTF8).Count
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 2

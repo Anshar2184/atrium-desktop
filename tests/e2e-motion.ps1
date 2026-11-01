@@ -85,7 +85,7 @@ function Frame {
 
 try {
     $pins = @("where.exe", "charmap.exe", "magnify.exe") | ForEach-Object { '{"name":"' + $_ + '","path":"C:\\Windows\\System32\\' + $_ + '"}' }
-    [IO.File]::WriteAllText($file, '{"showRunning":false,"showClock":true,"cornerRadius":30,"height":60,"magnify":1.7,"pins":[' + ($pins -join ",") + ']}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"showRunning":false,"showClock":true,"cornerRadius":30,"height":60,"magnify":1.7,"pins":[' + ($pins -join ",") + ']}')
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 2
 

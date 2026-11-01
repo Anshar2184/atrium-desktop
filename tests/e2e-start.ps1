@@ -6,7 +6,7 @@
   pins (not the bar's), turning pages with the wheel and the dots, type to
   search, Esc, toggle with the logo, close on an outside click, pin a search
   result to the bar, the power card (dry run: nothing is shut down), launch
-  with Enter and the tray entry.
+  with Enter and the tray entry (Atrium's tray panel).
 
 .DESCRIPTION
   Moves the mouse and types, so it only runs after the user has been idle for
@@ -116,9 +116,14 @@ function TestWindow($title) {
 }
 
 try {
-    [IO.File]::WriteAllText($file, '{"pins":[{"name":"where","path":"C:\\Windows\\System32\\where.exe"}],"showRunning":true}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"pins":[{"name":"where","path":"C:\\Windows\\System32\\where.exe"}],"showRunning":true}')
     $env:ATRIUM_POWER_DRYRUN = "1"
+    # Without %ALLUSERSPROFILE% in its environment (Atrium started by a tool or a
+    # service), the pins under it must still be found.
+    $allUsers = $env:ALLUSERSPROFILE
+    $env:ALLUSERSPROFILE = $null
     Start-Process $Core -ArgumentList "--debug-layout"
+    $env:ALLUSERSPROFILE = $allUsers
     Start-Sleep 3
     $a = TestWindow "Atrium Start Test"
     # The test window takes the foreground through a real click (away from the menu's area).
@@ -147,7 +152,8 @@ try {
     $layout = @(NewLog | Where-Object { $_ -match "start layout exported \((\d+) entries\)" })[-1]
     $entries = if ($layout -match "\((\d+) entries\)") { [int]$Matches[1] } else { -1 }
     $pins = if ($st -match " pins=(\d+) ") { [int]$Matches[1] } else { -1 }
-    Check "windows-start-pins" ($entries -gt 0 -and $pins -gt 0 -and $pins -le $entries -and $st -notmatch "first='where'") "layout entries $entries, menu pins $pins, $(([regex]::Match($st, "first='[^']*'")).Value)"
+    $missing = @(NewLog | Where-Object { $_ -match "catalog: start pin .* not (found|installed)" })
+    Check "windows-start-pins" ($entries -gt 0 -and $pins -eq $entries - $missing.Count -and @($missing | Where-Object { $_ -match "%ALLUSERSPROFILE%" }).Count -eq 0 -and $st -notmatch "first='where'") "layout entries $entries, menu pins $pins, unresolved $($missing.Count) (started without %ALLUSERSPROFILE%), $(([regex]::Match($st, "first='[^']*'")).Value)"
 
     # Pages: 21 pins each; the wheel turns them, the dots too.
     if ($st -match "page=1/([2-9])") {
@@ -202,14 +208,15 @@ try {
     $launched = (NewLog) -match "catalog: launched"
     Check "enter-launches" ([bool]$launched -and -not [U]::IsWindowVisible($menu)) "log: $(@($launched)[-1])"
 
-    # Tray entry: the system's hidden icons.
+    # Tray entry: Atrium's tray panel (no longer the system's overflow window).
     FocusTestWindow
     ClickLogo; Start-Sleep -Milliseconds 300
     $p = Spot "tray"; ClickAt $p[0] $p[1]
     Start-Sleep 1
     $fg = [U]::Class([U]::GetForegroundWindow())
-    $trayLog = @(NewLog | Where-Object { $_ -match "tray: " })[-1]
-    Check "tray-entry" ($fg -eq "TopLevelWindowForOverflowXamlIsland" -or $trayLog -match "left there") "foreground $fg; $trayLog"
+    Start-Process $Core -ArgumentList "--command", "tray-state" -Wait; Start-Sleep -Milliseconds 200
+    $trayLog = @(NewLog | Where-Object { $_ -match "tray: state" })[-1]
+    Check "tray-entry" ($trayLog -match "visible=1" -and $fg -eq "AtriumSurface") "foreground $fg; $trayLog"
     Key 0x1B
 }
 finally {
