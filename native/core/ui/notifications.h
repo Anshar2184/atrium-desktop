@@ -48,7 +48,7 @@ public:
 
     void Post(Notice n);
     void PanelsChanged(); // a panel opened: the cards on screen step aside
-    void ToggleCenter();
+    void ToggleCenter(bool expand = false);
     void Clear();
     void SetOptions(double timeoutSeconds, bool hideBody);
     // Corner radius (DIP), the bar's; the cards are concentric with it.
@@ -70,6 +70,7 @@ private:
     // so arrivals, expanding, collapsing and closing all glide.
     struct CardAnim {
         float y = 0, inset = 0, alpha = 0;
+        float content = 1; // the card's text (cards behind the stack's front show none)
         bool placed = false;
     };
     struct View {
@@ -77,7 +78,8 @@ private:
         std::vector<Hit> hits;
         std::wstring hover, pressed;
         bool tracking = false;
-        float scroll = 0, contentH = 0, viewH = 0;
+        int wheel = 0; // wheel delta not yet turned into steps
+        float scroll = 0, scrollTarget = 0, contentH = 0, viewH = 0; // the wheel sets the target; the list glides there
         std::map<uint64_t, CardAnim> cards;
         std::map<std::wstring, float> glow; // eased hover per element
         double lastPaint = 0;
@@ -116,6 +118,13 @@ private:
     ULONGLONG centerClosed_ = 0;
     float radius_ = 20;
     std::map<uint64_t, double> leaving_; // closing cards: ClockMs() when closed
+    // Expanding the popup's stack: the cards move over to the list where
+    // they are, and glide into the column (no second pop).
+    std::map<uint64_t, CardAnim> handoff_;
+    RECT handoffRect_{};
+    bool handoffPending_ = false;
+    uint64_t handoffFront_ = 0;
+    bool handoffPopup_ = false; // the popup waits for the list's glass, then goes
 };
 
 } // namespace atrium

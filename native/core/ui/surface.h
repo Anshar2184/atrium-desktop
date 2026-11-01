@@ -45,6 +45,7 @@ struct Theme {
 struct ShapeDip {
     D2D1_RECT_F rect;
     float radius;
+    float fade = 0; // 0 = as is, 1 = gone
 };
 
 class Surface;
@@ -123,6 +124,7 @@ public:
     // Mouse messages arrive in content coordinates.
     std::function<bool(UINT, WPARAM, LPARAM, LRESULT&)> message;
     std::function<void()> onMargin; // a press on the shadow margin, outside the content
+    std::function<void()> onReady;  // the glass is on screen (or the plain panel stands in)
 
     // The bar draws the glass layers; development screenshots keep popups capturable.
     static void SetGlassHost(GlassHost* host);
@@ -130,7 +132,7 @@ public:
 
     // Shows the content at `rect` (screen px), popping out of `anchor` (a
     // screen point); activatable surfaces take the foreground.
-    void Show(RECT rect, bool activate, POINT anchor);
+    void Show(RECT rect, bool activate, POINT anchor, bool pop = true); // pop: false appears in place (a hand-over from another popup)
     void Move(RECT rect);
     // Plays the closing animation, then hides the window. Visible() is false at once.
     void Hide(bool animate = true);

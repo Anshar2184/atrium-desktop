@@ -10,6 +10,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
+#include <mutex>
+#include <set>
+#include <thread>
 
 #pragma comment(lib, "dcomp.lib")
 
@@ -44,7 +48,66 @@ constexpr UINT_PTR kHideTimer = 0x5A01, kFrameTimer = 0x5A02, kGlassWaitTimer = 
 constexpr UINT kHideMs = 140;     // the closing pop (PopVisual) lasts 130 ms
 constexpr double kGlassWaitMs = 300; // then a plain panel stands in for missing glass
 
+constexpr UINT WM_SURFACE_FRAME = WM_APP + 0x42;
+
 D2D1_COLOR_F Rgba(uint32_t rgb, float a) { return D2D1::ColorF(rgb, a); }
+
+// Frames for the popups' animations, in step with the compositor: a thread
+// waits for each composition (DwmFlush) and tells the windows that want a
+// frame. (A 10 ms timer really fires every 16-31 ms and stutters.)
+class FramePump {
+public:
+    static FramePump& Get()
+    {
+        static FramePump pump;
+        return pump;
+    }
+    void Want(HWND h)
+    {
+        std::lock_guard g(mutex_);
+        wanting_.insert(h);
+        if (!thread_.joinable())
+            thread_ = std::thread([this] { Run(); });
+        cv_.notify_one();
+    }
+
+private:
+    ~FramePump()
+    {
+        {
+            std::lock_guard g(mutex_);
+            stop_ = true;
+        }
+        cv_.notify_one();
+        if (thread_.joinable())
+            thread_.join();
+    }
+    void Run()
+    {
+        for (;;) {
+            {
+                std::unique_lock g(mutex_);
+                cv_.wait(g, [&] { return stop_ || !wanting_.empty(); });
+                if (stop_)
+                    return;
+            }
+            if (FAILED(DwmFlush()))
+                Sleep(8);
+            std::set<HWND> due;
+            {
+                std::lock_guard g(mutex_);
+                due.swap(wanting_);
+            }
+            for (HWND h : due)
+                PostMessageW(h, WM_SURFACE_FRAME, 0, 0);
+        }
+    }
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::set<HWND> wanting_;
+    bool stop_ = false;
+    std::thread thread_;
+};
 
 uint32_t g_tint = 0xFFFFFF;
 double g_transparency = 0.95;
@@ -435,7 +498,7 @@ void Surface::SetRadius(float dip)
 void Surface::SetShapes(const std::vector<ShapeDip>& shapes)
 {
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
-        return a.radius == b.radius && a.rect.left == b.rect.left && a.rect.top == b.rect.top && a.rect.right == b.rect.right && a.rect.bottom == b.rect.bottom;
+        return a.radius == b.radius && a.fade == b.fade && a.rect.left == b.rect.left && a.rect.top == b.rect.top && a.rect.right == b.rect.right && a.rect.bottom == b.rect.bottom;
     };
     if (shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
         return;
@@ -456,7 +519,7 @@ void Surface::PublishPanel()
     for (const ShapeDip& s : shapes_) {
         // Whole px, so the glass and the content's washes line up.
         auto px = [&](float v) { return std::round(v * scale_) + p.inset; };
-        p.shapes.push_back({px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_});
+        p.shapes.push_back({px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade});
     }
     p.visible = visible_ || hiding_;
     p.pop = pop_;
@@ -489,7 +552,7 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
             self->FinishHide();
             return 0;
         }
-        if (w == kFrameTimer) {
+        if (w == kFrameTimer) { // older requests
             KillTimer(h, kFrameTimer);
             self->Paint();
             return 0;
@@ -497,14 +560,22 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (w == kGlassWaitTimer) {
             KillTimer(h, kGlassWaitTimer);
             self->Invalidate(); // a plain panel if the glass still has not come
+            if (self->onReady && !self->glassReady_)
+                self->onReady();
             return 0;
         }
         break;
+    case WM_SURFACE_FRAME:
+        if (self->visible_)
+            self->Paint();
+        return 0;
     case WM_GLASS_READY:
         if (!self->glassReady_ && self->visible_) {
             self->glassReady_ = true;
             KillTimer(h, kGlassWaitTimer);
             self->Invalidate();
+            if (self->onReady)
+                self->onReady();
         }
         return 0;
     case WM_GLASS_INK:
@@ -561,7 +632,7 @@ void Surface::Place(RECT rect)
     SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top, SWP_NOACTIVATE);
 }
 
-void Surface::Show(RECT rect, bool activate, POINT anchor)
+void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
 {
     KillTimer(hwnd_, kHideTimer);
     Place(rect);
@@ -583,10 +654,15 @@ void Surface::Show(RECT rect, bool activate, POINT anchor)
         SwitchToThisWindow(hwnd_, TRUE);
     // Content and glass pop out of the anchor together (DWM runs both
     // animations). The animation is in place before the first frame shows.
-    ++pop_;
-    popOpen_ = true;
-    if (EnsureDevice())
-        PopVisual(shared_->dcomp.get(), visual_.get(), true, float(anchor.x - window_.left), float(anchor.y - window_.top));
+    if (pop) {
+        ++pop_;
+        popOpen_ = true;
+        if (EnsureDevice())
+            PopVisual(shared_->dcomp.get(), visual_.get(), true, float(anchor.x - window_.left), float(anchor.y - window_.top));
+    } else {
+        popOpen_ = true;
+        EnsureDevice();
+    }
     Paint();
     PublishPanel();
 }
@@ -641,7 +717,7 @@ void Surface::Invalidate()
 void Surface::RequestFrame()
 {
     if (visible_)
-        SetTimer(hwnd_, kFrameTimer, 10, nullptr);
+        FramePump::Get().Want(hwnd_);
 }
 
 void Surface::ResetDevice()

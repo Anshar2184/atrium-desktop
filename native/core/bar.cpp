@@ -116,6 +116,7 @@ std::vector<GlassParams> PanelParams(const Settings& s, float scale, const Glass
         g.shapeR = sh.right;
         g.shapeB = sh.bottom;
         g.radius = std::min(sh.radius, std::min(sh.right - sh.left, sh.bottom - sh.top) / 2);
+        g.fade = sh.fade;
         out.push_back(g);
     }
     return out;

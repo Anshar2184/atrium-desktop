@@ -18,7 +18,8 @@ cbuffer GlassParams : register(b0)
     float2 LightDir;    // unit vector pointing towards the light
     float  Inset;       // shadow room around the shape (sets the shadow's softness)
     float  BlurMix;     // 0 = sharp backdrop, 1 = fully blurred
-    float2 _pad;
+    float  Fade;        // 0 = the glass as is, 1 = gone (a piece of glass fading out)
+    float  _pad;
     float4 Shape;       // the glass shape in window px: left, top, right, bottom
     float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
 };
@@ -78,6 +79,8 @@ float4 PS(VSOut i) : SV_Target
 
     float aa = max(fwidth(d), 1e-3);
     float cov = saturate(0.5 - d / aa);
+    float keep = saturate(1 - Fade);
+    shadowA *= keep;
     if (cov <= 0)
         return float4(0, 0, 0, shadowA);
 
@@ -136,6 +139,6 @@ float4 PS(VSOut i) : SV_Target
     col *= 1 - 0.05 * band * (1 - lit);
     col += ring * 0.10 * (0.4 + Highlight);
 
-    float4 glass = float4(saturate(col) * cov, cov);
+    float4 glass = float4(saturate(col) * cov, cov) * keep;
     return glass + (1 - cov) * float4(0, 0, 0, shadowA);
 }

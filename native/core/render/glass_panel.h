@@ -15,6 +15,7 @@ namespace atrium {
 struct GlassShape {
     float left = 0, top = 0, right = 0, bottom = 0;
     float radius = 0;
+    float fade = 0; // 0 = as is, 1 = gone
     bool operator==(const GlassShape&) const = default;
 };
 

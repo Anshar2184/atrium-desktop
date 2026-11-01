@@ -2,7 +2,7 @@
 .SYNOPSIS
   Atrium notifications end to end, with simulated notices (Atrium.Core.exe
   --command notify ...) and the real mouse: popup without taking the focus,
-  timeout, hover keeps it, queue and merge, expand the stack (upwards, every
+  timeout, hover keeps it, the wheel turns the stack, queue and merge, expand the stack (upwards, every
   card its own piece of glass), dismiss one,
   click action, clear, unread badge, full-screen suppression (simulated and
   with a real full-screen window), cards waiting while another Atrium panel
@@ -144,6 +144,13 @@ try {
     Start-Sleep 4
     $s = State
     Check "hover-keeps" ($s.popup -eq "1") "pointer on the popup for 4 s (timeout 3 s): popup=$($s.popup)"
+
+    # The wheel over the stack turns it: the next older card comes to the front, and back.
+    [U]::mouse_event(0x0800, 0, 0, [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]-120), 0), [UIntPtr]::Zero); Start-Sleep -Milliseconds 500
+    [U]::mouse_event(0x0800, 0, 0, 120, [UIntPtr]::Zero); Start-Sleep -Milliseconds 500
+    $turned = @(NewLog | Where-Object { $_ -match "notify: stack turned" })
+    $s = State
+    Check "wheel-turns-stack" ($turned.Count -ge 2 -and $s.popup -eq "1") "$($turned.Count) turns; $(@($turned)[-1])"
 
     ClickAt $p
     $s = State
