@@ -5,9 +5,15 @@
 // DirectComposition renders into, and an invisible input window directly below
 // it whose rounded region receives the clicks. Both are excluded from capture,
 // so the monitor capture shows what lies underneath (D01).
+//
+// Stacking (D25): both windows are topmost and are raised again when another
+// window covers them (foreground changes, a move ends, a 1 s check); they stay
+// below a revealed system taskbar and hide while a full-screen app is in front.
+// The render thread also draws the glass layer of Atrium's popups.
 #pragma once
 
 #include "render/bar_painter.h"
+#include "render/glass_panel.h"
 #include "settings.h"
 #include "shell/task_model.h"
 
@@ -15,6 +21,7 @@
 #include <dwrite_3.h>
 #include <ole2.h>
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -24,7 +31,7 @@
 
 namespace atrium {
 
-class Bar {
+class Bar : public GlassHost {
 public:
     // debugCapturable: development only. Leaves the bar visible to screen capture
     // and freezes the backdrop after the first frame so the glass never samples
@@ -50,6 +57,12 @@ public:
     RECT BarRect() const;
     // The window that had the foreground before a click on the logo activated the bar.
     HWND PreviousForeground() const { return previousForeground_; }
+    // Glass layers of popup windows (GlassHost).
+    void SetPanel(const GlassPanel& panel) override;
+    // Launch feedback: the app's icon hops up to `hops` times (fewer once it runs).
+    void Bounce(const std::wstring& key, int hops);
+    // Test hook: logs the stacking state now and the next rendered frame.
+    void LogState();
 
     std::function<IconImage(const std::wstring& key, int px)> iconProvider;
     std::function<void(const std::wstring& key)> onActivate;  // left click on an app
@@ -82,6 +95,7 @@ private:
         float scale = 1;
         bool visible = true;
         unsigned generation = 0;
+        std::vector<GlassPanel> panels;
     };
     struct Hit {
         std::wstring key; // app key, L"#clock", or empty for the bar itself
@@ -111,6 +125,11 @@ private:
     void FileDragLeave();
     void RenderThread();
     bool RenderSession(); // returns false to stop, true to rebuild (device lost, monitor changed)
+    void SetRegion(bool extended); // input region: the shape, plus the room above it while magnified
+    static void CALLBACK WinEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD thread, DWORD time);
+    void GuardStacking(const wchar_t* why);
+    bool ForegroundIsFullscreen() const;
+    void Raise();
 
     bool debugCapturable_ = false;
     bool debugLayout_ = false;
@@ -141,7 +160,21 @@ private:
     int unread_ = 0;
     HWND previousForeground_ = nullptr;
     RECT applied_{};      // last window rect given to SetWindowPos
-    int appliedRgn_[4]{}; // bar width, height, radius and inset of the last region
+    int appliedRgn_[6]{}; // bar width, height, radius, insets and extension of the last region
+    // Room around the shape inside the windows (px): sides (shadow plus the
+    // magnified bar's stretch), top (shadow plus magnified icons), bottom.
+    int insetX_ = 0, insetTop_ = 0, inset_ = 0;
+    int rise_ = 0;        // how far magnified or hopping icons reach above the shape
+    int radius_ = 0;
+    bool regionExtended_ = false;
+    std::map<std::wstring, std::pair<double, int>> bounces_; // key -> start (ClockMs), hops
+    std::map<HWND, GlassPanel> panels_;
+    // Stacking guard.
+    HWINEVENTHOOK hooks_[2]{};
+    bool fullscreen_ = false;
+    std::map<HWND, std::pair<int, ULONGLONG>> raises_; // windows we were raised over: count, first time
+    HWND lastCover_ = nullptr;
+    std::atomic<bool> frameLog_{false}; // the render thread logs its next frame
     bool appliedVisible_ = false;
     std::wstring fileHoverKey_;
     winrt::com_ptr<IDropTarget> dropTarget_;

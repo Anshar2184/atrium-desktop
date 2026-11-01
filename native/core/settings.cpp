@@ -67,6 +67,7 @@ void Settings::Clamp()
     c(height, 32, 160, d.height);
     c(margin, 0, 400, d.margin);
     c(iconSize, 16, 64, d.iconSize);
+    c(magnify, 1, 2, d.magnify);
     c(notifyTimeout, 3, 30, d.notifyTimeout);
     tint &= 0xFFFFFF;
     if (textColor != L"light" && textColor != L"dark")
@@ -98,6 +99,7 @@ std::wstring Settings::ToJson() const
     num(L"height", height);
     num(L"margin", margin);
     num(L"iconSize", iconSize);
+    num(L"magnify", magnify);
     o.SetNamedValue(L"showClock", json::JsonValue::CreateBooleanValue(showClock));
     o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
     o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
@@ -149,6 +151,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
             s.tint = static_cast<uint32_t>(wcstoul(t.c_str() + 1, nullptr, 16));
     }
     num(L"iconSize", s.iconSize);
+    num(L"magnify", s.magnify);
     auto flag = [&](const wchar_t* k, bool& v) {
         if (o.HasKey(k) && o.GetNamedValue(k).ValueType() == json::JsonValueType::Boolean)
             v = o.GetNamedBoolean(k);

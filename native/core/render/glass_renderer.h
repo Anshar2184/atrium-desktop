@@ -18,7 +18,7 @@
 
 namespace atrium {
 
-// Mirrors cbuffer GlassParams in shaders/glass.hlsl (96 bytes). Lengths in px.
+// Mirrors cbuffer GlassParams in shaders/glass.hlsl (128 bytes). Lengths in px.
 struct GlassParams {
     float sizeX, sizeY, roiOriginX, roiOriginY;
     float roiSizeX, roiSizeY, radius, edge;
@@ -26,8 +26,18 @@ struct GlassParams {
     float tintR, tintG, tintB, tintA;
     float highlight, shadow, lightX, lightY;
     float inset, blurMix, pad0, pad1;
+    // The shape in window px; all zero: the window minus `inset` on every side.
+    float shapeL, shapeT, shapeR, shapeB;
+    // Press ripple: centre (window px), ring radius, strength; strength 0 = none.
+    float rippleX, rippleY, rippleR, rippleA;
 };
-static_assert(sizeof(GlassParams) == 96);
+static_assert(sizeof(GlassParams) == 128);
+
+// Scale and fade of a composition visual, run by DWM so it stays smooth
+// whatever our own frame rate is. Opening: from slightly small and clear,
+// overshooting a hair before settling; closing: shrinks a little and fades.
+// (cx, cy): the fixed point of the scale, in the visual's px.
+void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool open, float cx, float cy);
 
 // Result of one backdrop comparison, read back without stalling the CPU.
 struct Readback {
@@ -45,7 +55,10 @@ class GlassRenderer {
 public:
     static constexpr int kPad = 64; // backdrop margin for refraction and blur
 
-    GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height);
+    // topmost: the composition target's layer. A popup window has two: the
+    // glass below (topmost = false) and its content drawn by Surface above.
+    // overlay: whether Present draws a Direct2D overlay (the popups' glass does not).
+    GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost = true, bool overlay = true);
     GlassRenderer(const GlassRenderer&) = delete;
     GlassRenderer& operator=(const GlassRenderer&) = delete;
 
@@ -57,6 +70,9 @@ public:
     // and queues its comparison with the ROI used for the last present (D04).
     void UpdateBackdrop(ID3D11Texture2D* monitorFrame, int x, int y);
     bool HasPresented() const { return hasPresented_; }
+    bool HasBackdrop() const { return hasBackdrop_; }
+    // Runs PopVisual on this surface's visual.
+    void Pop(bool open, float cx, float cy);
     // Completed comparisons since the last call, merged (changed = any changed,
     // colour = newest), or nullopt if none finished yet. Never waits.
     std::optional<Readback> Poll();

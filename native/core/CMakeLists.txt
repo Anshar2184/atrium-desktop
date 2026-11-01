@@ -39,6 +39,7 @@ add_executable(atrium_core WIN32
     render/bar_painter.cpp
     render/capture.cpp
     render/glass_renderer.cpp
+    render/glass_panel.cpp
     render/gpu.cpp
     core.rc
     core.manifest

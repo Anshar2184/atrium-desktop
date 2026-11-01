@@ -16,9 +16,11 @@ cbuffer GlassParams : register(b0)
     float  Highlight;
     float  Shadow;
     float2 LightDir;    // unit vector pointing towards the light
-    float  Inset;       // gap between window edge and glass shape (shadow room)
+    float  Inset;       // shadow room around the shape (sets the shadow's softness)
     float  BlurMix;     // 0 = sharp backdrop, 1 = fully blurred
     float2 _pad;
+    float4 Shape;       // the glass shape in window px: left, top, right, bottom
+    float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
 };
 
 Texture2D Bg : register(t0);
@@ -65,8 +67,8 @@ float3 blurred(float2 px)
 float4 PS(VSOut i) : SV_Target
 {
     float2 px = i.uv * Size;
-    float2 c = px - Size * 0.5;
-    float2 b = Size * 0.5 - Inset;
+    float2 c = px - (Shape.xy + Shape.zw) * 0.5;
+    float2 b = max((Shape.zw - Shape.xy) * 0.5, 1);
     float r = min(Radius, min(b.x, b.y));
     float d = sdRoundRect(c, b, r);
 
@@ -90,6 +92,20 @@ float4 PS(VSOut i) : SV_Target
     float profile = 1 - sqrt(saturate(1 - t * t)); // circular lens cross-section
     float2 off = -n * Refract * profile;
 
+    // Press ripple: a ring of displacement running outwards from the point that
+    // was pressed, as if the glass gave way under the finger and sprang back.
+    float ring = 0;
+    if (Ripple.w > 0) {
+        float2 dv = px - Ripple.xy;
+        float dl = length(dv);
+        float w = max(Ripple.z * 0.30, 6);
+        float x = (dl - Ripple.z) / w;
+        ring = exp(-x * x) * Ripple.w;
+        float2 dir = dl > 1e-3 ? dv / dl : float2(0, 0);
+        off += dir * ring * (6 + Refract * 0.35);
+        off -= dv * 0.06 * Ripple.w * saturate(1 - dl / max(Ripple.z, 1)); // the dent inside the ring
+    }
+
     float3 sharp;
     sharp.r = bg(px + off * (1 + Dispersion), 0).r;
     sharp.g = bg(px + off, 0).g;
@@ -112,12 +128,13 @@ float4 PS(VSOut i) : SV_Target
     float glow = saturate(1 - depth / (Edge * 1.6));
     col += Highlight * rimLine * (0.22 + 0.78 * lit + 0.35 * back);
     col += Highlight * glow * glow * lit * 0.16;
-    float sheen = saturate(1 - (px.y - Inset) / max(Size.y - 2 * Inset, 1));
+    float sheen = saturate(1 - (px.y - Shape.y) / max(Shape.w - Shape.y, 1));
     col += Highlight * 0.045 * sheen * sheen;
 
     // Depth: a very light shade in the band where the lens bends the most.
     float band = smoothstep(0.0, Edge * 0.5, depth) * (1 - smoothstep(Edge * 0.5, Edge * 1.3, depth));
     col *= 1 - 0.05 * band * (1 - lit);
+    col += ring * 0.10 * (0.4 + Highlight);
 
     float4 glass = float4(saturate(col) * cov, cov);
     return glass + (1 - cov) * float4(0, 0, 0, shadowA);

@@ -33,6 +33,7 @@ struct Settings {
     double height = 60;
     double margin = 10;              // gap above the bottom of the work area
     double iconSize = 30;
+    double magnify = 1.7;            // dock magnification under the pointer: icon scale, 1 = off
     bool autoWidth = true;           // shrink to the content
     bool showClock = true;
     bool showRunning = true;

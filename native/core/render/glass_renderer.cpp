@@ -14,9 +14,48 @@ constexpr UINT kCompareGroup = 16;
 
 void Check(HRESULT hr) { winrt::check_hresult(hr); }
 
+// Ease-out cubic from `from` to `to` over `t` seconds, starting at `begin`.
+void EaseOut(IDCompositionAnimation* a, double begin, double t, float from, float to)
+{
+    float d = to - from;
+    a->AddCubic(begin, from, float(3 * d / t), float(-3 * d / (t * t)), float(d / (t * t * t)));
+}
+
 } // namespace
 
-GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height) : gpu_(gpu), w_(width), h_(height)
+void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool open, float cx, float cy)
+{
+    winrt::com_ptr<IDCompositionScaleTransform> scale;
+    winrt::com_ptr<IDCompositionAnimation> s, o;
+    winrt::com_ptr<IDCompositionEffectGroup> fx;
+    if (FAILED(device->CreateScaleTransform(scale.put())) || FAILED(device->CreateAnimation(s.put())) ||
+        FAILED(device->CreateAnimation(o.put())) || FAILED(device->CreateEffectGroup(fx.put())))
+        return;
+    if (open) {
+        EaseOut(s.get(), 0, 0.20, 0.92f, 1.012f);
+        EaseOut(s.get(), 0.20, 0.14, 1.012f, 1.0f);
+        s->End(0.34, 1.0f);
+        EaseOut(o.get(), 0, 0.16, 0.0f, 1.0f);
+        o->End(0.16, 1.0f);
+    } else {
+        EaseOut(s.get(), 0, 0.13, 1.0f, 0.95f);
+        s->End(0.13, 0.95f);
+        EaseOut(o.get(), 0, 0.12, 1.0f, 0.0f);
+        o->End(0.12, 0.0f);
+    }
+    scale->SetCenterX(cx);
+    scale->SetCenterY(cy);
+    scale->SetScaleX(s.get());
+    scale->SetScaleY(s.get());
+    fx->SetOpacity(o.get());
+    visual->SetTransform(scale.get());
+    visual->SetEffect(fx.get());
+    device->Commit();
+}
+
+void GlassRenderer::Pop(bool open, float cx, float cy) { PopVisual(dcomp_.get(), visual_.get(), open, cx, cy); }
+
+GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost, bool overlay) : gpu_(gpu), w_(width), h_(height)
 {
     auto* dev = gpu_.device.get();
     Check(dev->CreateVertexShader(g_GlassVS, sizeof(g_GlassVS), nullptr, vs_.put()));
@@ -62,17 +101,19 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height) :
 
     auto dxgi = gpu_.device.as<IDXGIDevice>();
     Check(DCompositionCreateDevice(dxgi.get(), IID_PPV_ARGS(dcomp_.put())));
-    Check(dcomp_->CreateTargetForHwnd(hwnd, TRUE, target_.put()));
+    Check(dcomp_->CreateTargetForHwnd(hwnd, topmost, target_.put()));
     Check(dcomp_->CreateVisual(visual_.put()));
     Check(visual_->SetContent(swap_.get()));
     Check(target_->SetRoot(visual_.get()));
     Check(dcomp_->Commit());
 
-    D2D1_FACTORY_OPTIONS fo{};
-    Check(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory3), &fo, d2dFactory_.put_void()));
-    Check(d2dFactory_->CreateDevice(dxgi.get(), d2dDevice_.put()));
-    Check(d2dDevice_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, d2d_.put()));
-    Check(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory3), reinterpret_cast<IUnknown**>(dwrite_.put())));
+    if (overlay) {
+        D2D1_FACTORY_OPTIONS fo{};
+        Check(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory3), &fo, d2dFactory_.put_void()));
+        Check(d2dFactory_->CreateDevice(dxgi.get(), d2dDevice_.put()));
+        Check(d2dDevice_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, d2d_.put()));
+        Check(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory3), reinterpret_cast<IUnknown**>(dwrite_.put())));
+    }
 
     CreateSizeDependent();
 }
@@ -129,7 +170,8 @@ void GlassRenderer::Resize(int width, int height)
         return;
     w_ = width;
     h_ = height;
-    d2d_->SetTarget(nullptr);
+    if (d2d_)
+        d2d_->SetTarget(nullptr);
     Check(swap_->ResizeBuffers(2, UINT(w_), UINT(h_), DXGI_FORMAT_B8G8R8A8_UNORM, 0));
     CreateSizeDependent();
 }
@@ -243,6 +285,11 @@ bool GlassRenderer::Present(const GlassParams& in, const std::function<void(ID2D
     p.roiOriginX = p.roiOriginY = float(kPad);
     p.roiSizeX = float(w_ + 2 * kPad);
     p.roiSizeY = float(h_ + 2 * kPad);
+    if (p.shapeR <= p.shapeL || p.shapeB <= p.shapeT) {
+        p.shapeL = p.shapeT = p.inset;
+        p.shapeR = float(w_) - p.inset;
+        p.shapeB = float(h_) - p.inset;
+    }
     ctx->UpdateSubresource(cb_.get(), 0, nullptr, &p, 0, 0);
 
     winrt::com_ptr<ID3D11Texture2D> back;
@@ -269,7 +316,7 @@ bool GlassRenderer::Present(const GlassParams& in, const std::function<void(ID2D
     ctx->PSSetShaderResources(0, 1, &none);
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
 
-    if (overlay) {
+    if (overlay && d2d_) {
         auto surface = back.as<IDXGISurface>();
         D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
                                                              D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));

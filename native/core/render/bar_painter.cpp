@@ -70,6 +70,33 @@ ID2D1Bitmap1* BarPainter::BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& i
     return b.get();
 }
 
+namespace {
+
+// Integral of the magnification wave (a raised cosine over [-1, 1]) from 0 to x.
+float WaveArea(float x)
+{
+    constexpr float pi = 3.14159265f;
+    if (x >= 1)
+        return 0.5f;
+    if (x <= -1)
+        return -0.5f;
+    return x / 2 + std::sin(pi * x) / (2 * pi);
+}
+
+} // namespace
+
+// Displayed position of base position u. The local scale is 1 + (mag-1) *
+// amount * wave((t - centre) / range); integrating it from the pointer keeps
+// the point under the pointer fixed, so the icon under the pointer in the base
+// layout is the one shown under it, and the neighbours spread out like a wave.
+float BarPainter::MapX(float u) const
+{
+    float k = (mag_ - 1) * amount_;
+    if (k <= 0)
+        return u;
+    return u + k * range_ * WaveArea((u - centre_) / range_);
+}
+
 bool BarPainter::Animate(const BarScene& scene, double nowMs)
 {
     double dt = lastMs_ == 0 ? 16 : std::clamp(nowMs - lastMs_, 0.0, 100.0);
@@ -79,8 +106,19 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     // instead of sliding across from coordinates of the old window.
     bool snap = !SameRect(scene.bar, lastBar_);
     lastBar_ = scene.bar;
+
+    // Magnification: follows the pointer at once, grows and settles smoothly.
+    bool hovering = scene.pointerX >= 0 && scene.dragKey.empty() && scene.magnify > 1.001f;
+    mag_ = std::max(1.f, scene.magnify);
+    range_ = std::max(1.f, scene.magnifyRange);
+    if (hovering)
+        centre_ = scene.pointerX;
+    float amount = Approach(amount_, hovering ? 1.f : 0.f, dt, 13);
+    moving |= amount != amount_;
+    amount_ = amount;
+
     std::set<std::wstring> alive;
-    auto step = [&](const std::wstring& key, const D2D1_RECT_F* plate) {
+    auto step = [&](const std::wstring& key, const SceneItem* item) {
         alive.insert(key);
         Motion& m = motion_[key];
         float h = Approach(m.hover, scene.hoverKey == key || scene.dragKey == key ? 1.f : 0.f, dt, 18);
@@ -92,25 +130,64 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         m.press = p;
         m.appear = a;
         m.lift = l;
-        if (plate) {
-            float x = (plate->left + plate->right) / 2;
-            if (!m.placed || snap || scene.dragKey == key) {
-                m.x = x;
-                m.placed = true;
-            } else {
-                float nx = ApproachPx(m.x, x, dt, 20);
-                moving |= nx != m.x;
-                m.x = nx;
+        if (!item)
+            return;
+        float x = (item->plate.left + item->plate.right) / 2;
+        if (!m.placed || snap || scene.dragKey == key) {
+            m.x = x;
+            m.placed = true;
+        } else {
+            float nx = ApproachPx(m.x, x, dt, 20);
+            moving |= nx != m.x;
+            m.x = nx;
+        }
+        // Launch bounce: hops of decreasing height; stops after the hop in
+        // which the app started running.
+        m.hop = 0;
+        if (item->bounceMs > 0) {
+            if (m.bounceMs != item->bounceMs) {
+                m.bounceMs = item->bounceMs;
+                m.bounceEnd = std::max(1, item->bounces);
+            }
+            constexpr double kHopMs = 560;
+            double t = nowMs - m.bounceMs;
+            int n = int(t / kHopMs);
+            if (item->running && m.bounceEnd > n + 1)
+                m.bounceEnd = n + 1;
+            if (t >= 0 && n < m.bounceEnd) {
+                float ph = float(std::fmod(t, kHopMs) / kHopMs);
+                m.hop = 4 * ph * (1 - ph) * std::pow(0.72f, float(n));
+                moving = true;
             }
         }
     };
     for (const auto& it : scene.items)
-        step(it.key, &it.plate);
+        step(it.key, &it);
     for (const auto& it : scene.extras)
-        step(it.key, &it.plate);
+        step(it.key, &it);
     step(L"#clock", nullptr);
     for (auto it = motion_.begin(); it != motion_.end();)
         it = alive.count(it->first) ? std::next(it) : motion_.erase(it);
+
+    // What the glass shows this frame: the stretched shape and the ripple.
+    frame_.magnified = amount_;
+    frame_.hop = 0;
+    for (const auto& [key, m] : motion_)
+        frame_.hop = std::max(frame_.hop, m.hop);
+    frame_.shape = D2D1::RectF(MapX(scene.bar.left), scene.bar.top, MapX(scene.bar.right), scene.bar.bottom);
+    frame_.rippleA = 0;
+    if (scene.rippleMs > 0) {
+        constexpr double kRippleMs = 720;
+        double t = nowMs - scene.rippleMs;
+        if (t >= 0 && t < kRippleMs) {
+            float u = float(t / kRippleMs);
+            frame_.rippleX = MapX(scene.rippleX);
+            frame_.rippleY = scene.rippleY;
+            frame_.rippleR = (scene.bar.bottom - scene.bar.top) * 1.5f * EaseOut(u);
+            frame_.rippleA = 0.9f * (1 - u) * (1 - u);
+            moving = true;
+        }
+    }
     return moving;
 }
 
@@ -175,13 +252,16 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
         D2D1_COLOR_F c = inkFor(darkText);
         c.a = darkText ? 0.18f : 0.30f;
         brush->SetColor(c);
-        float h = (scene.bar.bottom - scene.bar.top) * 0.46f, mid = (scene.bar.top + scene.bar.bottom) / 2;
-        d2d->FillRectangle(D2D1::RectF(scene.separatorX - 0.5f * s, mid - h / 2, scene.separatorX + 0.5f * s, mid + h / 2), brush.get());
+        float h = (scene.bar.bottom - scene.bar.top) * 0.46f, mid = (scene.bar.top + scene.bar.bottom) / 2, x = MapX(scene.separatorX);
+        d2d->FillRectangle(D2D1::RectF(x - 0.5f * s, mid - h / 2, x + 0.5f * s, mid + h / 2), brush.get());
     }
 
     if (scene.clock.right > scene.clock.left) {
         const Motion& m = motion_[L"#clock"];
         ink = inkFor(darkText);
+        // The clock does not grow; it moves with the stretched bar.
+        float shift = MapX((scene.clock.left + scene.clock.right) / 2) - (scene.clock.left + scene.clock.right) / 2;
+        d2d->SetTransform(D2D1::Matrix3x2F::Translation(shift, 0));
         if (m.hover > 0.001f) {
             D2D1_COLOR_F c = washFor(darkText);
             c.a *= EaseOut(m.hover);
@@ -202,6 +282,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
         };
         text(time, Format(scene.timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD), top, top + lineT);
         text(date, Format(scene.datePx, DWRITE_FONT_WEIGHT_NORMAL), top + lineT, top + lineT + lineD);
+        d2d->SetTransform(D2D1::Matrix3x2F::Identity());
     }
 }
 
@@ -210,32 +291,38 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
 {
     const float s = scene.scale;
     const Motion& m = motion_[it.key];
-    // Everything of the item slides with its plate (reordering, drag and drop).
+    const bool magnifying = mag_ > 1.001f;
+    // Base position: everything of the item slides with its plate (reordering,
+    // drag and drop). Displayed position: the base one under the magnification.
     float dx = m.placed ? m.x - (it.plate.left + it.plate.right) / 2 : 0;
     D2D1_RECT_F plate = D2D1::RectF(it.plate.left + dx, it.plate.top, it.plate.right + dx, it.plate.bottom);
     D2D1_RECT_F icon = D2D1::RectF(it.icon.left + dx, it.icon.top, it.icon.right + dx, it.icon.bottom);
     float size = icon.right - icon.left;
-    float cx = (icon.left + icon.right) / 2, cy = (icon.top + icon.bottom) / 2;
+    float bx = (icon.left + icon.right) / 2, bottom = icon.bottom;
+    float pw = std::max(1.f, plate.right - plate.left);
+    float grow = (MapX(bx + pw / 2) - MapX(bx - pw / 2)) / pw; // local magnification
+    float cx = MapX(bx);
     float hover = EaseOut(m.hover), lift = EaseOut(m.lift);
 
-    // Plate: faint for the foreground app, brighter on hover and press. Its
-    // corners are concentric with the bar's (same gap all around the end caps).
-    float plateA = std::max(it.active ? 0.55f : 0.f, hover) + 0.35f * m.press + 0.4f * lift;
+    // Plate (only without magnification): hover, press and drag feedback.
+    // Its corners are concentric with the bar's.
+    float plateA = (magnifying ? 0.f : hover) + 0.35f * m.press + 0.4f * lift;
     if (plateA > 0.001f) {
         D2D1_COLOR_F c = wash;
         c.a *= std::min(plateA, 1.6f);
         brush->SetColor(c);
         float r = scene.plateRadius;
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, D2D1::Point2F(bx, plate.bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, 0));
         d2d->FillRoundedRectangle(D2D1::RoundedRect(plate, r, r), brush);
     }
 
-    // Icon: lifts and grows slightly on hover, more while dragged, dips on
-    // press, fades in when new.
-    float k = (1 + 0.06f * hover + 0.08f * lift) * (1 - 0.08f * m.press) * (0.85f + 0.15f * m.appear);
-    float up = -1.5f * s * hover - 2.0f * s * lift;
-    d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(cx, cy)) * D2D1::Matrix3x2F::Translation(0, up));
+    // Icon: grows from its bottom edge with the wave, hops when launching,
+    // dips on press, fades in when new; lifts while dragged.
+    float k = grow * (magnifying ? 1.f : 1 + 0.06f * hover) * (1 + 0.08f * lift) * (1 - 0.08f * m.press) * (0.85f + 0.15f * m.appear);
+    float up = m.hop * 0.55f * size + (magnifying ? 0.f : 1.5f * s * hover) + 2.0f * s * lift;
+    d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(bx, bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, -up));
     if (it.key == L"#start") {
-        DrawMark(d2d, icon, m.appear);
+        DrawLogo(d2d, icon, m.appear);
     } else if (!it.glyph.empty()) {
         if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
             brush->SetColor(ink);
@@ -244,7 +331,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     } else if (ID2D1Bitmap1* bmp = BitmapFor(d2d, it)) {
         usedBitmaps_.insert(it.imageId);
         shadow_->SetInput(0, bmp);
-        shadow_->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, (1.6f + 1.6f * lift) * s);
+        shadow_->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, (1.6f + 1.6f * lift + 1.2f * m.hop) * s);
         shadow_->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(0, 0, 0, (0.38f + 0.12f * lift) * m.appear));
         auto px = bmp->GetPixelSize();
         float sx = size / float(px.width), sy = size / float(px.height);
@@ -264,58 +351,55 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     // Count badge (unread notifications): a small accent disc on the icon's corner.
     if (it.badge > 0) {
         float d = std::max(9.f * s, size * 0.46f);
-        float bx = icon.right - d * 0.35f, by = icon.top + d * 0.15f;
+        float bxr = icon.right - d * 0.35f, by = icon.top + d * 0.15f;
         brush->SetColor(D2D1::ColorF(0.04f, 0.52f, 1.0f, 1.0f));
-        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bx, by), d / 2, d / 2), brush);
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bxr, by), d / 2, d / 2), brush);
         std::wstring n = it.badge > 9 ? L"9+" : std::to_wstring(it.badge);
         if (IDWriteTextFormat* f = Format(d * 0.62f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
             brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
-            d2d->DrawText(n.c_str(), UINT32(n.size()), f, D2D1::RectF(bx - d, by - d / 2, bx + d, by + d / 2), brush);
+            d2d->DrawText(n.c_str(), UINT32(n.size()), f, D2D1::RectF(bxr - d, by - d / 2, bxr + d, by + d / 2), brush);
         }
     }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());
 
-    // Running indicator, centred between the icon and the plate's lower edge:
-    // a dot; a short pill for the active app; amber when the app asks for
-    // attention. Hidden while dragged.
+    // Running indicator: a small dot under the icon, centred in the gap to the
+    // bar's lower edge; full ink for the foreground app, amber when the app
+    // asks for attention. It stays on the bar while the icon hops or grows.
     if (it.running && lift < 0.99f) {
-        float w = it.active ? 13 * s : 4.5f * s, h = 3.5f * s;
-        float y = (icon.bottom + plate.bottom) / 2 - h / 2;
+        float r = (it.active ? 2.3f : 1.9f) * s;
+        float y = (it.icon.bottom + scene.bar.bottom) / 2;
         D2D1_COLOR_F c = it.attention ? D2D1::ColorF(1.0f, 0.70f, 0.18f, 0.98f) : ink;
         if (!it.active && !it.attention)
-            c.a *= 0.65f;
-        c.a *= 1 - lift;
+            c.a *= 0.45f;
+        c.a *= (1 - lift) * m.appear;
         brush->SetColor(c);
-        d2d->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(cx - w / 2, y, cx + w / 2, y + h), h / 2, h / 2), brush);
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, y), r, r), brush);
     }
 }
 
-// The Atrium mark (as in the settings app): a glass capsule on a violet-to-cyan
-// tile.
-void BarPainter::DrawMark(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity)
+// The start entry: the Windows logo, redrawn as four panes with Windows 11's
+// light-to-deep blue, slightly smaller than an app icon's square.
+void BarPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity)
 {
-    float w = r.right - r.left, h = r.bottom - r.top;
-    D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(0x8B5CF6, opacity)}, {0.55f, D2D1::ColorF(0x3B82F6, opacity)}, {1.f, D2D1::ColorF(0x22D3EE, opacity)}};
+    float w = std::min(r.right - r.left, r.bottom - r.top) * 0.80f;
+    float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+    float left = cx - w / 2, top = cy - w / 2;
+    float gap = w * 0.08f, pane = (w - gap) / 2, corner = pane * 0.10f;
+    D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(0x5CCBFF, opacity)}, {0.5f, D2D1::ColorF(0x1A9BF0, opacity)}, {1.f, D2D1::ColorF(0x0060C8, opacity)}};
     winrt::com_ptr<ID2D1GradientStopCollection> coll;
     winrt::com_ptr<ID2D1LinearGradientBrush> grad;
     if (FAILED(d2d->CreateGradientStopCollection(stops, 3, coll.put())) ||
-        FAILED(d2d->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(r.left, r.top), D2D1::Point2F(r.right, r.bottom)),
+        FAILED(d2d->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(left, top), D2D1::Point2F(left + w, top + w)),
                                               coll.get(), grad.put())))
         return;
-    d2d->FillRoundedRectangle(D2D1::RoundedRect(r, w * 0.28f, h * 0.28f), grad.get());
-    winrt::com_ptr<ID2D1SolidColorBrush> b;
-    d2d->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.20f * opacity), b.put());
-    d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(r.left + w * 0.36f, r.top + h * 0.33f), w * 0.23f, h * 0.23f), b.get());
-    D2D1_RECT_F cap = D2D1::RectF(r.left + w * 0.16f, r.top + h * 0.46f, r.right - w * 0.16f, r.top + h * 0.80f);
-    float cr = (cap.bottom - cap.top) / 2;
-    b->SetColor(D2D1::ColorF(1, 1, 1, 0.30f * opacity));
-    d2d->FillRoundedRectangle(D2D1::RoundedRect(cap, cr, cr), b.get());
-    b->SetColor(D2D1::ColorF(1, 1, 1, 0.75f * opacity));
-    d2d->DrawRoundedRectangle(D2D1::RoundedRect(cap, cr, cr), b.get(), std::max(1.f, w * 0.025f));
-    float cy = (cap.top + cap.bottom) / 2, dot = w * 0.04f;
+    winrt::com_ptr<ID2D1SolidColorBrush> sheen;
+    d2d->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.16f * opacity), sheen.put());
     for (int i = 0; i < 4; ++i) {
-        b->SetColor(D2D1::ColorF(1, 1, 1, (i < 3 ? 0.9f : 0.6f) * opacity));
-        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(r.left + w * (0.335f + 0.11f * float(i)), cy), dot, dot), b.get());
+        float x = left + float(i % 2) * (pane + gap), y = top + float(i / 2) * (pane + gap);
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(x, y, x + pane, y + pane), corner, corner);
+        d2d->FillRoundedRectangle(rr, grad.get());
+        // A faint lit edge on top of each pane.
+        d2d->FillRectangle(D2D1::RectF(x + corner, y, x + pane - corner, y + std::max(0.6f, pane * 0.06f)), sheen.get());
     }
 }
 
