@@ -25,6 +25,17 @@ struct GlassShape {
     float radius = 0;
     float fade = 0; // 0 = as is, 1 = gone
     std::shared_ptr<const SdfImage> sdf; // the shape inside the rectangle; null: a rounded rectangle
+    // Instead of one rectangle: up to kMaxGlassParts rounded rectangles that
+    // melt into one (a smooth union `melt` px wide), each with its own corner
+    // radii. A page's pieces of glass becoming one while it changes.
+    struct Part {
+        float left, top, right, bottom;
+        float radii[4]; // top left, top right, bottom right, bottom left
+        bool operator==(const Part&) const = default;
+    };
+    std::vector<Part> parts;
+    float melt = 0;
+    float partMix = 0; // 0: the parts, 1: the rounded rectangle (left..bottom, radius) they become
     bool operator==(const GlassShape&) const = default;
 };
 

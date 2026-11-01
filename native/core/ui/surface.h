@@ -47,6 +47,14 @@ struct ShapeDip {
     float radius;
     float fade = 0; // 0 = as is, 1 = gone
     std::shared_ptr<const SdfImage> sdf; // a shape of its own inside rect (distance field at the window's scale)
+    // Melting parts instead of one rectangle (GlassShape::parts), DIP; rect is their bounds.
+    struct Part {
+        D2D1_RECT_F rect;
+        float radii[4]; // top left, top right, bottom right, bottom left
+    };
+    std::vector<Part> parts;
+    float melt = 0; // DIP
+    float partMix = 0; // 0: the parts, 1: rect with radius
 };
 
 class Surface;

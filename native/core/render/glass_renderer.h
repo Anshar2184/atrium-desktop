@@ -30,8 +30,13 @@ struct GlassParams {
     float shapeL, shapeT, shapeR, shapeB;
     // Press ripple: centre (window px), ring radius, strength; strength 0 = none.
     float rippleX, rippleY, rippleR, rippleA;
+    // Melting parts (GlassShape::parts), window px; partCount 0: the shape above.
+    float parts[6][4];
+    float partRadii[6][4];
+    float partCount, melt, partMix, pad0; // partMix: 0 the parts, 1 the rectangle above (Shape, Radius)
 };
-static_assert(sizeof(GlassParams) == 128);
+static_assert(sizeof(GlassParams) == 336);
+constexpr int kMaxGlassParts = 6;
 
 // Scale and fade of a composition visual, run by DWM so it stays smooth
 // whatever our own frame rate is. Opening: from slightly small and clear,

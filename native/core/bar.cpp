@@ -118,6 +118,18 @@ std::vector<GlassParams> PanelParams(const Settings& s, float scale, const Glass
         g.radius = std::min(sh.radius, std::min(sh.right - sh.left, sh.bottom - sh.top) / 2);
         g.fade = sh.fade;
         g.sdf = sh.sdf ? 1.f : 0.f;
+        g.partCount = float(std::min<size_t>(sh.parts.size(), kMaxGlassParts));
+        g.melt = sh.melt;
+        g.partMix = sh.partMix;
+        for (size_t i = 0; i < sh.parts.size() && i < kMaxGlassParts; ++i) {
+            const GlassShape::Part& pt = sh.parts[i];
+            g.parts[i][0] = pt.left;
+            g.parts[i][1] = pt.top;
+            g.parts[i][2] = pt.right;
+            g.parts[i][3] = pt.bottom;
+            for (int k = 0; k < 4; ++k)
+                g.partRadii[i][k] = pt.radii[k];
+        }
         out.push_back(g);
     }
     return out;

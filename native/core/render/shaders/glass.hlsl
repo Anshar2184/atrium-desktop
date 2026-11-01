@@ -22,6 +22,12 @@ cbuffer GlassParams : register(b0)
     float  SdfMode;     // 1: the shape is ShapeSdf (a distance field over Shape), not a rounded rectangle
     float4 Shape;       // the glass shape in window px: left, top, right, bottom
     float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
+    float4 PartRect[6]; // melting parts (PartCount > 0): rectangles in window px, left, top, right, bottom
+    float4 PartRadii[6]; // their corner radii: top left, top right, bottom right, bottom left
+    float  PartCount;
+    float  Melt;        // width of the smooth union in px
+    float  PartMix;     // 0: the parts, 1: the rounded rectangle Shape (the parts' union has seams inside where they meet)
+    float  PartPad;
 };
 
 Texture2D Bg : register(t0);
@@ -49,6 +55,22 @@ float sdRoundRect(float2 p, float2 b, float r)
     return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
 }
 
+// A rounded rectangle whose corners differ (r: top left, top right, bottom right, bottom left; y down).
+float sdRoundRect4(float2 p, float2 b, float4 r)
+{
+    float rr = p.x < 0 ? (p.y < 0 ? r.x : r.w) : (p.y < 0 ? r.y : r.z);
+    rr = min(rr, min(b.x, b.y));
+    float2 q = abs(p) - b + rr;
+    return length(max(q, 0)) + min(max(q.x, q.y), 0) - rr;
+}
+
+// Smooth minimum: two shapes melt where they come within k px of each other.
+float smin(float a, float b, float k)
+{
+    float h = saturate(0.5 + 0.5 * (b - a) / max(k, 1e-3));
+    return lerp(b, a, h) - k * h * (1 - h);
+}
+
 // Signed distance to the glass shape at window px `px` (negative inside).
 float Dist(float2 px)
 {
@@ -56,6 +78,18 @@ float Dist(float2 px)
     float2 b = max((Shape.zw - Shape.xy) * 0.5, 1);
     float r = min(Radius, min(b.x, b.y));
     float d = sdRoundRect(c, b, r);
+    if (PartCount > 0.5) {
+        float card = d;
+        d = 1e6;
+        [unroll] for (int i = 0; i < 6; ++i) {
+            if (float(i) < PartCount) {
+                float4 pr = PartRect[i];
+                float di = sdRoundRect4(px - (pr.xy + pr.zw) * 0.5, max((pr.zw - pr.xy) * 0.5, 1), PartRadii[i]);
+                d = Melt > 0.01 ? smin(d, di, Melt) : min(d, di);
+            }
+        }
+        d = lerp(d, card, PartMix);
+    }
     if (SdfMode > 0.5) {
         float2 uv = (px - Shape.xy) / max(Shape.zw - Shape.xy, 1);
         float2 outside = max(max(Shape.xy - px, px - Shape.zw), 0);

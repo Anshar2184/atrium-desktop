@@ -48,7 +48,7 @@ private:
         std::wstring id;
     };
     void Paint(Canvas& c);
-    void PaintMain(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes);
+    void PaintMain(Canvas& c, const Theme& t);
     void PaintWifi(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintBluetooth(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintSound(Canvas& c, const Theme& t, D2D1_RECT_F card);
@@ -71,8 +71,12 @@ private:
     void SetSliderAt(const std::wstring& id, float x);
     float Hover(Canvas& c, const std::wstring& id, bool on);
     float MainHeight() const;
-    float PageHeight() const;
-    D2D1_SIZE_F Size() const;
+    float PageHeight(Page page) const;
+    float HeightOf(Page page) const { return page == Page::Main ? MainHeight() : PageHeight(page); }
+    float MaxHeight() const;
+    std::vector<ShapeDip> MainShapes() const; // the main page's pieces of glass, from its top
+    void PaintPage(Canvas& c, const Theme& t, Page page);
+    D2D1_SIZE_F Size() const; // the window's: as tall as the tallest page, the glass standing on its bottom
 
     Surface surface_;
     SystemStatus status_;
@@ -88,6 +92,13 @@ private:
     Page page_ = Page::Main;
     double pageMs_ = 0;
     int pageDir_ = 0;
+    Page fromPage_ = Page::Main; // the page leaving while the new one comes in
+    // The glass's height glides between pages (and when a page's rows change);
+    // the window keeps its size, so nothing jumps while it does.
+    float shownH_ = 0, fromH_ = 0, toH_ = 0;
+    double heightMs_ = 0;
+    float cardTop_ = 0;     // DIP from the window's top: where the glass begins; the content hangs from it
+    int regionTop_ = -1;    // the window region's top (px): clicks above the glass go to what is under it
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_, dragging_;
     bool tracking_ = false;

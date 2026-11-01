@@ -522,7 +522,10 @@ void Surface::SetRadius(float dip)
 void Surface::SetShapes(const std::vector<ShapeDip>& shapes)
 {
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
-        return a.radius == b.radius && a.fade == b.fade && a.sdf == b.sdf && a.rect.left == b.rect.left && a.rect.top == b.rect.top && a.rect.right == b.rect.right && a.rect.bottom == b.rect.bottom;
+        auto sameRect = [](const D2D1_RECT_F& x, const D2D1_RECT_F& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
+        auto samePart = [&](const ShapeDip::Part& x, const ShapeDip::Part& y) { return sameRect(x.rect, y.rect) && std::equal(x.radii, x.radii + 4, y.radii); };
+        return a.radius == b.radius && a.fade == b.fade && a.sdf == b.sdf && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix &&
+               a.parts.size() == b.parts.size() && std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
     };
     if (shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
         return;
@@ -543,7 +546,13 @@ void Surface::PublishPanel()
     for (const ShapeDip& s : shapes_) {
         // Whole px, so the glass and the content's washes line up.
         auto px = [&](float v) { return std::round(v * scale_) + p.inset; };
-        p.shapes.push_back({px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade, s.sdf});
+        GlassShape g{px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade, s.sdf};
+        for (const ShapeDip::Part& part : s.parts)
+            g.parts.push_back({px(part.rect.left), px(part.rect.top), px(part.rect.right), px(part.rect.bottom),
+                               {part.radii[0] * scale_, part.radii[1] * scale_, part.radii[2] * scale_, part.radii[3] * scale_}});
+        g.melt = s.melt * scale_;
+        g.partMix = s.partMix;
+        p.shapes.push_back(std::move(g));
     }
     p.visible = visible_ || hiding_;
     p.pop = pop_;

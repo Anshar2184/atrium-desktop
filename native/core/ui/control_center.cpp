@@ -21,7 +21,7 @@ constexpr float kW = 340, kGap = 10, kTopH = 150, kSliderH = 68, kHeader = 58, k
 constexpr float kSection = 30, kAppRowH = 50, kModeH = 78;
 constexpr int kMaxRows = 6, kMaxOutputs = 4, kMaxApps = 5, kMaxDisplays = 4;
 constexpr UINT_PTR kStatusTimer = 1;
-constexpr double kPageMs = 240;
+constexpr double kPageMs = 320;
 constexpr UINT WM_WIFI_LIST = WM_APP + 0x50;  // wParam generation, lParam std::vector<WifiNetwork>*
 constexpr UINT WM_WIFI_AGAIN = WM_APP + 0x51; // after connecting: read the state and the list again
 constexpr UINT WM_CC_RADIOS = WM_APP + 0x52;  // lParam RadioRead*
@@ -102,21 +102,44 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
 
 float ControlCenter::MainHeight() const { return kTopH + kGap + kSliderH + (brightness_ >= 0 ? kGap + kSliderH : 0); }
 
-float ControlCenter::PageHeight() const
+float ControlCenter::PageHeight(Page page) const
 {
-    if (page_ == Page::Sound) {
+    if (page == Page::Sound) {
         int outs = std::clamp(int(outputs_.size()), 1, kMaxOutputs), apps = std::clamp(int(apps_.size()), 1, kMaxApps);
         return kHeader + float(outs) * kRowH + kSection + float(apps) * kAppRowH + kFooter + 6;
     }
-    if (page_ == Page::Cast)
+    if (page == Page::Cast)
         return kHeader + float(std::clamp(int(displays_.size()), 1, kMaxDisplays)) * kRowH + kSection + kModeH + kFooter + 6;
-    size_t n = page_ == Page::Wifi ? networks_.size() : devices_.size();
-    bool off = page_ == Page::Wifi ? radiosRead_ && !radios_.wifiOn : !radios_.btOn;
+    size_t n = page == Page::Wifi ? networks_.size() : devices_.size();
+    bool off = page == Page::Wifi ? radiosRead_ && !radios_.wifiOn : !radios_.btOn;
     int rows = off ? 1 : std::clamp(int(n), 1, kMaxRows);
     return kHeader + float(rows) * kRowH + kFooter + 6;
 }
 
-D2D1_SIZE_F ControlCenter::Size() const { return D2D1::SizeF(kW, page_ == Page::Main ? MainHeight() : PageHeight()); }
+float ControlCenter::MaxHeight() const
+{
+    return std::max({kTopH + 2 * (kGap + kSliderH), kHeader + float(kMaxRows) * kRowH + kFooter + 6,
+                     kHeader + float(kMaxOutputs) * kRowH + kSection + float(kMaxApps) * kAppRowH + kFooter + 6,
+                     kHeader + float(kMaxDisplays) * kRowH + kSection + kModeH + kFooter + 6});
+}
+
+D2D1_SIZE_F ControlCenter::Size() const { return D2D1::SizeF(kW, MaxHeight()); }
+
+std::vector<ShapeDip> ControlCenter::MainShapes() const
+{
+    const float modR = std::min(radius_, 22.f), colW = (kW - kGap) / 2;
+    std::vector<ShapeDip> s;
+    s.push_back({D2D1::RectF(0, 0, colW, kTopH), modR});
+    s.push_back({D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2), modR});
+    s.push_back({D2D1::RectF(colW + kGap, (kTopH - kGap) / 2 + kGap, kW, kTopH), modR});
+    float y = kTopH + kGap;
+    if (brightness_ >= 0) {
+        s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
+        y += kSliderH + kGap;
+    }
+    s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
+    return s;
+}
 
 void ControlCenter::Place()
 {
@@ -135,13 +158,20 @@ void ControlCenter::Open(RECT anchor, RECT bar)
     pressed_.clear();
     dragging_.clear();
     hoverAnim_.clear();
-    page_ = Page::Main;
+    page_ = fromPage_ = Page::Main;
     pageMs_ = ClockMs();
     pageDir_ = 0;
+    shownH_ = fromH_ = toH_ = MainHeight();
+    heightMs_ = 0;
+    if (regionTop_ != -1) {
+        SetWindowRgn(surface_.Hwnd(), nullptr, FALSE);
+        regionTop_ = -1;
+    }
     brightRead_ = false; // changed meanwhile with the keyboard or in Settings
     status_ = QuerySystemStatus();
     Place();
     ReadRadios(true);
+    ReadAudio(true); // ready for the sound's page
     Scan(false); // what the adapter already knows, ready for the Wi-Fi page
     SetTimer(surface_.Hwnd(), kStatusTimer, 1500, nullptr);
     Log(L"control: opened");
@@ -167,6 +197,7 @@ void ControlCenter::ShowPage(Page page)
     if (page_ == Page::Cast)
         finder_.Stop();
     pageDir_ = page == Page::Main ? -1 : 1;
+    fromPage_ = page_;
     page_ = page;
     pageMs_ = ClockMs();
     hover_.clear();
@@ -264,35 +295,102 @@ float ControlCenter::Hover(Canvas& c, const std::wstring& id, bool on)
     return v;
 }
 
+void ControlCenter::PaintPage(Canvas& c, const Theme& t, Page page)
+{
+    if (page == Page::Main) {
+        PaintMain(c, t);
+        return;
+    }
+    D2D1_RECT_F card = D2D1::RectF(0, 0, kW, HeightOf(page));
+    if (c.panel)
+        c.Fill(card, radius_, t.panel);
+    if (page == Page::Wifi)
+        PaintWifi(c, t, card);
+    else if (page == Page::Bluetooth)
+        PaintBluetooth(c, t, card);
+    else if (page == Page::Sound)
+        PaintSound(c, t, card);
+    else
+        PaintCast(c, t, card);
+}
+
+// The glass stands on the window's bottom; its height glides to the page's.
+// Between the main page and another, the main page's pieces of glass melt
+// into one (or come out of it) while one page fades into the other.
 void ControlCenter::Paint(Canvas& c)
 {
     const Theme& t = c.theme;
-    hits_.clear();
-    std::vector<ShapeDip> shapes;
-    float e = pageDir_ ? Ease(float((c.now - pageMs_) / kPageMs)) : 1.f;
-    if (e < 1)
-        c.Continue();
-    const float h = Size().height;
-    // A new page slides in from the side it comes from.
-    c.BeginGroup(e, 1, kW / 2, h / 2, float(pageDir_) * 22 * (1 - e), 0);
-    if (page_ == Page::Main) {
-        PaintMain(c, t, shapes);
-    } else {
-        D2D1_RECT_F card = D2D1::RectF(0, 0, kW, h);
-        shapes.push_back({card, radius_});
-        if (c.panel)
-            c.Fill(card, radius_, t.panel);
-        if (page_ == Page::Wifi)
-            PaintWifi(c, t, card);
-        else if (page_ == Page::Bluetooth)
-            PaintBluetooth(c, t, card);
-        else if (page_ == Page::Sound)
-            PaintSound(c, t, card);
-        else
-            PaintCast(c, t, card);
+    const float winH = Size().height;
+    const float target = HeightOf(page_);
+    if (target != toH_) {
+        fromH_ = shownH_;
+        toH_ = target;
+        heightMs_ = c.now;
     }
+    const float he = heightMs_ > 0 ? Ease(float((c.now - heightMs_) / kPageMs)) : 1.f;
+    shownH_ = fromH_ + (toH_ - fromH_) * he;
+    const float e = pageDir_ ? Ease(float((c.now - pageMs_) / kPageMs)) : 1.f;
+    if (he < 1 || e < 1)
+        c.Continue();
+    const bool morph = e < 1 && fromPage_ != page_ && (fromPage_ == Page::Main || page_ == Page::Main);
+    const D2D1_RECT_F card = D2D1::RectF(0, winH - shownH_, kW, winH);
+    cardTop_ = card.top;
+
+    std::vector<ShapeDip> shapes;
+    if (morph) {
+        // One piece of glass melting from the main page's pieces (k 0) into
+        // the card (k 1): the gaps close, the inner corners square up, the
+        // outer ones round into the card's, and a smooth union bridges the
+        // gaps on the way, so there is never more than one layer of glass.
+        const float k = fromPage_ == Page::Main ? e : 1 - e;
+        const float mainH = MainHeight(), sy = shownH_ / mainH, g = kGap / 2 * k;
+        ShapeDip m{card, radius_};
+        m.melt = 22 * std::sin(3.14159265f * k);
+        m.partMix = k * k * (3 - 2 * k); // the seams fade as the parts become the card
+        for (const ShapeDip& piece : MainShapes()) {
+            const D2D1_RECT_F r = piece.rect;
+            const bool atL = r.left < 0.5f, atT = r.top < 0.5f, atR = r.right > kW - 0.5f, atB = r.bottom > mainH - 0.5f;
+            D2D1_RECT_F q = D2D1::RectF(atL ? r.left : r.left - g, card.top + (atT ? r.top : r.top - g) * sy, atR ? r.right : r.right + g,
+                                        card.top + (atB ? r.bottom : r.bottom + g) * sy);
+            auto corner = [&](bool outer) { return piece.radius + ((outer ? radius_ : 0.f) - piece.radius) * k; };
+            m.parts.push_back({q, {corner(atL && atT), corner(atR && atT), corner(atR && atB), corner(atL && atB)}});
+        }
+        shapes.push_back(std::move(m));
+    } else if (page_ == Page::Main) {
+        for (ShapeDip piece : MainShapes()) {
+            piece.rect.top += card.top;
+            piece.rect.bottom += card.top;
+            shapes.push_back(piece);
+        }
+    } else {
+        shapes.push_back({card, radius_});
+    }
+
+    // The content hangs from the glass's top, clipped to it while it changes size.
+    c.Clip(card);
+    if (morph) {
+        // The old page goes quickly; the new one comes once it has.
+        c.BeginGroup(1 - Ease(std::min(1.f, e / 0.4f)), 1, kW / 2, card.top, -float(pageDir_) * 18 * e, card.top);
+        PaintPage(c, t, fromPage_);
+        c.EndGroup();
+    }
+    hits_.clear();
+    float in = morph ? Ease(std::clamp((e - 0.18f) / 0.82f, 0.f, 1.f)) : e;
+    c.BeginGroup(in, 1, kW / 2, card.top, float(pageDir_) * 18 * (1 - e), card.top);
+    PaintPage(c, t, page_);
     c.EndGroup();
+    c.Unclip();
     surface_.SetShapes(shapes);
+
+    // At rest, the window ends at the glass's top: clicks above it reach what is under it.
+    const int top = he >= 1 && e >= 1 ? int(std::lround(card.top * surface_.Scale())) : 0;
+    RECT wr{};
+    if (top != regionTop_ && GetWindowRect(surface_.Hwnd(), &wr)) {
+        regionTop_ = top;
+        HRGN rgn = CreateRectRgn(0, top, wr.right - wr.left, wr.bottom - wr.top);
+        if (!SetWindowRgn(surface_.Hwnd(), rgn, FALSE))
+            DeleteObject(rgn);
+    }
 }
 
 void ControlCenter::Switch(Canvas& c, const Theme& t, D2D1_RECT_F r, bool on, float hv)
@@ -304,9 +402,9 @@ void ControlCenter::Switch(Canvas& c, const Theme& t, D2D1_RECT_F r, bool on, fl
     c.Circle(x, cy, hh - 2.5f, D2D1::ColorF(1, 1, 1, 0.98f));
 }
 
-void ControlCenter::PaintMain(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes)
+void ControlCenter::PaintMain(Canvas& c, const Theme& t)
 {
-    const float modR = std::min(radius_, 22.f), colW = (kW - kGap) / 2;
+    const float colW = (kW - kGap) / 2;
     const D2D1_RECT_F conn = D2D1::RectF(0, 0, colW, kTopH);
     const D2D1_RECT_F batt = D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2);
     const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
@@ -317,13 +415,9 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t, std::vector<ShapeDip>& 
         y = bright.bottom + kGap;
     }
     const D2D1_RECT_F sound = D2D1::RectF(0, y, kW, y + kSliderH);
-    for (D2D1_RECT_F r : {conn, batt, cast})
-        shapes.push_back({r, modR});
-    if (brightness_ >= 0)
-        shapes.push_back({bright, modR});
-    shapes.push_back({sound, modR});
+    const float modR = std::min(radius_, 22.f);
     if (c.panel)
-        for (const ShapeDip& s : shapes)
+        for (const ShapeDip& s : MainShapes())
             c.Fill(s.rect, s.radius, t.panel);
 
     // Connections: a round switch and the state; the row opens its page.
@@ -802,7 +896,8 @@ void ControlCenter::PaintCast(Canvas& c, const Theme& t, D2D1_RECT_F card)
 
 std::wstring ControlCenter::HitAt(POINT pt) const
 {
-    float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
+    // The hits are the page's own coordinates: it hangs from the glass's top.
+    float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s - cardTop_;
     // Small controls first: they sit on larger rows.
     for (const Hit& h : hits_)
         if ((h.id == L"disconnect" || h.id == L"mute" || h.id == L"wifi" || h.id == L"bt" || h.id == L"rescan" || h.id == L"castoff" ||
@@ -1005,7 +1100,7 @@ void ControlCenter::LogState() const
              h.id.rfind(L"disp:", 0) != 0) ||
             h.id == L"net:0" || h.id == L"bt:0" || h.id == L"app:0" || h.id == L"amute:0" || h.id == L"disp:0")
             spots += L" " + h.id + L"@" + std::to_wstring(int(float(r.left) + (h.rect.left + h.rect.right) / 2 * s)) + L"," +
-                     std::to_wstring(int(float(r.top) + (h.rect.top + h.rect.bottom) / 2 * s));
+                     std::to_wstring(int(float(r.top) + (cardTop_ + (h.rect.top + h.rect.bottom) / 2) * s));
     Log(L"control: spots%s", spots.c_str());
     const wchar_t* page = page_ == Page::Main       ? L"main"
                           : page_ == Page::Wifi      ? L"wifi"
@@ -1184,6 +1279,10 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         return true;
     case WM_LBUTTONDOWN:
+        if (float(pt.y) / surface_.Scale() < cardTop_) {
+            Close(); // above the glass (while it changes size): as a click outside
+            return true;
+        }
         pressed_ = HitAt(pt);
         if ((pressed_ == L"slider" && status_.audio) || pressed_ == L"bright" || pressed_.rfind(L"app:", 0) == 0) {
             dragging_ = pressed_;
