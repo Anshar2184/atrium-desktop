@@ -183,6 +183,34 @@ std::vector<std::pair<std::wstring, std::wstring>> JsonStringPairs(const std::ws
     return out;
 }
 
+// %ALLUSERSPROFILE%, %APPDATA% and the like, from the shell's known folders:
+// the process environment may lack them (Atrium started from a service or a
+// sandbox), and then those pins would seem to point nowhere.
+std::wstring ExpandFolders(const std::wstring& value)
+{
+    static const std::pair<const wchar_t*, const KNOWNFOLDERID*> kFolders[] = {
+        {L"%ALLUSERSPROFILE%", &FOLDERID_ProgramData}, {L"%PROGRAMDATA%", &FOLDERID_ProgramData},
+        {L"%APPDATA%", &FOLDERID_RoamingAppData},      {L"%LOCALAPPDATA%", &FOLDERID_LocalAppData},
+        {L"%USERPROFILE%", &FOLDERID_Profile},         {L"%PUBLIC%", &FOLDERID_Public},
+        {L"%PROGRAMFILES%", &FOLDERID_ProgramFiles},   {L"%PROGRAMFILES(X86)%", &FOLDERID_ProgramFilesX86},
+        {L"%SYSTEMROOT%", &FOLDERID_Windows},          {L"%WINDIR%", &FOLDERID_Windows}};
+    std::wstring out = value;
+    for (const auto& [token, id] : kFolders) {
+        size_t len = wcslen(token);
+        if (out.size() < len || CompareStringOrdinal(out.c_str(), int(len), token, int(len), TRUE) != CSTR_EQUAL)
+            continue;
+        PWSTR path = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(*id, KF_FLAG_DEFAULT, nullptr, &path)))
+            out = std::wstring(path) + out.substr(len);
+        CoTaskMemFree(path);
+        break;
+    }
+    wchar_t expanded[MAX_PATH * 2] = {};
+    if (out.find(L'%') != std::wstring::npos && ExpandEnvironmentStringsW(out.c_str(), expanded, DWORD(std::size(expanded))))
+        out = expanded;
+    return out;
+}
+
 // The layout's entries as apps. A pinned shortcut is the catalog's entry only
 // when that is the same app (its AUMID, or the same target under the same
 // name); otherwise the shortcut itself, which keeps its arguments and keeps
@@ -198,18 +226,22 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
         if (key == L"packagedAppId") {
             auto it = std::find_if(apps.begin(), apps.end(), [&](const CatalogApp& a) { return SameText(a.aumid, value) || SameText(a.id, value); });
             if (it != apps.end())
-                add(*it); // otherwise no longer installed
+                add(*it);
+            else
+                Log(L"catalog: start pin %s is not installed", value.c_str());
             continue;
         }
         if (key != L"desktopAppLink")
             continue;
-        wchar_t expanded[MAX_PATH * 2] = {};
-        if (!ExpandEnvironmentStringsW(value.c_str(), expanded, DWORD(std::size(expanded))) || GetFileAttributesW(expanded) == INVALID_FILE_ATTRIBUTES)
+        std::wstring expanded = ExpandFolders(value);
+        if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            Log(L"catalog: start pin %s not found", value.c_str());
             continue;
+        }
         CatalogApp link;
         link.id = expanded;
         winrt::com_ptr<IShellItem2> item;
-        if (SUCCEEDED(SHCreateItemFromParsingName(expanded, nullptr, IID_PPV_ARGS(item.put())))) {
+        if (SUCCEEDED(SHCreateItemFromParsingName(expanded.c_str(), nullptr, IID_PPV_ARGS(item.put())))) {
             PWSTR s = nullptr;
             if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &s)) && s)
                 link.name = s; // localised ("File Explorer.lnk" shows as 文件资源管理器)
