@@ -1,6 +1,8 @@
 #include "glass_panel.h"
 
 #include <algorithm>
+#include <map>
+#include <mutex>
 
 namespace atrium {
 
@@ -15,7 +17,39 @@ bool SystemLight()
     return v != 0;
 }
 
+std::mutex g_inkMutex;
+std::map<HWND, InkGrid> g_ink;
+
 } // namespace
+
+bool InkGrid::DarkAt(float x0, float y0, float x1, float y1, bool fallback) const
+{
+    if (dark.empty() || w <= 0 || h <= 0)
+        return fallback;
+    int gx0 = std::clamp(int(x0 / cellX), 0, w - 1), gx1 = std::clamp(int((x1 - 0.01f) / cellX), 0, w - 1);
+    int gy0 = std::clamp(int(y0 / cellY), 0, h - 1), gy1 = std::clamp(int((y1 - 0.01f) / cellY), 0, h - 1);
+    int n = 0, d = 0;
+    for (int y = gy0; y <= gy1; ++y)
+        for (int x = gx0; x <= gx1; ++x, ++n)
+            d += dark[size_t(y) * size_t(w) + size_t(x)];
+    return n ? 2 * d >= n : fallback;
+}
+
+void PublishInk(HWND hwnd, const InkGrid& grid)
+{
+    std::lock_guard g(g_inkMutex);
+    if (grid.dark.empty())
+        g_ink.erase(hwnd);
+    else
+        g_ink[hwnd] = grid;
+}
+
+InkGrid InkFor(HWND hwnd)
+{
+    std::lock_guard g(g_inkMutex);
+    auto it = g_ink.find(hwnd);
+    return it == g_ink.end() ? InkGrid{} : it->second;
+}
 
 PanelTone PanelToneFor(uint32_t userTint, double transparency)
 {

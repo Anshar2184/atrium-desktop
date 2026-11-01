@@ -306,6 +306,119 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
     return out;
 }
 
+// Matches each button to the tray record of its program (an index into
+// `records`, or -1).
+std::vector<int> MatchButtons(const std::vector<Found>& buttons, std::vector<Record>& records, bool& ordered)
+{
+    // Pictures: match each button to a running program Windows has a
+    // tray record of.
+    records = ReadRecords(ordered);
+    auto running = RunningPrograms();
+    struct Candidate {
+        size_t record;
+        std::vector<std::wstring> names; // tooltip, description, product, file name, others, then window titles
+        size_t firstTitle;
+    };
+    std::vector<Candidate> candidates;
+    std::map<std::wstring, std::pair<std::wstring, std::wstring>> version; // exe -> description, product
+    for (size_t r = 0; r < records.size(); ++r) {
+        auto run = running.find(records[r].exe);
+        if (run == running.end())
+            continue;
+        if (records[r].hasUid && !HasIcon(run->second.windows, records[r].uid))
+            continue; // running, but without this icon now
+        auto& v = version[records[r].exe];
+        if (v.first.empty() && v.second.empty())
+            v = {VersionString(records[r].exe, L"FileDescription"), VersionString(records[r].exe, L"ProductName")};
+        std::wstring stem = PathFindFileNameW(records[r].exe.c_str());
+        PathRemoveExtensionW(stem.data());
+        stem.resize(wcslen(stem.c_str()));
+        Candidate c{r, {records[r].tip, v.first, v.second, stem}, 0};
+        // Windows' own icon whose description does not name it as its tooltip does.
+        if (Lower(stem) == L"securityhealthsystray")
+            c.names.insert(c.names.end(), {L"Windows 安全中心", L"Windows Security"});
+        c.firstTitle = c.names.size();
+        c.names.insert(c.names.end(), run->second.titles.begin(), run->second.titles.end());
+        candidates.push_back(std::move(c));
+    }
+    // How well button b's tooltip names candidate c: 0 .. 105.
+    auto score = [&](size_t b, size_t c) {
+        std::wstring key = Key(TrayModel::Title(buttons[b].tip));
+        int best = 0;
+        for (size_t k = 0; k < candidates[c].names.size(); ++k) {
+            int sc = Score(key, candidates[c].names[k]);
+            // Window titles only when they are the tooltip: a browser's
+            // page titles would otherwise claim other apps' icons.
+            if (k >= candidates[c].firstTitle && sc < 100)
+                sc = 0;
+            best = std::max(best, sc + (k == 0 && sc ? 5 : 0)); // the recorded tooltip counts most
+        }
+        return best;
+    };
+    std::vector<int> match(buttons.size(), -1);
+    if (ordered) {
+        // Windows shows the icons in the order of its records: line the
+        // buttons up with the running programs' records in that order,
+        // as many as possible, the names deciding where they disagree.
+        // This also places icons without a tooltip.
+        for (bool promoted : {true, false}) {
+            std::vector<size_t> bs, cs;
+            for (size_t b = 0; b < buttons.size(); ++b)
+                if (buttons[b].promoted == promoted)
+                    bs.push_back(b);
+            for (size_t c = 0; c < candidates.size(); ++c)
+                if (records[candidates[c].record].promoted == promoted && records[candidates[c].record].order != SIZE_MAX)
+                    cs.push_back(c);
+            std::stable_sort(cs.begin(), cs.end(),
+                             [&](size_t a, size_t b) { return records[candidates[a].record].order < records[candidates[b].record].order; });
+            const size_t n = bs.size(), m = cs.size();
+            std::vector<std::vector<int>> w(n, std::vector<int>(m)), dp(n + 1, std::vector<int>(m + 1, 0));
+            for (size_t i = 0; i < n; ++i)
+                for (size_t j = 0; j < m; ++j) {
+                    int sc = score(bs[i], cs[j]);
+                    // In place, the name agreeing; a named button whose name
+                    // fits nothing of the program's counts for less.
+                    w[i][j] = 10 + sc - (sc == 0 && !TrayModel::Title(buttons[bs[i]].tip).empty() ? 6 : 0);
+                }
+            for (size_t i = 1; i <= n; ++i)
+                for (size_t j = 1; j <= m; ++j)
+                    dp[i][j] = std::max({dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1] + w[i - 1][j - 1]});
+            // Back from the end; on a tie the earlier record wins.
+            for (size_t i = n, j = m; i > 0 && j > 0;) {
+                if (dp[i][j] == dp[i][j - 1])
+                    --j;
+                else if (dp[i][j] == dp[i - 1][j - 1] + w[i - 1][j - 1]) {
+                    match[bs[i - 1]] = int(candidates[cs[j - 1]].record);
+                    --i;
+                    --j;
+                } else
+                    --i;
+            }
+        }
+    } else {
+        // No order: by name alone, best names first, each program once.
+        struct Pair {
+            int score;
+            size_t button, candidate;
+        };
+        std::vector<Pair> pairs;
+        for (size_t b = 0; b < buttons.size(); ++b)
+            for (size_t c = 0; c < candidates.size(); ++c)
+                if (int sc = score(b, c); sc > 0)
+                    pairs.push_back({sc + (records[candidates[c].record].png.empty() ? 0 : 1), b, c});
+        std::stable_sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) { return a.score > b.score; });
+        std::set<std::wstring> usedExe;
+        std::set<size_t> usedCandidate;
+        for (const Pair& p : pairs)
+            if (match[p.button] < 0 && !usedCandidate.count(p.candidate) && !usedExe.count(records[candidates[p.candidate].record].exe)) {
+                match[p.button] = int(candidates[p.candidate].record);
+                usedCandidate.insert(p.candidate);
+                usedExe.insert(records[candidates[p.candidate].record].exe);
+            }
+    }
+    return match;
+}
+
 } // namespace
 
 std::wstring TrayModel::Title(const std::wstring& tip)
@@ -393,10 +506,27 @@ void TrayModel::Worker()
             if (!job.refresh) {
                 // The same place and position with the same tooltip; else the
                 // same tooltip anywhere (the list may have changed meanwhile).
-                auto it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) {
-                    return f.promoted == job.icon.promoted && f.index == job.icon.index && f.tip == job.icon.tip;
-                });
+                // The button of the icon's program as matched now (icons without
+                // a tooltip, Feishu's and Docker's, cannot be told apart by it);
+                // else the same place and position with the same tooltip; else
+                // the same, non-empty, tooltip anywhere.
+                auto it = buttons.end();
+                if (!job.icon.exe.empty()) {
+                    bool ordered = false;
+                    std::vector<Record> records;
+                    std::vector<int> match = MatchButtons(buttons, records, ordered);
+                    for (size_t b = 0; b < buttons.size() && it == buttons.end(); ++b)
+                        if (match[b] >= 0 && records[size_t(match[b])].exe == job.icon.exe && (buttons[b].tip == job.icon.tip || job.icon.tip.empty()))
+                            it = buttons.begin() + ptrdiff_t(b);
+                    for (size_t b = 0; b < buttons.size() && it == buttons.end(); ++b)
+                        if (match[b] >= 0 && records[size_t(match[b])].exe == job.icon.exe)
+                            it = buttons.begin() + ptrdiff_t(b);
+                }
                 if (it == buttons.end())
+                    it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) {
+                        return f.promoted == job.icon.promoted && f.index == job.icon.index && f.tip == job.icon.tip;
+                    });
+                if (it == buttons.end() && !job.icon.tip.empty())
                     it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) { return f.tip == job.icon.tip; });
                 HRESULT hr = E_FAIL;
                 if (it != buttons.end() && it->element) {
@@ -410,118 +540,15 @@ void TrayModel::Worker()
                             hr = invoke->Invoke();
                     }
                 }
-                Log(L"tray: %s on '%s' -> 0x%08X", job.right ? L"right click" : L"click", Title(job.icon.tip).c_str(), unsigned(hr));
+                Log(L"tray: %s on '%s' (%s) -> 0x%08X", job.right ? L"right click" : L"click", Title(job.icon.tip).c_str(),
+                    job.icon.exe.empty() ? L"-" : PathFindFileNameW(job.icon.exe.c_str()), unsigned(hr));
                 PostMessageW(notify_, msg_, 1, 0);
                 continue;
             }
 
-            // Pictures: match each button to a running program Windows has a
-            // tray record of.
             bool ordered = false;
-            std::vector<Record> records = ReadRecords(ordered);
-            auto running = RunningPrograms();
-            struct Candidate {
-                size_t record;
-                std::vector<std::wstring> names; // tooltip, description, product, file name, others, then window titles
-                size_t firstTitle;
-            };
-            std::vector<Candidate> candidates;
-            std::map<std::wstring, std::pair<std::wstring, std::wstring>> version; // exe -> description, product
-            for (size_t r = 0; r < records.size(); ++r) {
-                auto run = running.find(records[r].exe);
-                if (run == running.end())
-                    continue;
-                if (records[r].hasUid && !HasIcon(run->second.windows, records[r].uid))
-                    continue; // running, but without this icon now
-                auto& v = version[records[r].exe];
-                if (v.first.empty() && v.second.empty())
-                    v = {VersionString(records[r].exe, L"FileDescription"), VersionString(records[r].exe, L"ProductName")};
-                std::wstring stem = PathFindFileNameW(records[r].exe.c_str());
-                PathRemoveExtensionW(stem.data());
-                stem.resize(wcslen(stem.c_str()));
-                Candidate c{r, {records[r].tip, v.first, v.second, stem}, 0};
-                // Windows' own icon whose description does not name it as its tooltip does.
-                if (Lower(stem) == L"securityhealthsystray")
-                    c.names.insert(c.names.end(), {L"Windows 安全中心", L"Windows Security"});
-                c.firstTitle = c.names.size();
-                c.names.insert(c.names.end(), run->second.titles.begin(), run->second.titles.end());
-                candidates.push_back(std::move(c));
-            }
-            // How well button b's tooltip names candidate c: 0 .. 105.
-            auto score = [&](size_t b, size_t c) {
-                std::wstring key = Key(Title(buttons[b].tip));
-                int best = 0;
-                for (size_t k = 0; k < candidates[c].names.size(); ++k) {
-                    int sc = Score(key, candidates[c].names[k]);
-                    // Window titles only when they are the tooltip: a browser's
-                    // page titles would otherwise claim other apps' icons.
-                    if (k >= candidates[c].firstTitle && sc < 100)
-                        sc = 0;
-                    best = std::max(best, sc + (k == 0 && sc ? 5 : 0)); // the recorded tooltip counts most
-                }
-                return best;
-            };
-            std::vector<int> match(buttons.size(), -1);
-            if (ordered) {
-                // Windows shows the icons in the order of its records: line the
-                // buttons up with the running programs' records in that order,
-                // as many as possible, the names deciding where they disagree.
-                // This also places icons without a tooltip.
-                for (bool promoted : {true, false}) {
-                    std::vector<size_t> bs, cs;
-                    for (size_t b = 0; b < buttons.size(); ++b)
-                        if (buttons[b].promoted == promoted)
-                            bs.push_back(b);
-                    for (size_t c = 0; c < candidates.size(); ++c)
-                        if (records[candidates[c].record].promoted == promoted && records[candidates[c].record].order != SIZE_MAX)
-                            cs.push_back(c);
-                    std::stable_sort(cs.begin(), cs.end(),
-                                     [&](size_t a, size_t b) { return records[candidates[a].record].order < records[candidates[b].record].order; });
-                    const size_t n = bs.size(), m = cs.size();
-                    std::vector<std::vector<int>> w(n, std::vector<int>(m)), dp(n + 1, std::vector<int>(m + 1, 0));
-                    for (size_t i = 0; i < n; ++i)
-                        for (size_t j = 0; j < m; ++j) {
-                            int sc = score(bs[i], cs[j]);
-                            // In place, the name agreeing; a named button whose name
-                            // fits nothing of the program's counts for less.
-                            w[i][j] = 10 + sc - (sc == 0 && !Title(buttons[bs[i]].tip).empty() ? 6 : 0);
-                        }
-                    for (size_t i = 1; i <= n; ++i)
-                        for (size_t j = 1; j <= m; ++j)
-                            dp[i][j] = std::max({dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1] + w[i - 1][j - 1]});
-                    // Back from the end; on a tie the earlier record wins.
-                    for (size_t i = n, j = m; i > 0 && j > 0;) {
-                        if (dp[i][j] == dp[i][j - 1])
-                            --j;
-                        else if (dp[i][j] == dp[i - 1][j - 1] + w[i - 1][j - 1]) {
-                            match[bs[i - 1]] = int(candidates[cs[j - 1]].record);
-                            --i;
-                            --j;
-                        } else
-                            --i;
-                    }
-                }
-            } else {
-                // No order: by name alone, best names first, each program once.
-                struct Pair {
-                    int score;
-                    size_t button, candidate;
-                };
-                std::vector<Pair> pairs;
-                for (size_t b = 0; b < buttons.size(); ++b)
-                    for (size_t c = 0; c < candidates.size(); ++c)
-                        if (int sc = score(b, c); sc > 0)
-                            pairs.push_back({sc + (records[candidates[c].record].png.empty() ? 0 : 1), b, c});
-                std::stable_sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) { return a.score > b.score; });
-                std::set<std::wstring> usedExe;
-                std::set<size_t> usedCandidate;
-                for (const Pair& p : pairs)
-                    if (match[p.button] < 0 && !usedCandidate.count(p.candidate) && !usedExe.count(records[candidates[p.candidate].record].exe)) {
-                        match[p.button] = int(candidates[p.candidate].record);
-                        usedCandidate.insert(p.candidate);
-                        usedExe.insert(records[candidates[p.candidate].record].exe);
-                    }
-            }
+            std::vector<Record> records;
+            std::vector<int> match = MatchButtons(buttons, records, ordered);
 
             std::vector<TrayIcon> icons;
             int recognised = 0;

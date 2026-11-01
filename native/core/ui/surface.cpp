@@ -126,6 +126,8 @@ ID2D1SolidColorBrush* Canvas::Brush(D2D1_COLOR_F c)
 
 void Canvas::Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c)
 {
+    D2D1_COLOR_F unused;
+    c = InkAt(r, c, unused);
     if (radius > 0)
         d2d_->FillRoundedRectangle(D2D1::RoundedRect(Px(r), radius * scale, radius * scale), Brush(c));
     else
@@ -134,6 +136,8 @@ void Canvas::Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c)
 
 void Canvas::Stroke(D2D1_RECT_F r, float radius, D2D1_COLOR_F c, float width)
 {
+    D2D1_COLOR_F unused;
+    c = InkAt(r, c, unused);
     float h = width * scale / 2;
     D2D1_RECT_F p = Px(r);
     p = D2D1::RectF(p.left + h, p.top + h, p.right - h, p.bottom - h);
@@ -142,11 +146,15 @@ void Canvas::Stroke(D2D1_RECT_F r, float radius, D2D1_COLOR_F c, float width)
 
 void Canvas::Line(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width)
 {
+    D2D1_COLOR_F unused;
+    c = InkAt(D2D1::RectF(std::min(x0, x1), std::min(y0, y1), std::max(x0, x1) + 1, std::max(y0, y1) + 1), c, unused);
     d2d_->DrawLine(D2D1::Point2F(x0 * scale, y0 * scale), D2D1::Point2F(x1 * scale, y1 * scale), Brush(c), width * scale);
 }
 
 void Canvas::Circle(float cx, float cy, float radius, D2D1_COLOR_F c)
 {
+    D2D1_COLOR_F unused;
+    c = InkAt(D2D1::RectF(cx - radius, cy - radius, cx + radius, cy + radius), c, unused);
     d2d_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx * scale, cy * scale), radius * scale, radius * scale), Brush(c));
 }
 
@@ -172,15 +180,47 @@ IDWriteTextFormat* Canvas::Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, in
     return f.get();
 }
 
+D2D1_COLOR_F Canvas::InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk) const
+{
+    haloInk = theme.halo;
+    if (ink.dark.empty())
+        return c;
+    // Only the theme's own ink and washes switch (accents and colours stay).
+    auto same = [](const D2D1_COLOR_F& a, const D2D1_COLOR_F& b) {
+        return std::fabs(a.r - b.r) < 0.01f && std::fabs(a.g - b.g) < 0.01f && std::fabs(a.b - b.b) < 0.01f;
+    };
+    // Opaque white (a slider's knob, text on an accent) is not ink: the
+    // theme's inks are at most 0.96 opaque.
+    if (c.a > 0.965f)
+        return c;
+    bool isText = same(c, theme.text), isWash = !isText && same(c, theme.hover);
+    if (!isText && !isWash)
+        return c;
+    const D2D1_COLOR_F& from = isText ? theme.text : theme.hover;
+    D2D1_RECT_F p = Px(r);
+    D2D1_MATRIX_3X2_F m;
+    d2d_->GetTransform(&m); // groups move and scale what they draw
+    float x0 = p.left * m._11 + m._31, y0 = p.top * m._22 + m._32, x1 = p.right * m._11 + m._31, y1 = p.bottom * m._22 + m._32;
+    bool dark = ink.DarkAt(x0, y0, x1, y1, theme.light);
+    if (dark == theme.light)
+        return c;
+    Theme t = Theme::For(dark);
+    haloInk = t.halo;
+    const D2D1_COLOR_F& to = isText ? t.text : t.hover;
+    return D2D1::ColorF(to.r, to.g, to.b, std::min(1.f, c.a * to.a / std::max(0.01f, from.a)));
+}
+
 void Canvas::Text(const std::wstring& s, D2D1_RECT_F r, float size, D2D1_COLOR_F c, DWRITE_FONT_WEIGHT w, int align, bool wrap)
 {
     if (s.empty())
         return;
+    D2D1_COLOR_F haloInk;
+    c = InkAt(r, c, haloInk);
     if (IDWriteTextFormat* f = Format(size * scale, w, false, align, wrap)) {
         D2D1_RECT_F p = Px(r);
-        if (halo && theme.halo.a > 0) { // the bar's halo: a soft copy just below the ink
+        if (halo && haloInk.a > 0) { // the bar's halo: a soft copy just below the ink
             float o = std::max(1.0f, scale * 0.6f);
-            D2D1_COLOR_F hc = theme.halo;
+            D2D1_COLOR_F hc = haloInk;
             hc.a *= c.a;
             d2d_->DrawText(s.c_str(), UINT32(s.size()), f, D2D1::RectF(p.left, p.top + o, p.right, p.bottom + o), Brush(hc), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
@@ -190,11 +230,13 @@ void Canvas::Text(const std::wstring& s, D2D1_RECT_F r, float size, D2D1_COLOR_F
 
 void Canvas::Glyph(const std::wstring& g, D2D1_RECT_F r, float size, D2D1_COLOR_F c)
 {
+    D2D1_COLOR_F haloInk;
+    c = InkAt(r, c, haloInk);
     if (IDWriteTextFormat* f = Format(size * scale, DWRITE_FONT_WEIGHT_NORMAL, true, 1, false)) {
         D2D1_RECT_F p = Px(r);
-        if (halo && theme.halo.a > 0) {
+        if (halo && haloInk.a > 0) {
             float o = std::max(1.0f, scale * 0.6f);
-            D2D1_COLOR_F hc = theme.halo;
+            D2D1_COLOR_F hc = haloInk;
             hc.a *= c.a;
             d2d_->DrawText(g.c_str(), UINT32(g.size()), f, D2D1::RectF(p.left, p.top + o, p.right, p.bottom + o), Brush(hc));
         }
@@ -466,10 +508,9 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_GLASS_INK:
-        if (self->darkInk_ != (w != 0)) {
-            self->darkInk_ = w != 0;
-            self->Invalidate();
-        }
+        self->darkInk_ = w != 0;
+        self->ink_ = InkFor(h);
+        self->Invalidate();
         return 0;
     }
     // Mouse positions in content coordinates; presses on the margin are the caller's to decide.
@@ -688,6 +729,8 @@ void Surface::Paint()
         c.now = ClockMs();
         c.panel = !host_ || (!glassReady_ && c.now - shownMs_ > kGlassWaitMs);
         c.theme = c.panel ? Theme::Panel() : Theme::For(darkInk_);
+        if (!c.panel)
+            c.ink = ink_;
         paint(c);
         d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
     }

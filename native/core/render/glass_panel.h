@@ -47,6 +47,21 @@ constexpr UINT WM_GLASS_READY = WM_APP + 0x40;
 // the bar's material unchanged, so, like the bar, they adapt the ink, not the glass.
 constexpr UINT WM_GLASS_INK = WM_APP + 0x41;
 
+// The ink a popup's content needs, region by region: a coarse grid over the
+// window (window px), 1 = dark ink (the glass shows something bright there).
+// The bar's render thread publishes it, then posts WM_GLASS_INK; the popup
+// reads it while painting, so each text follows what is under it.
+struct InkGrid {
+    int w = 0, h = 0;
+    float cellX = 1, cellY = 1;
+    std::vector<uint8_t> dark;
+    bool operator==(const InkGrid&) const = default;
+    // Dark ink for a rectangle (window px): what most of the cells under it need; `fallback` without a grid.
+    bool DarkAt(float x0, float y0, float x1, float y1, bool fallback) const;
+};
+void PublishInk(HWND hwnd, const InkGrid& grid); // render thread
+InkGrid InkFor(HWND hwnd);                        // UI thread
+
 // Tone of the plain panel that stands in while the glass is unavailable: the
 // user's tint when the bar is clearly tinted, otherwise the system theme.
 struct PanelTone {

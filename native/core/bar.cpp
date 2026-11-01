@@ -1334,6 +1334,7 @@ bool Bar::RenderSession()
         bool ready = false;   // presented once (the popup was told)
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         bool dark = false;
+        InkGrid grid;         // ink region by region (published for the popup)
         std::vector<GlassParams> params;
     };
     std::map<HWND, PanelState> panels;
@@ -1341,6 +1342,8 @@ bool Bar::RenderSession()
     auto renderPanels = [&](const Snapshot& snap, ID3D11Texture2D* source, bool& lost) {
         for (auto it = panels.begin(); it != panels.end();) {
             bool listed = std::any_of(snap.panels.begin(), snap.panels.end(), [&](const GlassPanel& p) { return p.hwnd == it->first; });
+            if (!listed)
+                PublishInk(it->first, InkGrid{});
             it = listed ? std::next(it) : panels.erase(it);
         }
         bool moving = false;
@@ -1366,28 +1369,45 @@ bool Bar::RenderSession()
             std::vector<GlassParams> gp = PanelParams(snap.settings, snap.scale, p);
             if (auto rb = r.Poll()) {
                 changed |= rb->changed;
-                // One ink for the popup, from what its glass shows on average
-                // (area-weighted over its pieces); hysteresis as on the bar.
+                // The ink region by region (cells of about 20 DIP), from what
+                // the glass shows there, each cell with the bar's hysteresis;
+                // the popup's own ink is what most of it needs.
                 const float pad = float(GlassRenderer::kPad);
-                float sum = 0, area = 0;
-                for (const GlassParams& g : gp) {
-                    float l = g.shapeR > g.shapeL ? g.shapeL : p.inset, t = g.shapeB > g.shapeT ? g.shapeT : p.inset;
-                    float rr = g.shapeR > g.shapeL ? g.shapeR : float(w) - p.inset, b = g.shapeB > g.shapeT ? g.shapeB : float(h) - p.inset;
-                    float a = std::max(0.f, rr - l) * std::max(0.f, b - t);
-                    sum += rb->RegionLuma(l + pad, t + pad, rr + pad, b + pad) * a;
-                    area += a;
+                const float cell = std::max(8.f, 20.f * snap.scale);
+                InkGrid grid;
+                grid.w = std::max(1, int(std::ceil(float(w) / cell)));
+                grid.h = std::max(1, int(std::ceil(float(h) / cell)));
+                grid.cellX = float(w) / float(grid.w);
+                grid.cellY = float(h) / float(grid.h);
+                grid.dark.resize(size_t(grid.w) * size_t(grid.h));
+                const std::wstring& tc = snap.settings.textColor;
+                bool sameSize = ps.grid.w == grid.w && ps.grid.h == grid.h;
+                int darkCells = 0;
+                for (int y = 0; y < grid.h; ++y)
+                    for (int x = 0; x < grid.w; ++x) {
+                        size_t i = size_t(y) * size_t(grid.w) + size_t(x);
+                        bool was = sameSize ? ps.grid.dark[i] != 0 : ps.dark;
+                        bool d = was;
+                        if (tc == L"dark" || tc == L"light") {
+                            d = tc == L"dark";
+                        } else {
+                            float x0 = float(x) * grid.cellX, y0 = float(y) * grid.cellY;
+                            float lum = GlassLuma(snap.settings, rb->RegionLuma(x0 + pad, y0 + pad, x0 + grid.cellX + pad, y0 + grid.cellY + pad));
+                            if (!was && lum > kDarkInkAbove)
+                                d = true;
+                            else if (was && lum < kLightInkBelow)
+                                d = false;
+                        }
+                        grid.dark[i] = d ? 1 : 0;
+                        darkCells += d ? 1 : 0;
+                    }
+                ps.dark = 2 * darkCells >= int(grid.dark.size());
+                if (!(grid == ps.grid)) {
+                    ps.grid = grid;
+                    PublishInk(p.hwnd, grid);
+                    ps.ink = ps.dark ? 1 : 0;
+                    PostMessageW(p.hwnd, WM_GLASS_INK, WPARAM(ps.ink), 0);
                 }
-                float lum = GlassLuma(snap.settings, area > 0 ? sum / area : 0.5f);
-                if (!ps.dark && lum > kDarkInkAbove)
-                    ps.dark = true;
-                else if (ps.dark && lum < kLightInkBelow)
-                    ps.dark = false;
-            }
-            const std::wstring& tc = snap.settings.textColor;
-            int ink = tc == L"dark" ? 1 : tc == L"light" ? 0 : ps.dark ? 1 : 0;
-            if (ink != ps.ink) {
-                ps.ink = ink;
-                PostMessageW(p.hwnd, WM_GLASS_INK, WPARAM(ink), 0);
             }
             if (p.pop != ps.pop) {
                 r.Pop(p.popOpen, p.popX, p.popY);
@@ -1419,7 +1439,7 @@ bool Bar::RenderSession()
                 wchar_t title[64] = {};
                 GetWindowTextW(p.hwnd, title, 64);
                 Log(L"render: popup glass ready for %s (%dx%d px, %zu shapes, radius %.0f px, tint %.2f, ink %s)", title, w, h, gp.size(),
-                    gp.empty() ? 0.f : gp[0].radius, gp.empty() ? 0.f : gp[0].tintMix, ink ? L"dark" : L"light");
+                    gp.empty() ? 0.f : gp[0].radius, gp.empty() ? 0.f : gp[0].tintMix, ps.dark ? L"dark" : L"light");
             }
         }
         return moving;

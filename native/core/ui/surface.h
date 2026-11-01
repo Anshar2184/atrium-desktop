@@ -67,6 +67,9 @@ public:
     double now = 0;     // ClockMs() of this frame
     Theme theme;        // ink for this frame
     bool halo = true;   // Text and Glyph draw the theme's halo under the ink
+    // Ink region by region (WM_GLASS_INK): Text and Glyph in the theme's ink
+    // switch to the other ink where the glass under them needs it.
+    InkGrid ink;
 
     // Asks for another frame (an animation is still running).
     void Continue();
@@ -97,6 +100,7 @@ public:
 
 private:
     IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, int align, bool wrap);
+    D2D1_COLOR_F InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk) const; // c, and its halo, for what is under r
     ID2D1SolidColorBrush* Brush(D2D1_COLOR_F c);
     Surface& s_;
     ID2D1DeviceContext* d2d_;
@@ -174,6 +178,7 @@ private:
     float radius_ = 20;
     std::vector<ShapeDip> shapes_;
     bool darkInk_ = false;
+    InkGrid ink_;
     POINT anchor_{};
     unsigned pop_ = 0;
     bool popOpen_ = true;
