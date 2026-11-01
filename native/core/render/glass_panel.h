@@ -7,14 +7,25 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace atrium {
+
+// One piece of glass inside a popup window, window px.
+struct GlassShape {
+    float left = 0, top = 0, right = 0, bottom = 0;
+    float radius = 0;
+    bool operator==(const GlassShape&) const = default;
+};
 
 struct GlassPanel {
     HWND hwnd = nullptr;
     RECT window{};            // screen px
     float inset = 0;          // px from the window edge to the glass shape (shadow room)
     float radius = 0;         // px
+    // Separate pieces of glass, drawn back to front; empty: one shape, the
+    // window minus `inset`, with `radius`.
+    std::vector<GlassShape> shapes;
     bool visible = false;     // false removes the layer
     unsigned pop = 0;         // bumped to play a pop animation
     bool popOpen = true;
@@ -31,15 +42,16 @@ public:
 
 // Posted to the popup window once its glass has been presented.
 constexpr UINT WM_GLASS_READY = WM_APP + 0x40;
+// Posted to the popup window when the ink its glass needs changes: wParam 1 =
+// dark ink (the glass shows something bright), 0 = light ink. The popups use
+// the bar's material unchanged, so, like the bar, they adapt the ink, not the glass.
+constexpr UINT WM_GLASS_INK = WM_APP + 0x41;
 
-// Tone of popup glass: the user's tint when the bar is clearly tinted,
-// otherwise the system theme's light or dark. `minMix` is the least tint the
-// panels use; the render thread raises it where the backdrop would make text
-// hard to read.
+// Tone of the plain panel that stands in while the glass is unavailable: the
+// user's tint when the bar is clearly tinted, otherwise the system theme.
 struct PanelTone {
-    bool light = false;  // light glass, dark text
+    bool light = false;  // light panel, dark text
     uint32_t tint = 0;   // 0xRRGGBB
-    float minMix = 0.4f;
 };
 PanelTone PanelToneFor(uint32_t userTint, double transparency);
 

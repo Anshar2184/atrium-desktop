@@ -1,7 +1,9 @@
-// Atrium's own notifications: cards in a window above the bell on the bar.
-// New notices pop up without taking the focus (collapsed stack: the newest
-// card in full, the edges of older ones behind it) and time out; the bell
-// opens the list with unread marks, dismiss and clear. Senders are internal
+// Atrium's own notifications: cards above the bell on the bar, each its own
+// piece of the bar's glass. They stack upwards: the newest card sits lowest,
+// on the bar, and older ones peek out above it (the list unfolds upwards).
+// New notices pop up without taking the focus and time out; the bell opens
+// the list, with a capsule like the bar below the cards for its controls,
+// unread marks, dismiss and clear. Senders are internal
 // (tests, Atrium itself) or, experimentally, the Windows notifications read
 // through UserNotificationListener.
 #pragma once
@@ -51,6 +53,8 @@ public:
     // Tests: pretend SHQueryUserNotificationState returned `state` (0: use the real one).
     void SetQuietOverride(int state) { quietOverride_ = state; }
     void LogState() const;
+    // As a click on `id` ("stack", "collapse", ...) in the open list, else the popup.
+    void TestClick(const std::wstring& id) { Click(center_.surface->Visible() ? Mode::Center : Mode::Popup, id); }
 
 private:
     enum class Mode { Popup, Center };
@@ -89,6 +93,7 @@ private:
     void Changed();       // unread count, layout of visible windows
     void Layout(Mode mode);
     float CardHeight() const;
+    float CardRadius() const; // the bar's, as far as the card's height allows
     std::vector<const Notice*> Shown(Mode mode) const;
     int QuietState() const;
     bool BodyHidden() const;

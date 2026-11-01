@@ -46,35 +46,45 @@ void Theme::SetGlass(uint32_t tint, double transparency)
     g_transparency = transparency;
 }
 
-Theme Theme::Current()
+Theme Theme::For(bool darkInk)
 {
+    // The bar's inks and washes (BarPainter::DrawContent).
     Theme t;
+    t.light = darkInk;
     PanelTone tone = PanelToneFor(g_tint, g_transparency);
-    t.light = tone.light;
     t.panel = Rgba(tone.tint, 0.96f);
-    if (t.light) {
-        t.border = Rgba(0xFFFFFF, 0.55f);
-        t.text = Rgba(0x111317, 0.94f);
-        t.subtext = Rgba(0x111317, 0.64f);
-        t.faint = Rgba(0x111317, 0.42f);
-        t.hover = Rgba(0x000000, 0.06f);
-        t.press = Rgba(0x000000, 0.10f);
-        t.divider = Rgba(0x000000, 0.08f);
-        t.card = Rgba(0xFFFFFF, 0.50f);
-        t.cardHot = Rgba(0xFFFFFF, 0.72f);
+    if (darkInk) {
+        t.border = Rgba(0x000000, 0.10f);
+        t.text = Rgba(0x111317, 0.92f);
+        t.subtext = Rgba(0x111317, 0.66f);
+        t.faint = Rgba(0x111317, 0.46f);
+        t.hover = Rgba(0x000000, 0.10f);
+        t.press = Rgba(0x000000, 0.16f);
+        t.divider = Rgba(0x000000, 0.12f);
+        t.card = Rgba(0x000000, 0.05f);
+        t.cardHot = Rgba(0x000000, 0.10f);
+        t.halo = Rgba(0xFFFFFF, 0.35f);
     } else {
-        t.border = Rgba(0xFFFFFF, 0.14f);
-        t.text = Rgba(0xFFFFFF, 0.95f);
-        t.subtext = Rgba(0xFFFFFF, 0.66f);
-        t.faint = Rgba(0xFFFFFF, 0.42f);
-        t.hover = Rgba(0xFFFFFF, 0.08f);
-        t.press = Rgba(0xFFFFFF, 0.13f);
-        t.divider = Rgba(0xFFFFFF, 0.09f);
-        t.card = Rgba(0xFFFFFF, 0.07f);
-        t.cardHot = Rgba(0xFFFFFF, 0.12f);
+        t.border = Rgba(0xFFFFFF, 0.30f);
+        t.text = Rgba(0xFFFFFF, 0.96f);
+        t.subtext = Rgba(0xFFFFFF, 0.76f);
+        t.faint = Rgba(0xFFFFFF, 0.56f);
+        t.hover = Rgba(0xFFFFFF, 0.20f);
+        t.press = Rgba(0xFFFFFF, 0.28f);
+        t.divider = Rgba(0xFFFFFF, 0.24f);
+        t.card = Rgba(0xFFFFFF, 0.08f);
+        t.cardHot = Rgba(0xFFFFFF, 0.20f);
+        t.halo = Rgba(0x000000, 0.32f);
     }
     t.accent = Rgba(0x0A84FF, 1);
     t.accentText = Rgba(0xFFFFFF, 1);
+    return t;
+}
+
+Theme Theme::Panel()
+{
+    Theme t = For(PanelToneFor(g_tint, g_transparency).light);
+    t.halo = D2D1::ColorF(0, 0, 0, 0); // an opaque panel needs none
     return t;
 }
 
@@ -144,14 +154,30 @@ void Canvas::Text(const std::wstring& s, D2D1_RECT_F r, float size, D2D1_COLOR_F
 {
     if (s.empty())
         return;
-    if (IDWriteTextFormat* f = Format(size * scale, w, false, align, wrap))
-        d2d_->DrawText(s.c_str(), UINT32(s.size()), f, Px(r), Brush(c), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    if (IDWriteTextFormat* f = Format(size * scale, w, false, align, wrap)) {
+        D2D1_RECT_F p = Px(r);
+        if (halo && theme.halo.a > 0) { // the bar's halo: a soft copy just below the ink
+            float o = std::max(1.0f, scale * 0.6f);
+            D2D1_COLOR_F hc = theme.halo;
+            hc.a *= c.a;
+            d2d_->DrawText(s.c_str(), UINT32(s.size()), f, D2D1::RectF(p.left, p.top + o, p.right, p.bottom + o), Brush(hc), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+        d2d_->DrawText(s.c_str(), UINT32(s.size()), f, p, Brush(c), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
 }
 
 void Canvas::Glyph(const std::wstring& g, D2D1_RECT_F r, float size, D2D1_COLOR_F c)
 {
-    if (IDWriteTextFormat* f = Format(size * scale, DWRITE_FONT_WEIGHT_NORMAL, true, 1, false))
-        d2d_->DrawText(g.c_str(), UINT32(g.size()), f, Px(r), Brush(c));
+    if (IDWriteTextFormat* f = Format(size * scale, DWRITE_FONT_WEIGHT_NORMAL, true, 1, false)) {
+        D2D1_RECT_F p = Px(r);
+        if (halo && theme.halo.a > 0) {
+            float o = std::max(1.0f, scale * 0.6f);
+            D2D1_COLOR_F hc = theme.halo;
+            hc.a *= c.a;
+            d2d_->DrawText(g.c_str(), UINT32(g.size()), f, D2D1::RectF(p.left, p.top + o, p.right, p.bottom + o), Brush(hc));
+        }
+        d2d_->DrawText(g.c_str(), UINT32(g.size()), f, p, Brush(c));
+    }
 }
 
 float Canvas::TextWidth(const std::wstring& s, float size, DWRITE_FONT_WEIGHT w)
@@ -342,6 +368,18 @@ void Surface::SetRadius(float dip)
         PublishPanel();
 }
 
+void Surface::SetShapes(const std::vector<ShapeDip>& shapes)
+{
+    auto same = [](const ShapeDip& a, const ShapeDip& b) {
+        return a.radius == b.radius && a.rect.left == b.rect.left && a.rect.top == b.rect.top && a.rect.right == b.rect.right && a.rect.bottom == b.rect.bottom;
+    };
+    if (shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
+        return;
+    shapes_ = shapes;
+    if (visible_ || hiding_)
+        PublishPanel();
+}
+
 void Surface::PublishPanel()
 {
     if (!host_)
@@ -351,6 +389,11 @@ void Surface::PublishPanel()
     p.window = window_;
     p.inset = float(InsetPx());
     p.radius = radius_ * scale_;
+    for (const ShapeDip& s : shapes_) {
+        // Whole px, so the glass and the content's washes line up.
+        auto px = [&](float v) { return std::round(v * scale_) + p.inset; };
+        p.shapes.push_back({px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_});
+    }
     p.visible = visible_ || hiding_;
     p.pop = pop_;
     p.popOpen = popOpen_;
@@ -397,6 +440,12 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (!self->glassReady_ && self->visible_) {
             self->glassReady_ = true;
             KillTimer(h, kGlassWaitTimer);
+            self->Invalidate();
+        }
+        return 0;
+    case WM_GLASS_INK:
+        if (self->darkInk_ != (w != 0)) {
+            self->darkInk_ = w != 0;
             self->Invalidate();
         }
         return 0;
@@ -616,6 +665,7 @@ void Surface::Paint()
         Canvas c(*this, d2d_.get(), scale_, base);
         c.now = ClockMs();
         c.panel = !host_ || (!glassReady_ && c.now - shownMs_ > kGlassWaitMs);
+        c.theme = c.panel ? Theme::Panel() : Theme::For(darkInk_);
         paint(c);
         d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
     }

@@ -27,14 +27,24 @@
 
 namespace atrium {
 
-// Ink and fills over the popup glass: light glass (dark text) or dark glass,
-// from PanelToneFor. `panel` is only painted when the glass is unavailable.
+// Ink and washes over the popup glass, which is the bar's clear material:
+// dark ink where the glass shows something bright, light ink elsewhere (the
+// render thread decides, WM_GLASS_INK). Text gets a soft halo, as on the bar.
+// `panel` is only painted when the glass is unavailable (its own tone).
 struct Theme {
-    bool light = false;
-    D2D1_COLOR_F panel, border, text, subtext, faint, hover, press, accent, accentText, divider, card, cardHot;
-    static Theme Current();
-    // The bar's tint and transparency (ApplySettings), which decide the tone.
+    bool light = false; // dark ink
+    D2D1_COLOR_F panel, border, text, subtext, faint, hover, press, accent, accentText, divider, card, cardHot, halo;
+    static Theme For(bool darkInk);
+    // The plain stand-in panel: its tone, and the ink over it.
+    static Theme Panel();
+    // The bar's tint and transparency (ApplySettings), which decide the stand-in's tone.
     static void SetGlass(uint32_t tint, double transparency);
+};
+
+// A piece of glass in a popup: content coordinates, DIP.
+struct ShapeDip {
+    D2D1_RECT_F rect;
+    float radius;
 };
 
 class Surface;
@@ -46,6 +56,8 @@ public:
     float scale; // px per DIP; every coordinate below is in DIP
     bool panel = false; // the glass is not there (yet): paint a plain panel instead
     double now = 0;     // ClockMs() of this frame
+    Theme theme;        // ink for this frame
+    bool halo = true;   // Text and Glyph draw the theme's halo under the ink
 
     // Asks for another frame (an animation is still running).
     void Continue();
@@ -117,6 +129,11 @@ public:
     RECT Rect() const { return rect_; } // the content, screen px
     // Corner radius of the glass shape (DIP), matching the bar's.
     void SetRadius(float dip);
+    // Separate pieces of glass (content DIP), back to front; empty: the whole
+    // content with the radius. Published to the glass when they change.
+    void SetShapes(const std::vector<ShapeDip>& shapes);
+    bool DarkInk() const { return darkInk_; }
+    size_t Shapes() const { return shapes_.size(); }
     // A press at (x, y) DIP in content coordinates: the glass ripples from there.
     void Ripple(float x, float y);
     POINT ScreenToContent(POINT screen) const;
@@ -146,6 +163,8 @@ private:
     RECT window_{};          // window, screen px
     float scale_ = 1;
     float radius_ = 20;
+    std::vector<ShapeDip> shapes_;
+    bool darkInk_ = false;
     POINT anchor_{};
     unsigned pop_ = 0;
     bool popOpen_ = true;

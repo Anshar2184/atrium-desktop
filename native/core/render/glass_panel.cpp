@@ -25,11 +25,9 @@ PanelTone PanelToneFor(uint32_t userTint, double transparency)
         float luma = (0.2126f * float((userTint >> 16) & 0xFF) + 0.7152f * float((userTint >> 8) & 0xFF) + 0.0722f * float(userTint & 0xFF)) / 255.f;
         t.light = luma > 0.55f;
         t.tint = userTint;
-        t.minMix = userMix;
     } else {
         t.light = SystemLight();
         t.tint = t.light ? 0xF7F7FA : 0x1D1E23;
-        t.minMix = 0.40f;
     }
     return t;
 }

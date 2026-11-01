@@ -81,6 +81,8 @@ public:
     // Draws the glass, then `overlay` with D2D on the same back buffer, and
     // presents. Returns false if the device was lost.
     bool Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay);
+    // Several shapes, back to front (each with its own shadow), then the overlay.
+    bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay);
 
     ID2D1DeviceContext2* D2D() const { return d2d_.get(); }
     IDWriteFactory3* DWrite() const { return dwrite_.get(); }

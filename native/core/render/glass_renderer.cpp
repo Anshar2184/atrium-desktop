@@ -83,8 +83,14 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, b
     sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.MaxLOD = D3D11_FLOAT32_MAX;
     Check(dev->CreateSamplerState(&sd, sampler_.put()));
+    // Premultiplied "over": several shapes (and their shadows) layer back to front.
     D3D11_BLEND_DESC bd{};
-    bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    auto& rt = bd.RenderTarget[0];
+    rt.BlendEnable = TRUE;
+    rt.SrcBlend = rt.SrcBlendAlpha = D3D11_BLEND_ONE;
+    rt.DestBlend = rt.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    rt.BlendOp = rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
     Check(dev->CreateBlendState(&bd, blend_.put()));
 
     DXGI_SWAP_CHAIN_DESC1 desc{};
@@ -276,27 +282,21 @@ std::optional<Readback> GlassRenderer::Poll()
     return merged;
 }
 
-bool GlassRenderer::Present(const GlassParams& in, const std::function<void(ID2D1DeviceContext2*)>& overlay)
+bool GlassRenderer::Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay)
+{
+    return Present(std::vector<GlassParams>{params}, overlay);
+}
+
+bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay)
 {
     auto* ctx = gpu_.context.get();
-    GlassParams p = in;
-    p.sizeX = float(w_);
-    p.sizeY = float(h_);
-    p.roiOriginX = p.roiOriginY = float(kPad);
-    p.roiSizeX = float(w_ + 2 * kPad);
-    p.roiSizeY = float(h_ + 2 * kPad);
-    if (p.shapeR <= p.shapeL || p.shapeB <= p.shapeT) {
-        p.shapeL = p.shapeT = p.inset;
-        p.shapeR = float(w_) - p.inset;
-        p.shapeB = float(h_) - p.inset;
-    }
-    ctx->UpdateSubresource(cb_.get(), 0, nullptr, &p, 0, 0);
-
     winrt::com_ptr<ID3D11Texture2D> back;
     Check(swap_->GetBuffer(0, IID_PPV_ARGS(back.put())));
     winrt::com_ptr<ID3D11RenderTargetView> rtv;
     Check(gpu_.device->CreateRenderTargetView(back.get(), nullptr, rtv.put()));
     ID3D11RenderTargetView* rt = rtv.get();
+    const float clear[4] = {0, 0, 0, 0};
+    ctx->ClearRenderTargetView(rt, clear);
     ctx->OMSetRenderTargets(1, &rt, nullptr);
     ctx->OMSetBlendState(blend_.get(), nullptr, 0xFFFFFFFF);
     D3D11_VIEWPORT vp{0, 0, float(w_), float(h_), 0, 1};
@@ -311,7 +311,21 @@ bool GlassRenderer::Present(const GlassParams& in, const std::function<void(ID2D
     ctx->PSSetShaderResources(0, 1, &srv);
     ID3D11SamplerState* s = sampler_.get();
     ctx->PSSetSamplers(0, 1, &s);
-    ctx->Draw(3, 0);
+    for (const GlassParams& in : shapes) {
+        GlassParams p = in;
+        p.sizeX = float(w_);
+        p.sizeY = float(h_);
+        p.roiOriginX = p.roiOriginY = float(kPad);
+        p.roiSizeX = float(w_ + 2 * kPad);
+        p.roiSizeY = float(h_ + 2 * kPad);
+        if (p.shapeR <= p.shapeL || p.shapeB <= p.shapeT) {
+            p.shapeL = p.shapeT = p.inset;
+            p.shapeR = float(w_) - p.inset;
+            p.shapeB = float(h_) - p.inset;
+        }
+        ctx->UpdateSubresource(cb_.get(), 0, nullptr, &p, 0, 0);
+        ctx->Draw(3, 0);
+    }
     ID3D11ShaderResourceView* none = nullptr;
     ctx->PSSetShaderResources(0, 1, &none);
     ctx->OMSetRenderTargets(0, nullptr, nullptr);

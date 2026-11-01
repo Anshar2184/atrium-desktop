@@ -2,7 +2,8 @@
 .SYNOPSIS
   Atrium notifications end to end, with simulated notices (Atrium.Core.exe
   --command notify ...) and the real mouse: popup without taking the focus,
-  timeout, hover keeps it, queue and merge, expand the stack, dismiss one,
+  timeout, hover keeps it, queue and merge, expand the stack (upwards, every
+  card its own piece of glass), dismiss one,
   click action, clear, unread badge, full-screen suppression (simulated and
   with a real full-screen window), hidden text with capture exclusion, and the
   window's place and size at the monitor's DPI.
@@ -146,6 +147,13 @@ try {
     ClickAt $p
     $s = State
     Check "click-expands" ($s.center -eq "1" -and $s.expanded -eq "1" -and $s.popup -eq "0" -and $s.unread -eq "0") "clicking the stack opens the expanded list (center=$($s.center) expanded=$($s.expanded)) and marks all read"
+
+    # Upwards: the newest card lowest (next to the bar), older ones above it,
+    # the list's capsule below them; every card and the capsule is a piece of glass.
+    Start-Sleep -Milliseconds 400
+    $c0 = Spot "center" "card:0"; $c1 = Spot "center" "card:1"; $cl = Spot "center" "clear"
+    $s = State
+    Check "stacks-upwards" ($c0[1] -gt $c1[1] -and $cl[1] -gt $c0[1] -and [int]$s.centerShapes -eq [int]$s.count + 1) "newest card at y $($c0[1]), the next older at $($c1[1]), the capsule at $($cl[1]); $($s.centerShapes) pieces of glass for $($s.count) cards"
 
     $before = [int]$s.count
     $card = Spot "center" "card:1"

@@ -90,29 +90,36 @@ GlassParams ParamsFor(const Settings& s, float scale)
     return p;
 }
 
-// The popups' glass: the bar's material, a little more frosted, with at least
-// enough tint for text to stay readable over the backdrop (mean luminance
-// `backdrop`, 0..1, of what lies under the panel).
-GlassParams PanelParams(const Settings& s, float scale, const GlassPanel& p, float backdrop)
+// The popups' glass: exactly the bar's material (D26), one set of parameters
+// per piece of glass in the window.
+std::vector<GlassParams> PanelParams(const Settings& s, float scale, const GlassPanel& p)
 {
+    std::vector<GlassParams> out;
     GlassParams g = ParamsFor(s, scale);
-    g.radius = p.radius;
     g.inset = p.inset;
-    g.blurLod = std::max(g.blurLod, 1.0f + 4.5f * 0.8f);
-    g.blurMix = 1;
-    PanelTone tone = PanelToneFor(s.tint, s.transparency);
-    float tr = float((tone.tint >> 16) & 0xFF) / 255.f, tg = float((tone.tint >> 8) & 0xFF) / 255.f, tb = float(tone.tint & 0xFF) / 255.f;
-    float lt = 0.2126f * tr + 0.7152f * tg + 0.0722f * tb;
-    float need = 0;
-    if (tone.light && backdrop < 0.80f && lt > backdrop)
-        need = (0.80f - backdrop) / (lt - backdrop);
-    else if (!tone.light && backdrop > 0.22f && lt < backdrop)
-        need = (backdrop - 0.22f) / (backdrop - lt);
-    g.tintMix = std::clamp(std::max(tone.minMix, need), 0.f, 0.93f);
-    g.tintR = tr;
-    g.tintG = tg;
-    g.tintB = tb;
-    return g;
+    if (p.shapes.empty()) {
+        g.radius = p.radius;
+        out.push_back(g);
+        return out;
+    }
+    for (const GlassShape& sh : p.shapes) {
+        g.shapeL = sh.left;
+        g.shapeT = sh.top;
+        g.shapeR = sh.right;
+        g.shapeB = sh.bottom;
+        g.radius = std::min(sh.radius, std::min(sh.right - sh.left, sh.bottom - sh.top) / 2);
+        out.push_back(g);
+    }
+    return out;
+}
+
+// Luminance of what the glass shows (backdrop mixed with the tint), the
+// bar's rule for its ink.
+float GlassLuma(const Settings& s, float backdrop)
+{
+    float tm = float(1.0 - s.transparency);
+    float tintLuma = (0.2126f * float((s.tint >> 16) & 0xFF) + 0.7152f * float((s.tint >> 8) & 0xFF) + 0.0722f * float(s.tint & 0xFF)) / 255.f;
+    return backdrop * (1 - tm) + tintLuma * tm;
 }
 
 void ClockStrings(std::wstring& time, std::wstring& date)
@@ -1219,8 +1226,9 @@ bool Bar::RenderSession()
         std::unique_ptr<GlassRenderer> renderer;
         unsigned pop = 0;
         bool ready = false;   // presented once (the popup was told)
-        float backdrop = 0.5f;
-        GlassParams params{};
+        int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
+        bool dark = false;
+        std::vector<GlassParams> params;
     };
     std::map<HWND, PanelState> panels;
     // Draws the panels; true while one of them animates.
@@ -1249,27 +1257,50 @@ bool Bar::RenderSession()
             r.Resize(w, h);
             if (source)
                 r.UpdateBackdrop(source, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
+            std::vector<GlassParams> gp = PanelParams(snap.settings, snap.scale, p);
             if (auto rb = r.Poll()) {
                 changed |= rb->changed;
+                // One ink for the popup, from what its glass shows on average
+                // (area-weighted over its pieces); hysteresis as on the bar.
                 const float pad = float(GlassRenderer::kPad);
-                ps.backdrop = rb->RegionLuma(p.inset + pad, p.inset + pad, float(w) - p.inset + pad, float(h) - p.inset + pad);
+                float sum = 0, area = 0;
+                for (const GlassParams& g : gp) {
+                    float l = g.shapeR > g.shapeL ? g.shapeL : p.inset, t = g.shapeB > g.shapeT ? g.shapeT : p.inset;
+                    float rr = g.shapeR > g.shapeL ? g.shapeR : float(w) - p.inset, b = g.shapeB > g.shapeT ? g.shapeB : float(h) - p.inset;
+                    float a = std::max(0.f, rr - l) * std::max(0.f, b - t);
+                    sum += rb->RegionLuma(l + pad, t + pad, rr + pad, b + pad) * a;
+                    area += a;
+                }
+                float lum = GlassLuma(snap.settings, area > 0 ? sum / area : 0.5f);
+                if (!ps.dark && lum > 0.62f)
+                    ps.dark = true;
+                else if (ps.dark && lum < 0.50f)
+                    ps.dark = false;
+            }
+            const std::wstring& tc = snap.settings.textColor;
+            int ink = tc == L"dark" ? 1 : tc == L"light" ? 0 : ps.dark ? 1 : 0;
+            if (ink != ps.ink) {
+                ps.ink = ink;
+                PostMessageW(p.hwnd, WM_GLASS_INK, WPARAM(ink), 0);
             }
             if (p.pop != ps.pop) {
                 r.Pop(p.popOpen, p.popX, p.popY);
                 ps.pop = p.pop;
             }
-            GlassParams gp = PanelParams(snap.settings, snap.scale, p, ps.backdrop);
             if (p.rippleMs > 0 && now - p.rippleMs < 720) {
                 float u = float((now - p.rippleMs) / 720);
-                gp.rippleX = p.rippleX;
-                gp.rippleY = p.rippleY;
-                gp.rippleR = 150 * snap.scale * (1 - (1 - u) * (1 - u) * (1 - u));
-                gp.rippleA = 0.8f * (1 - u) * (1 - u);
+                for (GlassParams& g : gp) {
+                    g.rippleX = p.rippleX;
+                    g.rippleY = p.rippleY;
+                    g.rippleR = 150 * snap.scale * (1 - (1 - u) * (1 - u) * (1 - u));
+                    g.rippleA = 0.8f * (1 - u) * (1 - u);
+                }
                 moving = true;
             }
             if (!r.HasBackdrop())
                 continue; // waits for the first capture frame under it
-            if (!changed && r.HasPresented() && memcmp(&gp, &ps.params, sizeof(gp)) == 0)
+            bool same = gp.size() == ps.params.size() && memcmp(gp.data(), ps.params.data(), gp.size() * sizeof(GlassParams)) == 0;
+            if (!changed && r.HasPresented() && same)
                 continue;
             if (!r.Present(gp, nullptr)) {
                 lost = true;
@@ -1281,7 +1312,8 @@ bool Bar::RenderSession()
                 PostMessageW(p.hwnd, WM_GLASS_READY, 0, 0);
                 wchar_t title[64] = {};
                 GetWindowTextW(p.hwnd, title, 64);
-                Log(L"render: popup glass ready for %s (%dx%d px, radius %.0f px, tint %.2f)", title, w, h, p.radius, gp.tintMix);
+                Log(L"render: popup glass ready for %s (%dx%d px, %zu shapes, radius %.0f px, tint %.2f, ink %s)", title, w, h, gp.size(),
+                    gp.empty() ? 0.f : gp[0].radius, gp.empty() ? 0.f : gp[0].tintMix, ink ? L"dark" : L"light");
             }
         }
         return moving;

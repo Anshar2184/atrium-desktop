@@ -193,6 +193,8 @@ void RunCommand(const std::wstring& line)
         SendMessageW(g_app.start->Hwnd(), WM_CHAR, arg == L"enter" ? 13 : arg == L"esc" ? 27 : arg == L"back" ? 8 : arg[0], 0);
     else if (verb == L"start-state")
         g_app.start->LogState();
+    else if (verb == L"start-click")
+        g_app.start->TestClick(arg);
     else if (verb == L"bar-state")
         g_app.bar->LogState();
     else if (verb == L"notify") {
@@ -219,6 +221,8 @@ void RunCommand(const std::wstring& line)
         g_app.notes->LogState();
     else if (verb == L"notify-open")
         g_app.notes->ToggleCenter();
+    else if (verb == L"notify-click")
+        g_app.notes->TestClick(arg);
     else if (verb == L"notify-clear")
         g_app.notes->Clear();
     else if (verb == L"notify-quiet")
@@ -313,6 +317,7 @@ void ApplySettings(const Settings& s)
     Theme::SetGlass(s.tint, s.transparency);
     float radius = float(std::clamp(s.cornerRadius, 8.0, std::max(8.0, s.height / 2)));
     g_app.start->SetRadius(radius);
+    g_app.start->SetBarHeight(float(s.height)); // its status capsule is shaped like the bar
     g_app.notes->SetRadius(radius);
     g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody);
     if (s.notifyListener && !g_app.listener)
@@ -643,24 +648,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ApplySettings(settings);
     g_app.bar->SetItems(g_app.tasks->Snapshot());
     g_app.server = std::make_unique<SettingsServer>(g_app.host, settings);
+    // The start menu shows the Windows start menu's pins; from there an app
+    // can be pinned to the bar (the bar's own pins are separate).
     g_app.start->onPin = [](const PinnedApp& pin) {
         g_app.server->Modify([&](Settings& s) {
             auto pins = s.pins.value_or(std::vector<PinnedApp>{});
             if (std::find(pins.begin(), pins.end(), pin) == pins.end() && pins.size() < 64)
                 pins.push_back(pin);
-            s.pins = std::move(pins);
-        });
-    };
-    g_app.start->onUnpin = [](const std::wstring& key) {
-        std::vector<TaskItem> items = g_app.tasks->Snapshot();
-        auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key && t.pinned; });
-        if (it == items.end())
-            return;
-        int index = it->pinIndex;
-        g_app.server->Modify([&](Settings& s) {
-            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
-            if (index >= 0 && index < int(pins.size()))
-                pins.erase(pins.begin() + index);
             s.pins = std::move(pins);
         });
     };

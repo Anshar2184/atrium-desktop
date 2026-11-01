@@ -23,16 +23,16 @@ namespace atrium {
 
 namespace {
 
-constexpr float kW = 640, kH = 720;  // DIP
-constexpr float kPad = 20;           // outer padding
-constexpr float kSearchTop = 20, kSearchH = 44;
-constexpr float kHeaderTop = 78, kContentTop = 118;
-constexpr float kShelfH = 64, kShelfGap = 12; // the shelf sits kShelfGap from the sides and the bottom
-constexpr int kCols = 6;
-constexpr float kTileH = 104, kRowH = 46, kGroupH = 34;
-constexpr float kIcon = 44, kRowIcon = 28;
+// DIP. The panel above, the status capsule (the bar's height) kGap below it.
+constexpr float kW = 560, kMainH = 392, kGap = 12;
+constexpr float kSearchX = 24, kSearchTop = 20, kSearchH = 44;
+constexpr int kCols = 7, kRows = 3, kPerPage = kCols * kRows;
+constexpr float kGridTop = 86, kCellW = 72, kCellH = 88, kIcon = 40;
+constexpr float kRowH = 52, kRowIcon = 28, kListTop = 84, kListBottom = 348;
+constexpr float kDotsY = 366;
+constexpr float kPowerW = 176, kPowerRowH = 44, kPowerPad = 12;
 constexpr UINT_PTR kStatusTimer = 1;
-constexpr double kStageMs = 280, kStaggerMs = 16, kRippleMs = 520;
+constexpr double kStageMs = 260, kStaggerMs = 12, kRippleMs = 520, kPowerMs = 220;
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
@@ -49,38 +49,6 @@ float EaseBack(float t)
     return 1 + c3 * std::pow(t - 1, 3.f) + c1 * std::pow(t - 1, 2.f);
 }
 
-// Initial for the all-apps list: A-Z, the pinyin initial of a Chinese name
-// (by the zh-CN pronunciation sort against the first character of each
-// initial), or '#'.
-std::wstring GroupOf(const std::wstring& name)
-{
-    if (name.empty())
-        return L"#";
-    wchar_t c = name[0];
-    if (c >= 0xFF21 && c <= 0xFF5A)
-        c = wchar_t(c - 0xFEE0); // full-width Latin
-    if (c < 0x80)
-        return iswalpha(c) ? std::wstring(1, wchar_t(towupper(c))) : L"#";
-    if (c >= 0x4E00 && c <= 0x9FFF) {
-        static const wchar_t kFirst[] = L"吖八嚓咑妸发旮铪丌咔垃嘸拏噢妑七呥仨他屲夕丫帀";
-        static const wchar_t kLetter[] = L"ABCDEFGHJKLMNOPQRSTWXYZ";
-        int found = -1;
-        for (int i = 0; kLetter[i]; ++i) {
-            if (CompareStringEx(L"zh-CN", 0, &c, 1, &kFirst[i], 1, nullptr, nullptr, 0) == CSTR_LESS_THAN)
-                break;
-            found = i;
-        }
-        return found >= 0 ? std::wstring(1, kLetter[found]) : L"#";
-    }
-    if (iswalpha(c)) {
-        // Accented Latin: the base letter.
-        wchar_t base[4] = {};
-        if (FoldStringW(MAP_COMPOSITE, &c, 1, base, 4) > 0 && base[0] < 0x80 && iswalpha(base[0]))
-            return std::wstring(1, wchar_t(towupper(base[0])));
-    }
-    return L"#";
-}
-
 } // namespace
 
 StartMenu::StartMenu(HINSTANCE instance, TaskModel& tasks, AppCatalog& catalog)
@@ -93,17 +61,28 @@ StartMenu::StartMenu(HINSTANCE instance, TaskModel& tasks, AppCatalog& catalog)
 
 float StartMenu::W() const { return float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale(); }
 float StartMenu::H() const { return float(surface_.Rect().bottom - surface_.Rect().top) / surface_.Scale(); }
-
-void StartMenu::Rebuild()
+D2D1_RECT_F StartMenu::MainRect() const { return D2D1::RectF(0, 0, W(), H() - barH_ - kGap); }
+D2D1_RECT_F StartMenu::ShelfRect() const { return D2D1::RectF(0, H() - barH_, W(), H()); }
+float StartMenu::ButtonSize() const { return std::min(44.f, barH_ - 12); }
+D2D1_RECT_F StartMenu::PowerRect() const
 {
-    groups_.resize(apps_.size());
-    order_.resize(apps_.size());
-    for (size_t i = 0; i < apps_.size(); ++i) {
-        groups_[i] = GroupOf(apps_[i].name);
-        order_[i] = i;
-    }
-    // '#' first, then A-Z; within a group the catalog's (user locale) order.
-    std::stable_sort(order_.begin(), order_.end(), [&](size_t a, size_t b) { return groups_[a] < groups_[b]; });
+    // Right-aligned with the power button, the last in the capsule.
+    D2D1_RECT_F shelf = ShelfRect();
+    float right = std::min(shelf.right - (barH_ - ButtonSize()) / 2 + 6, W());
+    float bottom = shelf.top - 8, h = 3 * kPowerRowH + 2 * kPowerPad;
+    return D2D1::RectF(right - kPowerW, bottom - h, right, bottom);
+}
+
+float StartMenu::Covered(const D2D1_RECT_F& r, double now) const
+{
+    // Content under the power card fades as it opens: the card's glass is
+    // below the content layer, so the content would show through it.
+    if (!powerOpen_)
+        return 1;
+    D2D1_RECT_F p = PowerRect();
+    if (r.right <= p.left || r.left >= p.right || r.bottom <= p.top || r.top >= p.bottom)
+        return 1;
+    return 1 - Ease(float((now - powerMs_) / (kPowerMs * 0.6)));
 }
 
 void StartMenu::LoadAccount()
@@ -115,7 +94,7 @@ void StartMenu::LoadAccount()
     wchar_t privacy[8] = {};
     private_ = GetEnvironmentVariableW(L"ATRIUM_PRIVACY", privacy, 8) && privacy[0] == L'1';
     if (private_) {
-        userName_ = L"\u7528\u6237"; // 用户
+        userName_ = L"用户"; // 用户
         return;
     }
     wchar_t buf[256] = {};
@@ -152,15 +131,18 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
 {
     previous_ = previous;
     query_.clear();
-    view_ = View::Pinned;
+    results_.clear();
+    page_ = 0;
+    pageShown_ = 0;
+    wheelAcc_ = 0;
     scroll_ = scrollTarget_ = 0;
     sel_ = -1;
     hover_.clear();
     pressed_.clear();
     powerOpen_ = false;
     apps_ = catalog_.Apps();
-    Rebuild();
-    catalog_.Refresh(); // new installs since last time; the list updates when ready
+    pins_ = catalog_.StartPins();
+    catalog_.Refresh(); // new installs and pins since last time; the menu updates when ready
     status_ = QuerySystemStatus();
     LoadAccount();
     HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
@@ -170,10 +152,9 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi, &dpiY);
     float s = float(dpi) / 96.f;
     const RECT& wa = mi.rcWork;
-    int w = int(std::lround(kW * s)), h = int(std::lround(kH * s)), gap = int(std::lround(12 * s));
+    int w = int(std::lround(kW * s)), h = int(std::lround((kMainH + kGap + barH_) * s)), gap = int(std::lround(12 * s));
     int bottom = bar.top - gap;
-    h = std::min(h, int(bottom - wa.top - gap)); // short screens: shorter menu, the lists scroll
-    int left = std::clamp(int(bar.left), int(wa.left) + gap, int(wa.right) - gap - w);
+    int left = std::max(int(wa.left) + gap, std::min(int(bar.left), int(wa.right) - gap - w));
     Restage();
     // Pops out of the logo.
     POINT anchor{(logo.left + logo.right) / 2, bottom};
@@ -183,7 +164,7 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     // Read the status again right away: Open may run inside a cross-process
     // SendMessage (test commands), where the network list cannot be queried.
     SetTimer(surface_.Hwnd(), kStatusTimer, 50, nullptr);
-    Log(L"start: opened (%zu apps, %s)", apps_.size(), catalog_.Loaded() ? L"catalog ready" : L"catalog loading");
+    Log(L"start: opened (%zu apps, %zu start pins, %s)", apps_.size(), pins_.size(), catalog_.Loaded() ? L"catalog ready" : L"catalog loading");
 }
 
 void StartMenu::Close(bool launched)
@@ -213,23 +194,32 @@ void StartMenu::Type(const std::wstring& text)
 
 void StartMenu::LogState() const
 {
-    auto entries = Entries();
     const RECT r = surface_.Rect();
     const float s = surface_.Scale();
     auto screen = [&](const D2D1_RECT_F& d) {
         return std::to_wstring(int(float(r.left) + (d.left + d.right) / 2 * s)) + L"," + std::to_wstring(int(float(r.top) + (d.top + d.bottom) / 2 * s));
     };
-    std::wstring spots; // screen px centres of the fixed buttons and the first tiles, for tests
+    // Screen px centres of the fixed buttons and the first entries shown, for tests.
+    std::wstring spots;
+    int content = 0;
     for (const Hit& h : hits_) {
-        std::wstring name = h.id == L"app:0" || h.id == L"pin:0" ? L"first" : h.id == L"pin:1" ? L"second" : h.id;
-        if (name == L"toggle" || name == L"tray" || name == L"power" || name == L"network" || name == L"volume" || name == L"account" ||
-            name == L"first" || name == L"second" || name.rfind(L"pw:", 0) == 0)
+        bool entry = h.id.rfind(L"pin:", 0) == 0 || h.id.rfind(L"app:", 0) == 0;
+        std::wstring name = h.id;
+        if (entry)
+            name = content == 0 ? L"first" : content == 1 ? L"second" : L"";
+        content += entry ? 1 : 0;
+        if (!name.empty())
             spots += L" " + name + L"@" + screen(h.rect);
     }
     Log(L"start: spots%s", spots.c_str());
-    Log(L"start: state visible=%d foreground=%d view=%s query='%s' entries=%zu first='%s' catalog=%zu rect=%ld,%ld,%ld,%ld power=%d radius=%.0f",
-        surface_.Visible() ? 1 : 0, GetForegroundWindow() == surface_.Hwnd() ? 1 : 0, view_ == View::All ? L"all" : L"pinned", query_.c_str(),
-        entries.size(), entries.empty() ? L"" : entries[0].name.c_str(), apps_.size(), r.left, r.top, r.right, r.bottom, powerOpen_ ? 1 : 0, radius_);
+    const auto& shown = Shown();
+    D2D1_RECT_F main = MainRect(), shelf = ShelfRect();
+    Log(L"start: state visible=%d foreground=%d view=%s query='%s' entries=%zu first='%s' catalog=%zu pins=%zu page=%d/%d rect=%ld,%ld,%ld,%ld "
+        L"power=%d radius=%.0f panel=%.0fx%.0f shelf=%.0fx%.0f shelfRadius=%.0f ink=%s",
+        surface_.Visible() ? 1 : 0, GetForegroundWindow() == surface_.Hwnd() ? 1 : 0, query_.empty() ? L"pins" : L"search", query_.c_str(), shown.size(),
+        shown.empty() ? L"" : shown[0].name.c_str(), apps_.size(), pins_.size(), page_ + 1, Pages(), r.left, r.top, r.right, r.bottom, powerOpen_ ? 1 : 0,
+        radius_, main.right - main.left, main.bottom - main.top, shelf.right - shelf.left, shelf.bottom - shelf.top, (shelf.bottom - shelf.top) / 2,
+        surface_.DarkInk() ? L"dark" : L"light");
 }
 
 void StartMenu::Refresh()
@@ -237,7 +227,10 @@ void StartMenu::Refresh()
     if (!surface_.Visible())
         return;
     apps_ = catalog_.Apps();
-    Rebuild();
+    pins_ = catalog_.StartPins();
+    if (!query_.empty())
+        results_ = Results();
+    page_ = std::clamp(page_, 0, Pages() - 1);
     surface_.Invalidate();
 }
 
@@ -247,58 +240,33 @@ void StartMenu::Restage()
     hoverAnim_.clear();
 }
 
-std::vector<StartMenu::Entry> StartMenu::Entries() const
+std::vector<CatalogApp> StartMenu::Results() const
 {
-    std::vector<Entry> out;
-    if (query_.empty() && view_ == View::Pinned) {
-        // The pins, then every app below them (no recommendations).
-        for (const TaskItem& t : tasks_.Snapshot())
-            if (t.pinned)
-                out.push_back({t.key, t.name, true, 0, {}});
-    }
-    if (query_.empty()) {
-        for (size_t i : order_)
-            if (i < apps_.size())
-                out.push_back({apps_[i].id, apps_[i].name, false, i, groups_[i]});
-        return out;
-    }
-    for (size_t i = 0; i < apps_.size(); ++i)
-        if (AppCatalog::Matches(apps_[i], query_))
-            out.push_back({apps_[i].id, apps_[i].name, false, i, {}});
+    std::vector<CatalogApp> out;
+    for (const CatalogApp& a : apps_)
+        if (AppCatalog::Matches(a, query_))
+            out.push_back(a);
     // Names that start with the query first, then the other matches.
-    std::stable_partition(out.begin(), out.end(), [&](const Entry& e) {
-        return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE, e.name.c_str(), int(std::min(e.name.size(), query_.size())), query_.c_str(),
+    std::stable_partition(out.begin(), out.end(), [&](const CatalogApp& a) {
+        return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE, a.name.c_str(), int(std::min(a.name.size(), query_.size())), query_.c_str(),
                                int(query_.size()), nullptr, nullptr, 0) == CSTR_EQUAL;
     });
     return out;
 }
 
-std::vector<StartMenu::Row> StartMenu::Layout(const std::vector<Entry>& entries, float width) const
+const std::vector<CatalogApp>& StartMenu::Shown() const { return query_.empty() ? pins_ : results_; }
+
+int StartMenu::Pages() const { return std::max(1, int((pins_.size() + kPerPage - 1) / kPerPage)); }
+
+void StartMenu::SetPage(int page)
 {
-    std::vector<Row> rows;
-    // Pinned apps as tiles; in the pinned view the whole list follows them.
-    const float cell = width / kCols;
-    size_t i = 0;
-    for (; i < entries.size() && entries[i].pinned; ++i) {
-        float x = cell * float(i % kCols), y = kTileH * float(i / kCols);
-        rows.push_back({D2D1::RectF(x, y, x + cell, y + kTileH), int(i), {}});
-    }
-    float y = i ? kTileH * float((i + kCols - 1) / kCols) + 10 : 0;
-    if (i && i < entries.size()) {
-        rows.push_back({D2D1::RectF(0, y, width, y + kGroupH + 6), -1, L"\u5168\u90E8\u5E94\u7528"}); // 全部应用
-        y += kGroupH + 6;
-    }
-    std::wstring group;
-    for (; i < entries.size(); ++i) {
-        if (query_.empty() && entries[i].group != group) {
-            group = entries[i].group;
-            rows.push_back({D2D1::RectF(0, y, width, y + kGroupH), -1, group});
-            y += kGroupH;
-        }
-        rows.push_back({D2D1::RectF(0, y, width, y + kRowH), int(i), {}});
-        y += kRowH;
-    }
-    return rows;
+    page = std::clamp(page, 0, Pages() - 1);
+    if (page == page_)
+        return;
+    page_ = page;
+    if (sel_ >= 0 && sel_ / kPerPage != page_)
+        sel_ = -1;
+    surface_.Invalidate();
 }
 
 float StartMenu::Hover(Canvas& c, const std::wstring& id, bool on)
@@ -318,240 +286,313 @@ float StartMenu::Hover(Canvas& c, const std::wstring& id, bool on)
 
 void StartMenu::Paint(Canvas& c)
 {
-    const Theme t = Theme::Current();
-    const float w = W(), h = H(), R = radius_;
+    const Theme& t = c.theme;
     const double now = c.now;
     hits_.clear();
-    if (c.panel) // no glass (yet): a plain panel keeps the text readable
-        c.Fill(D2D1::RectF(0, 0, w, h), R, t.panel);
-
-    // Smooth scrolling towards the wheel's target.
     float dt = lastPaint_ > 0 ? float(std::clamp(now - lastPaint_, 0.0, 100.0)) : 16.f;
     lastPaint_ = now;
-    scroll_ += (scrollTarget_ - scroll_) * (1 - std::exp(-dt / 1000.f * 16.f));
-    if (std::fabs(scrollTarget_ - scroll_) < 0.3f)
-        scroll_ = scrollTarget_;
-    else
-        c.Continue();
+    auto glide = [&](float& v, float target, float rate, float eps) {
+        v += (target - v) * (1 - std::exp(-dt / 1000.f * rate));
+        if (std::fabs(target - v) < eps)
+            v = target;
+        else
+            c.Continue();
+    };
+    glide(scroll_, scrollTarget_, 16, 0.3f);
+    glide(pageShown_, float(page_), 14, 0.002f);
 
-    // Search field: a capsule, like the bar.
-    const float inner = std::clamp(R - kPad / 2, 8.f, kSearchH / 2);
-    D2D1_RECT_F search = D2D1::RectF(kPad, kSearchTop, w - kPad, kSearchTop + kSearchH);
-    float sh = Hover(c, L"search", hover_ == L"search" || !query_.empty());
-    c.Fill(search, inner, t.card);
-    if (sh > 0)
-        c.Fill(search, inner, Alpha(t.cardHot, sh * 0.6f));
-    c.Stroke(search, inner, query_.empty() ? t.divider : Alpha(t.accent, 0.85f), query_.empty() ? 1.f : 1.5f);
-    c.Glyph(L"\uE721", D2D1::RectF(search.left + 10, search.top, search.left + 44, search.bottom), 16, t.subtext);
-    D2D1_RECT_F field = D2D1::RectF(search.left + 46, search.top, search.right - 18, search.bottom);
+    // The pieces of glass: the panel, the capsule (round like the bar) and,
+    // while open, the power card growing up out of the capsule.
+    const D2D1_RECT_F main = MainRect(), shelf = ShelfRect();
+    std::vector<ShapeDip> shapes{{main, radius_}, {shelf, (shelf.bottom - shelf.top) / 2}};
+    if (c.panel) // no glass (yet): plain panels keep the text readable
+        for (const ShapeDip& sh : shapes)
+            c.Fill(sh.rect, sh.radius, t.panel);
+
+    PaintSearch(c, t);
     if (query_.empty())
-        c.Text(L"搜索应用", field, 15, t.faint);
+        PaintPins(c, t);
+    else
+        PaintResults(c, t);
+    PaintShelf(c, t);
+    if (powerOpen_) {
+        float e = float((now - powerMs_) / kPowerMs);
+        D2D1_RECT_F card = PowerRect();
+        float grow = 0.55f + 0.45f * EaseBack(e);
+        card.top = card.bottom - (card.bottom - card.top) * grow;
+        shapes.push_back({card, 20});
+        if (c.panel)
+            c.Fill(card, 20, t.panel);
+        PaintPower(c, t);
+    }
+    surface_.SetShapes(shapes);
+}
+
+// Search: an outlined capsule at the top of the panel; typing anywhere goes here.
+void StartMenu::PaintSearch(Canvas& c, const Theme& t)
+{
+    const float w = W();
+    D2D1_RECT_F search = D2D1::RectF(kSearchX, kSearchTop, w - kSearchX, kSearchTop + kSearchH);
+    const float r = kSearchH / 2;
+    float sh = Hover(c, L"search", hover_ == L"search" || !query_.empty());
+    c.Fill(search, r, Alpha(t.card, 0.6f + 0.4f * sh));
+    c.Stroke(search, r, query_.empty() ? t.border : Alpha(t.accent, 0.85f), query_.empty() ? 1.f : 1.5f);
+    c.Glyph(L"\uE721", D2D1::RectF(search.left + 10, search.top, search.left + 44, search.bottom), 16, t.subtext);
+    D2D1_RECT_F field = D2D1::RectF(search.left + 46, search.top, search.right - 48, search.bottom);
+    if (query_.empty())
+        c.Text(L"搜索应用", field, 15, t.faint); // 搜索应用
     else
         c.Text(query_, field, 15, t.text);
     float caretX = field.left + std::min(c.TextWidth(query_, 15), field.right - field.left - 2) + 1;
     c.Line(caretX, search.top + 12, caretX, search.bottom - 12, Alpha(t.accent, 0.9f), 1.5f);
     hits_.push_back({search, L"search"});
-
-    // Header: what the area below shows, and the switch between pinned and all apps.
-    std::wstring title = !query_.empty() ? L"搜索结果" : view_ == View::All ? L"全部应用" : L"已固定";
-    c.Text(title, D2D1::RectF(kPad + 6, kHeaderTop, w / 2, kHeaderTop + 28), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    if (query_.empty()) {
-        std::wstring label = view_ == View::All ? L"‹  已固定" : L"全部应用  ›";
-        float lw = c.TextWidth(label, 12.5f) + 28;
-        D2D1_RECT_F b = D2D1::RectF(w - kPad - lw, kHeaderTop, w - kPad, kHeaderTop + 28);
-        float hv = Hover(c, L"toggle", hover_ == L"toggle");
-        c.Fill(b, 14, t.card);
-        c.Fill(b, 14, Alpha(pressed_ == L"toggle" ? t.press : t.cardHot, 0.3f + 0.7f * hv));
-        c.Text(label, b, 12.5f, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
-        hits_.push_back({b, L"toggle"});
-    } else {
-        c.Text(L"Enter 打开", D2D1::RectF(w / 2, kHeaderTop, w - kPad - 6, kHeaderTop + 28), 12, t.faint, DWRITE_FONT_WEIGHT_NORMAL, 2);
+    if (!query_.empty()) {
+        D2D1_RECT_F clear = D2D1::RectF(search.right - 40, search.top + 6, search.right - 8, search.bottom - 6);
+        float hv = Hover(c, L"clear", hover_ == L"clear");
+        c.Fill(clear, 16, Alpha(pressed_ == L"clear" ? t.press : t.hover, 0.5f + 0.5f * hv));
+        c.Glyph(L"\uE711", clear, 10, t.text);
+        hits_.push_back({clear, L"clear"});
     }
+}
 
-    // Content: tiles or rows, sliding in staggered when the view changes.
-    const float top = kContentTop, bottom = h - kShelfGap - kShelfH - 8;
-    viewH_ = bottom - top;
-    std::vector<Entry> entries = Entries();
-    std::vector<Row> rows = Layout(entries, w - 2 * kPad);
-    contentH_ = rows.empty() ? 0 : rows.back().rect.bottom;
-    float maxScroll = std::max(0.f, contentH_ - viewH_);
-    scrollTarget_ = std::clamp(scrollTarget_, 0.f, maxScroll);
-    scroll_ = std::clamp(scroll_, 0.f, maxScroll);
-    const bool grid = Grid();
-    c.Clip(D2D1::RectF(0, top, w, bottom));
-    if (entries.empty()) {
-        std::wstring msg = !query_.empty() ? L"没有找到应用"
-                           : grid           ? L"还没有应用。"
-                           : catalog_.Loaded() ? L"没有应用" : L"正在读取应用…";
-        c.Text(msg, D2D1::RectF(kPad, top + 40, w - kPad, top + 64), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+// The Windows start menu's pins, 7 x 3 per page; pages slide sideways.
+void StartMenu::PaintPins(Canvas& c, const Theme& t)
+{
+    const float w = W(), x0 = (w - kCols * kCellW) / 2;
+    const double now = c.now;
+    if (pins_.empty()) {
+        std::wstring msg = catalog_.Loaded() ? L"Windows 开始菜单里还没有固定的应用" : L"正在读取…";
+        c.Text(msg, D2D1::RectF(kSearchX, kGridTop + 60, w - kSearchX, kGridTop + 90), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        return;
     }
-    const int tilePx = int(std::lround(kIcon * c.scale * 1.1f)), rowPx = int(std::lround(kRowIcon * c.scale * 1.1f));
-    int shown = 0;
+    const int tilePx = int(std::lround(kIcon * c.scale * 1.1f));
     static const IconImage kNone;
-    for (const Row& row : rows) {
-        D2D1_RECT_F r = D2D1::RectF(kPad + row.rect.left, top + row.rect.top - scroll_, kPad + row.rect.right, top + row.rect.bottom - scroll_);
-        if (r.bottom < top || r.top > bottom)
+    c.Clip(D2D1::RectF(0, kListTop - 4, w, kGridTop + kRows * kCellH + 4));
+    for (size_t i = 0; i < pins_.size(); ++i) {
+        int page = int(i) / kPerPage, k = int(i) % kPerPage;
+        float x = x0 + float(k % kCols) * kCellW + (float(page) - pageShown_) * w, y = kGridTop + float(k / kCols) * kCellH;
+        if (x + kCellW < 0 || x > w)
             continue;
-        float e = Ease(float((now - stageMs_ - kStaggerMs * std::min(shown++, 18)) / kStageMs));
+        D2D1_RECT_F r = D2D1::RectF(x, y, x + kCellW, y + kCellH);
+        float e = Ease(float((now - stageMs_ - kStaggerMs * std::min(k, 18)) / kStageMs));
         if (e < 1)
             c.Continue();
-        c.BeginGroup(e, 1, (r.left + r.right) / 2, (r.top + r.bottom) / 2, 0, 14 * (1 - e));
-        if (row.entry < 0) {
-            if (row.label.size() > 1) { // a section title
-                c.Text(row.label, D2D1::RectF(r.left + 6, r.top + 6, r.right, r.bottom), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            } else {
-                c.Text(row.label, D2D1::RectF(r.left + 12, r.top + 8, r.right, r.bottom), 13, t.accent, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-                c.Line(r.left + 34, (r.top + r.bottom) / 2 + 4, r.right - 8, (r.top + r.bottom) / 2 + 4, t.divider);
-            }
-            c.EndGroup();
+        float shown = Covered(r, now);
+        if (shown <= 0.01f)
             continue;
-        }
-        const Entry& en = entries[size_t(row.entry)];
-        std::wstring id = (en.pinned ? L"pin:" : L"app:") + std::to_wstring(row.entry);
-        bool selected = row.entry == sel_ || (sel_ < 0 && row.entry == 0 && !query_.empty());
+        if (shown < 1)
+            c.Continue();
+        c.BeginGroup(e * shown, 1, (r.left + r.right) / 2, (r.top + r.bottom) / 2, 0, 10 * (1 - e));
+        std::wstring id = L"pin:" + std::to_wstring(i);
+        bool selected = int(i) == sel_;
         float hv = Hover(c, id, hover_ == id || selected);
         bool pressed = pressed_ == id;
-        D2D1_RECT_F plate = D2D1::RectF(r.left + 3, r.top + 3, r.right - 3, r.bottom - 3);
-        const float plateR = std::clamp(R - kPad, 8.f, en.pinned ? 18.f : 14.f);
-        const int iconPx = en.pinned ? tilePx : rowPx;
+        D2D1_RECT_F plate = D2D1::RectF(r.left + 2, r.top + 1, r.right - 2, r.bottom - 1);
         if (hv > 0.001f)
-            c.Fill(plate, plateR, selected && hover_ != id ? Alpha(t.accent, 0.20f * hv) : Alpha(t.cardHot, hv));
+            c.Fill(plate, 16, selected && hover_ != id ? Alpha(t.accent, 0.22f * hv) : Alpha(t.hover, hv));
         if (pressed)
-            c.Fill(plate, plateR, t.press);
+            c.Fill(plate, 16, t.press);
         if (rippleId_ == id && now - rippleMs_ < kRippleMs) {
-            c.Ripple(plate, plateR, rippleX_, rippleY_, float((now - rippleMs_) / kRippleMs),
-                     t.light ? D2D1::ColorF(1, 1, 1, 0.9f) : D2D1::ColorF(1, 1, 1, 0.22f));
+            c.Ripple(plate, 16, rippleX_, rippleY_, float((now - rippleMs_) / kRippleMs), t.light ? D2D1::ColorF(1, 1, 1, 0.6f) : D2D1::ColorF(1, 1, 1, 0.22f));
             c.Continue();
         }
-        std::wstring cacheKey = (en.pinned ? L"p|" : L"c|") + en.key + L"|" + std::to_wstring(iconPx);
+        const CatalogApp& app = pins_[i];
+        std::wstring cacheKey = L"c|" + app.id + L"|" + std::to_wstring(tilePx);
         bool cached = c.Cached(cacheKey);
         IconImage fetched;
         if (!cached)
-            fetched = en.pinned ? tasks_.Icon(en.key, iconPx) : catalog_.Icon(en.key, iconPx);
+            fetched = catalog_.Icon(app.id, tilePx);
         const IconImage& icon = cached ? kNone : fetched;
-        bool hasIcon = cached || !icon.empty();
-        float lift = pressed ? 0.94f : 1 + 0.07f * hv;
-        if (en.pinned) {
-            float cx = (r.left + r.right) / 2, iy = r.top + 14;
-            D2D1_RECT_F ir = D2D1::RectF(cx - kIcon / 2, iy, cx + kIcon / 2, iy + kIcon);
-            c.BeginGroup(1, lift, cx, iy + kIcon, 0, -3 * hv);
-            if (hasIcon)
-                c.Image(cacheKey, icon, ir);
-            else
-                c.Fill(ir, 10, t.hover);
-            c.EndGroup();
-            c.Text(en.name, D2D1::RectF(r.left + 6, r.top + 66, r.right - 6, r.top + 88), 12, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
-        } else {
-            float iy = (r.top + r.bottom) / 2 - kRowIcon / 2;
-            D2D1_RECT_F ir = D2D1::RectF(r.left + 14, iy, r.left + 14 + kRowIcon, iy + kRowIcon);
-            c.BeginGroup(1, lift, (ir.left + ir.right) / 2, (ir.top + ir.bottom) / 2);
-            if (hasIcon)
-                c.Image(cacheKey, icon, ir);
-            else
-                c.Fill(ir, 7, t.hover);
-            c.EndGroup();
-            c.Text(en.name, D2D1::RectF(r.left + 56, r.top, r.right - 14, r.bottom), 14, t.text);
-        }
-        hits_.push_back({r, id});
+        float cx = (r.left + r.right) / 2, iy = r.top + 8;
+        D2D1_RECT_F ir = D2D1::RectF(cx - kIcon / 2, iy, cx + kIcon / 2, iy + kIcon);
+        c.BeginGroup(1, pressed ? 0.94f : 1 + 0.08f * hv, cx, iy + kIcon, 0, -2 * hv);
+        if (cached || !icon.empty())
+            c.Image(cacheKey, icon, ir);
+        else
+            c.Fill(ir, 10, t.hover);
         c.EndGroup();
+        c.Text(app.name, D2D1::RectF(r.left + 2, r.top + 52, r.right - 2, r.bottom + 2), 11.5f, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1, true);
+        c.EndGroup();
+        if (page == page_)
+            hits_.push_back({r, id});
     }
     c.Unclip();
-    // Scroll indicator.
-    if (contentH_ > viewH_ + 1) {
-        float th = std::max(28.f, viewH_ * viewH_ / contentH_);
-        float ty = top + (viewH_ - th) * (scroll_ / (contentH_ - viewH_));
-        c.Fill(D2D1::RectF(w - 10, ty, w - 6, ty + th), 2, t.faint);
-    }
 
-    PaintShelf(c, t, w, h);
-    if (powerOpen_)
-        PaintPower(c, t, w, h);
+    // Page dots; the current one is drawn out into a short capsule.
+    int pages = Pages();
+    if (pages > 1) {
+        const float dot = 6, gapX = 8;
+        float total = 0;
+        std::vector<float> widths(static_cast<size_t>(pages));
+        for (int p = 0; p < pages; ++p) {
+            float on = std::max(0.f, 1 - std::fabs(pageShown_ - float(p)));
+            widths[size_t(p)] = dot + 12 * on;
+            total += widths[size_t(p)] + (p ? gapX : 0);
+        }
+        float x = (w - total) / 2;
+        for (int p = 0; p < pages; ++p) {
+            float on = std::max(0.f, 1 - std::fabs(pageShown_ - float(p)));
+            std::wstring id = L"page:" + std::to_wstring(p);
+            float hv = Hover(c, id, hover_ == id);
+            D2D1_RECT_F d = D2D1::RectF(x, kDotsY - dot / 2, x + widths[size_t(p)], kDotsY + dot / 2);
+            D2D1_COLOR_F col = t.faint;
+            col.a = t.faint.a + (t.text.a - t.faint.a) * std::max(on, 0.5f * hv);
+            c.Fill(d, dot / 2, col);
+            hits_.push_back({D2D1::RectF(d.left - gapX / 2, kDotsY - 10, d.right + gapX / 2, kDotsY + 10), id});
+            x = d.right + gapX;
+        }
+    }
 }
 
-// The shelf at the bottom: the account on the left; network, volume,
-// battery, tray and power on the right.
-void StartMenu::PaintShelf(Canvas& c, const Theme& t, float w, float h)
+// Search results: one row per app, the first (or the selected) one opens with Enter.
+void StartMenu::PaintResults(Canvas& c, const Theme& t)
 {
-    D2D1_RECT_F shelf = D2D1::RectF(kShelfGap, h - kShelfGap - kShelfH, w - kShelfGap, h - kShelfGap);
-    const float sr = std::clamp(radius_ - kShelfGap, 8.f, kShelfH / 2);
-    c.Fill(shelf, sr, t.card);
-    const float cy = (shelf.top + shelf.bottom) / 2, bh = 40;
-
-    // Account.
-    std::wstring name = userName_.empty() ? L"用户" : userName_;
-    float nw = std::min(c.TextWidth(name, 14, DWRITE_FONT_WEIGHT_SEMI_BOLD), 180.f);
-    D2D1_RECT_F acct = D2D1::RectF(shelf.left + 10, cy - bh / 2, shelf.left + 10 + 6 + 32 + 10 + nw + 14, cy + bh / 2);
-    float ah = Hover(c, L"account", hover_ == L"account");
-    if (ah > 0)
-        c.Fill(acct, bh / 2, Alpha(pressed_ == L"account" ? t.press : t.cardHot, ah));
-    D2D1_RECT_F pic = D2D1::RectF(acct.left + 6, cy - 16, acct.left + 38, cy + 16);
-    if (!avatar_.empty()) {
-        c.ImageCircle(L"avatar", avatar_, pic);
-    } else {
-        c.Circle((pic.left + pic.right) / 2, cy, 16, Alpha(t.accent, 0.9f));
-        c.Text(name.substr(0, 1), pic, 14, t.accentText, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+    const float w = W();
+    const double now = c.now;
+    contentH_ = float(results_.size()) * kRowH;
+    const float viewH = kListBottom - kListTop;
+    scrollTarget_ = std::clamp(scrollTarget_, 0.f, std::max(0.f, contentH_ - viewH));
+    scroll_ = std::clamp(scroll_, 0.f, std::max(0.f, contentH_ - viewH));
+    if (results_.empty()) {
+        c.Text(L"没有找到应用", D2D1::RectF(kSearchX, kGridTop + 60, w - kSearchX, kGridTop + 90), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        return;
     }
-    c.Text(name, D2D1::RectF(pic.right + 10, shelf.top, pic.right + 10 + nw + 2, shelf.bottom), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    hits_.push_back({acct, L"account"});
+    const int rowPx = int(std::lround(kRowIcon * c.scale * 1.1f));
+    static const IconImage kNone;
+    c.Clip(D2D1::RectF(0, kListTop, w, kListBottom));
+    int shown = 0;
+    for (size_t i = 0; i < results_.size(); ++i) {
+        float y = kListTop + float(i) * kRowH - scroll_;
+        if (y + kRowH < kListTop || y > kListBottom)
+            continue;
+        D2D1_RECT_F r = D2D1::RectF(16, y, w - 16, y + kRowH);
+        float e = Ease(float((now - stageMs_ - kStaggerMs * std::min(shown++, 8)) / kStageMs));
+        if (e < 1)
+            c.Continue();
+        float visible = Covered(r, now);
+        if (visible <= 0.01f)
+            continue;
+        if (visible < 1)
+            c.Continue();
+        c.BeginGroup(e * visible, 1, (r.left + r.right) / 2, (r.top + r.bottom) / 2, 0, 8 * (1 - e));
+        std::wstring id = L"app:" + std::to_wstring(i);
+        bool selected = int(i) == sel_ || (sel_ < 0 && i == 0);
+        float hv = Hover(c, id, hover_ == id || selected);
+        D2D1_RECT_F plate = D2D1::RectF(r.left, r.top + 2, r.right, r.bottom - 2);
+        const float pr = (plate.bottom - plate.top) / 2;
+        if (hv > 0.001f)
+            c.Fill(plate, pr, selected && hover_ != id ? Alpha(t.accent, 0.22f * hv) : Alpha(t.hover, hv));
+        if (pressed_ == id)
+            c.Fill(plate, pr, t.press);
+        if (rippleId_ == id && now - rippleMs_ < kRippleMs) {
+            c.Ripple(plate, pr, rippleX_, rippleY_, float((now - rippleMs_) / kRippleMs), t.light ? D2D1::ColorF(1, 1, 1, 0.6f) : D2D1::ColorF(1, 1, 1, 0.22f));
+            c.Continue();
+        }
+        const CatalogApp& app = results_[i];
+        std::wstring cacheKey = L"c|" + app.id + L"|" + std::to_wstring(rowPx);
+        bool cached = c.Cached(cacheKey);
+        IconImage fetched;
+        if (!cached)
+            fetched = catalog_.Icon(app.id, rowPx);
+        const IconImage& icon = cached ? kNone : fetched;
+        float iy = (r.top + r.bottom) / 2 - kRowIcon / 2;
+        D2D1_RECT_F ir = D2D1::RectF(r.left + 14, iy, r.left + 14 + kRowIcon, iy + kRowIcon);
+        c.BeginGroup(1, pressed_ == id ? 0.94f : 1 + 0.06f * hv, (ir.left + ir.right) / 2, (ir.top + ir.bottom) / 2);
+        if (cached || !icon.empty())
+            c.Image(cacheKey, icon, ir);
+        else
+            c.Fill(ir, 7, t.hover);
+        c.EndGroup();
+        c.Text(app.name, D2D1::RectF(r.left + 56, r.top, r.right - 80, r.bottom), 14, t.text);
+        if (selected)
+            c.Text(L"Enter 打开", D2D1::RectF(r.right - 100, r.top, r.right - 18, r.bottom), 12, t.faint, DWRITE_FONT_WEIGHT_NORMAL, 2);
+        c.EndGroup();
+        hits_.push_back({r, id});
+    }
+    c.Unclip();
+    if (contentH_ > viewH + 1) {
+        float th = std::max(28.f, viewH * viewH / contentH_);
+        float ty = kListTop + (viewH - th) * (scroll_ / (contentH_ - viewH));
+        c.Fill(D2D1::RectF(w - 9, ty, w - 5, ty + th), 2, t.faint);
+    }
+}
+
+// The capsule: the account on the left; network, volume, battery, tray and
+// power on the right, round buttons like the bar's.
+void StartMenu::PaintShelf(Canvas& c, const Theme& t)
+{
+    const D2D1_RECT_F shelf = ShelfRect();
+    const float cy = (shelf.top + shelf.bottom) / 2, bh = ButtonSize();
+    const float edge = (shelf.bottom - shelf.top - bh) / 2; // concentric with the capsule
 
     // Right side, built from the right edge.
-    float x = shelf.right - 10;
-    auto chip = [&](const std::wstring& id, const std::wstring& glyph, const std::wstring& label, bool dim) {
+    float x = shelf.right - edge;
+    auto button = [&](const std::wstring& id, const std::wstring& glyph, const std::wstring& label, bool dim) {
         float tw = label.empty() ? 0 : c.TextWidth(label, 12) + 4;
-        float bw = label.empty() ? bh : 12 + 20 + 6 + tw + 12;
+        float bw = label.empty() ? bh : 12 + 20 + 4 + tw + 12;
         D2D1_RECT_F b = D2D1::RectF(x - bw, cy - bh / 2, x, cy + bh / 2);
         float hv = Hover(c, id, hover_ == id || (id == L"power" && powerOpen_));
         if (hv > 0)
-            c.Fill(b, bh / 2, Alpha(pressed_ == id ? t.press : t.cardHot, hv));
+            c.Fill(b, bh / 2, Alpha(pressed_ == id ? t.press : t.hover, hv));
         D2D1_RECT_F g = label.empty() ? b : D2D1::RectF(b.left + 10, b.top, b.left + 34, b.bottom);
         c.Glyph(glyph, g, 16, dim ? t.faint : t.text);
         if (!label.empty())
-            c.Text(label, D2D1::RectF(b.left + 38, b.top, b.right - 8, b.bottom), 12, dim ? t.faint : t.subtext);
+            c.Text(label, D2D1::RectF(b.left + 36, b.top, b.right - 8, b.bottom), 12, dim ? t.faint : t.subtext);
         hits_.push_back({b, id});
-        x = b.left - 4;
+        x = b.left - 2;
     };
-    chip(L"power", L"\uE7E8", L"", false);
-    c.Line(x - 2, cy - 12, x - 2, cy + 12, t.divider);
-    x -= 6;
-    chip(L"tray", L"\uE70E", L"托盘", false);
+    button(L"power", L"\uE7E8", L"", false);
+    c.Line(x - 4, cy - 12, x - 4, cy + 12, t.divider);
+    x -= 8;
+    button(L"tray", L"\uE70E", L"", false);
     if (status_.battery) {
         int level = std::clamp(status_.batteryPercent / 10, 0, 10);
         std::wstring glyph(1, wchar_t((status_.charging ? 0xEBAB : 0xEBA0) + level));
-        chip(L"battery", glyph, std::to_wstring(status_.batteryPercent) + L"%", false);
+        button(L"battery", glyph, std::to_wstring(status_.batteryPercent) + L"%", false);
     }
     if (status_.audio)
-        chip(L"volume", status_.muted ? L"\uE74F" : status_.volume < 34 ? L"\uE993" : status_.volume < 67 ? L"\uE994" : L"\uE995",
-             status_.muted ? L"静音" : std::to_wstring(status_.volume) + L"%", status_.muted);
-    std::wstring net = status_.connected ? (status_.network.empty() || private_ ? L"已连接" : status_.network) : L"未连接";
-    if (net.size() > 12)
-        net = net.substr(0, 11) + L"…";
-    chip(L"network", status_.connected ? L"\uE701" : L"\uEB55", net, !status_.connected);
+        button(L"volume", status_.muted ? L"\uE74F" : status_.volume < 34 ? L"\uE993" : status_.volume < 67 ? L"\uE994" : L"\uE995", L"", status_.muted);
+    button(L"network", status_.connected ? L"\uE701" : L"\uEB55", L"", !status_.connected);
+
+    // Account, in what is left.
+    std::wstring name = userName_.empty() ? L"用户" : userName_;
+    const float left = shelf.left + edge;
+    float nw = std::clamp(c.TextWidth(name, 14, DWRITE_FONT_WEIGHT_SEMI_BOLD), 0.f, std::max(0.f, x - left - 70));
+    D2D1_RECT_F acct = D2D1::RectF(left, cy - bh / 2, left + 8 + 28 + 10 + nw + 16, cy + bh / 2);
+    float ah = Hover(c, L"account", hover_ == L"account");
+    if (ah > 0)
+        c.Fill(acct, bh / 2, Alpha(pressed_ == L"account" ? t.press : t.hover, ah));
+    D2D1_RECT_F pic = D2D1::RectF(acct.left + 8, cy - 14, acct.left + 36, cy + 14);
+    if (!avatar_.empty()) {
+        c.ImageCircle(L"avatar", avatar_, pic);
+    } else {
+        c.Circle((pic.left + pic.right) / 2, cy, 14, Alpha(t.accent, 0.9f));
+        bool halo = c.halo;
+        c.halo = false;
+        c.Text(name.substr(0, 1), pic, 13, t.accentText, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.halo = halo;
+    }
+    c.Text(name, D2D1::RectF(pic.right + 10, shelf.top, pic.right + 10 + nw + 2, shelf.bottom), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    hits_.push_back({acct, L"account"});
 }
 
-// Power choices: a small card that springs up from the power button.
-void StartMenu::PaintPower(Canvas& c, const Theme& t, float w, float h)
+// Power choices, in their own piece of glass above the power button.
+void StartMenu::PaintPower(Canvas& c, const Theme& t)
 {
-    auto power = std::find_if(hits_.begin(), hits_.end(), [](const Hit& hh) { return hh.id == L"power"; });
-    if (power == hits_.end())
-        return;
-    const float cw = 172, rowH = 40, pad = 6, ch = 3 * rowH + 2 * pad;
-    const float right = std::min(power->rect.right + 6, w - 8), bottom = h - kShelfGap - kShelfH - 6;
-    D2D1_RECT_F card = D2D1::RectF(right - cw, bottom - ch, right, bottom);
-    float e = float((c.now - powerMs_) / 220);
+    D2D1_RECT_F card = PowerRect();
+    float e = float((c.now - powerMs_) / kPowerMs);
     if (e < 1)
         c.Continue();
-    c.BeginGroup(Ease(e * 1.4f), 0.86f + 0.14f * EaseBack(e), right - 18, bottom);
-    const float r = std::clamp(radius_ - kShelfGap, 8.f, 18.f);
-    c.Fill(card, r, t.light ? D2D1::ColorF(0xFBFBFD, 0.97f) : D2D1::ColorF(0x2A2B31, 0.97f));
-    c.Stroke(card, r, t.divider);
+    c.BeginGroup(Ease(e * 1.3f), 0.92f + 0.08f * EaseBack(e), card.right - 22, card.bottom);
     static const wchar_t* const kGlyphs[] = {L"\uE708", L"\uE72C", L"\uE7E8"};
     static const wchar_t* const kNames[] = {L"睡眠", L"重启", L"关机"};
     for (int i = 0; i < 3; ++i) {
-        D2D1_RECT_F row = D2D1::RectF(card.left + pad, card.top + pad + rowH * float(i), card.right - pad, card.top + pad + rowH * float(i + 1));
+        D2D1_RECT_F row = D2D1::RectF(card.left + 8, card.top + kPowerPad + kPowerRowH * float(i), card.right - 8,
+                                      card.top + kPowerPad + kPowerRowH * float(i + 1));
         std::wstring id = L"pw:" + std::to_wstring(i);
         float hv = Hover(c, id, hover_ == id || powerSel_ == i);
         if (hv > 0)
-            c.Fill(row, std::max(4.f, r - pad), Alpha(powerSel_ == i && hover_ != id ? Alpha(t.accent, 0.22f) : t.hover, hv * 1.4f));
+            c.Fill(row, 14, powerSel_ == i && hover_ != id ? Alpha(t.accent, 0.24f * hv) : Alpha(t.hover, hv));
         c.Glyph(kGlyphs[i], D2D1::RectF(row.left + 6, row.top, row.left + 38, row.bottom), 15, t.text);
         c.Text(kNames[i], D2D1::RectF(row.left + 44, row.top, row.right - 8, row.bottom), 14, t.text);
         hits_.push_back({row, id});
@@ -563,28 +604,22 @@ std::wstring StartMenu::HitAt(POINT pt) const
 {
     float s = surface_.Scale();
     float x = float(pt.x) / s, y = float(pt.y) / s;
-    // Last painted is on top (the power card over the content).
+    // Last painted is on top (the power card over the panel).
     for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
         const Hit& h = *it;
         if (!In(h.rect, x, y))
             continue;
-        // Rows scrolled under the header or the shelf are not clickable.
-        bool content = h.id.rfind(L"pin:", 0) == 0 || h.id.rfind(L"app:", 0) == 0;
-        if (content && (y < kContentTop || y > H() - kShelfGap - kShelfH - 8))
+        // Rows scrolled out of the list are not clickable.
+        if (h.id.rfind(L"app:", 0) == 0 && (y < kListTop || y > kListBottom))
             continue;
         return h.id;
     }
     return {};
 }
 
-void StartMenu::Launch(const Entry& e)
+void StartMenu::Launch(const CatalogApp& app)
 {
-    if (e.pinned) {
-        tasks_.Launch(e.key);
-        Log(L"start: launched pin %s", e.key.c_str());
-    } else if (e.catalog < apps_.size()) {
-        AppCatalog::Launch(apps_[e.catalog]);
-    }
+    AppCatalog::Launch(app);
     Close(true);
 }
 
@@ -598,17 +633,19 @@ void StartMenu::RunPower(int index)
 
 void StartMenu::Activate(const std::wstring& id)
 {
-    if (id == L"toggle") {
-        view_ = view_ == View::All ? View::Pinned : View::All;
-        scroll_ = scrollTarget_ = 0;
+    if (id.rfind(L"pin:", 0) == 0 || id.rfind(L"app:", 0) == 0) {
+        size_t i = size_t(std::stoul(id.substr(4)));
+        const auto& list = id[0] == L'p' ? pins_ : results_;
+        if (i < list.size())
+            Launch(list[i]);
+    } else if (id.rfind(L"page:", 0) == 0) {
+        SetPage(std::stoi(id.substr(5)));
+    } else if (id == L"clear") {
+        query_.clear();
+        results_.clear();
         sel_ = -1;
         Restage();
         surface_.Invalidate();
-    } else if (id.rfind(L"pin:", 0) == 0 || id.rfind(L"app:", 0) == 0) {
-        size_t i = size_t(std::stoul(id.substr(4)));
-        auto entries = Entries();
-        if (i < entries.size())
-            Launch(entries[i]);
     } else if (id == L"power") {
         powerOpen_ = !powerOpen_;
         powerSel_ = -1;
@@ -629,63 +666,55 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
     if (id.rfind(L"pin:", 0) != 0 && id.rfind(L"app:", 0) != 0)
         return;
     size_t i = size_t(std::stoul(id.substr(4)));
-    auto entries = Entries();
-    if (i >= entries.size())
+    const auto& list = id[0] == L'p' ? pins_ : results_;
+    if (i >= list.size())
         return;
-    Entry e = entries[i];
+    CatalogApp app = list[i];
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, 1, L"打开");
-    PinnedApp pin;
-    if (e.pinned) {
-        AppendMenuW(menu, MF_STRING, 2, L"从 Atrium 取消固定");
-    } else if (e.catalog < apps_.size()) {
-        pin = AppCatalog::PinFor(apps_[e.catalog]);
-        AppendMenuW(menu, MF_STRING, 3, L"固定到 Atrium");
-    }
+    AppendMenuW(menu, MF_STRING, 2, L"固定到程序坞");
     menuOpen_ = true;
     UINT cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, surface_.Hwnd(), nullptr);
     menuOpen_ = false;
     DestroyMenu(menu);
     if (cmd == 1)
-        Launch(e);
-    else if (cmd == 2 && onUnpin)
-        onUnpin(e.key);
-    else if (cmd == 3 && onPin)
-        onPin(pin);
+        Launch(app);
+    else if (cmd == 2 && onPin)
+        onPin(AppCatalog::PinFor(app));
     surface_.Invalidate();
 }
 
 void StartMenu::MoveSelection(int dx, int dy)
 {
-    auto entries = Entries();
-    if (entries.empty())
+    const auto& list = Shown();
+    if (list.empty())
         return;
-    int n = int(entries.size());
-    int pins = int(std::count_if(entries.begin(), entries.end(), [](const Entry& e) { return e.pinned; }));
-    int cur = sel_ < 0 ? (query_.empty() ? -1 : 0) : sel_;
+    int n = int(list.size());
     int next;
-    if (cur < 0)
-        next = 0;
-    else if (cur < pins) // tiles: a grid; down from the last row reaches the list
-        next = dy > 0 && cur + kCols >= pins ? pins : cur + dx + dy * kCols;
-    else // rows; up from the first row returns to the last tile
-        next = cur + dy + dx < pins && cur + dy + dx >= 0 && dy < 0 ? pins - 1 : cur + dy + dx;
+    if (!query_.empty()) // rows; with nothing selected the first row counts as selected
+        next = (sel_ < 0 ? 0 : sel_) + dy + dx;
+    else if (sel_ < 0)
+        next = page_ * kPerPage; // the first tile of the page shown
+    else if (int to = sel_ + dx + dy * kCols; to >= 0 && to < n)
+        next = to;
+    else
+        next = dx ? std::clamp(to, 0, n - 1) : sel_; // up/down past the grid stays
     sel_ = std::clamp(next, 0, n - 1);
+    if (query_.empty())
+        SetPage(sel_ / kPerPage);
     EnsureVisible();
     surface_.Invalidate();
 }
 
 void StartMenu::EnsureVisible()
 {
-    if (sel_ < 0)
+    if (sel_ < 0 || query_.empty())
         return;
-    for (const Row& row : Layout(Entries(), W() - 2 * kPad))
-        if (row.entry == sel_) {
-            if (row.rect.top < scrollTarget_)
-                scrollTarget_ = row.rect.top;
-            else if (row.rect.bottom > scrollTarget_ + viewH_)
-                scrollTarget_ = row.rect.bottom - viewH_;
-        }
+    const float viewH = kListBottom - kListTop, top = float(sel_) * kRowH;
+    if (top < scrollTarget_)
+        scrollTarget_ = top;
+    else if (top + kRowH > scrollTarget_ + viewH)
+        scrollTarget_ = top + kRowH - viewH;
 }
 
 void StartMenu::PlaceIme()
@@ -698,7 +727,7 @@ void StartMenu::PlaceIme()
         POINT origin{surface_.Rect().left - win.left, surface_.Rect().top - win.top};
         COMPOSITIONFORM cf{};
         cf.dwStyle = CFS_POINT;
-        cf.ptCurrentPos = POINT{origin.x + LONG((kPad + 46) * s), origin.y + LONG((kSearchTop + kSearchH + 4) * s)};
+        cf.ptCurrentPos = POINT{origin.x + LONG((kSearchX + 46) * s), origin.y + LONG((kSearchTop + kSearchH + 4) * s)};
         ImmSetCompositionWindow(imc, &cf);
         ImmReleaseContext(surface_.Hwnd(), imc);
     }
@@ -770,15 +799,24 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_RBUTTONUP:
         ContextMenu(HitAt(pt), surface_.ContentToScreen(pt));
         return true;
-    case WM_MOUSEWHEEL: {
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
         POINT client = surface_.ScreenToContent(pt);
-        int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
-        if (HitAt(client) == L"volume") {
-            AdjustVolume(2 * notches);
+        float notches = float(GET_WHEEL_DELTA_WPARAM(w)) / WHEEL_DELTA;
+        if (m == WM_MOUSEWHEEL && HitAt(client) == L"volume") {
+            AdjustVolume(int(std::lround(2 * notches)));
             status_ = QuerySystemStatus();
+        } else if (!query_.empty()) {
+            if (m == WM_MOUSEWHEEL)
+                scrollTarget_ = std::clamp(scrollTarget_ - notches * 2 * kRowH, 0.f, std::max(0.f, contentH_ - (kListBottom - kListTop)));
         } else {
-            scrollTarget_ -= float(notches) * 3 * kRowH;
-            scrollTarget_ = std::clamp(scrollTarget_, 0.f, std::max(0.f, contentH_ - viewH_));
+            // A page per notch (touchpads: per notch's worth of small steps);
+            // the wheel turned down, or a swipe to the right, goes forward.
+            wheelAcc_ += m == WM_MOUSEWHEEL ? -notches : notches;
+            if (std::fabs(wheelAcc_) >= 1) {
+                SetPage(page_ + (wheelAcc_ > 0 ? 1 : -1));
+                wheelAcc_ = 0;
+            }
         }
         surface_.Invalidate();
         return true;
@@ -805,6 +843,13 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         case VK_RIGHT:
             MoveSelection(1, 0);
             return true;
+        case VK_PRIOR:
+        case VK_NEXT:
+            if (query_.empty()) {
+                SetPage(page_ + (w == VK_NEXT ? 1 : -1));
+                return true;
+            }
+            return false;
         }
         return false;
     case WM_CHAR: {
@@ -814,10 +859,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
                 powerOpen_ = false;
                 surface_.Invalidate();
             } else if (!query_.empty()) {
-                query_.clear();
-                sel_ = -1;
-                Restage();
-                surface_.Invalidate();
+                Activate(L"clear");
             } else {
                 Close(false);
             }
@@ -825,14 +867,15 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             if (powerOpen_) {
                 RunPower(powerSel_);
             } else {
-                auto entries = Entries();
+                const auto& list = Shown();
                 int i = sel_ >= 0 ? sel_ : query_.empty() ? -1 : 0;
-                if (i >= 0 && i < int(entries.size()))
-                    Launch(entries[size_t(i)]);
+                if (i >= 0 && i < int(list.size()))
+                    Launch(list[size_t(i)]);
             }
         } else if (ch == 8) {
             if (!query_.empty()) {
                 query_.pop_back();
+                results_ = Results();
                 if (query_.empty())
                     Restage();
             }
@@ -843,6 +886,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             if (query_.empty())
                 Restage(); // the results slide in
             query_ += ch;
+            results_ = Results();
             sel_ = -1;
             scroll_ = scrollTarget_ = 0;
             powerOpen_ = false;

@@ -1,10 +1,12 @@
 ﻿<#
 .SYNOPSIS
   Drives Atrium's start menu with the real mouse and keyboard: open from the
-  logo (and take the keyboard), type to search, Esc, toggle with the logo,
-  close on an outside click, launch with Enter, pin and unpin from the menu,
-  the power card (dry run: nothing is shut down), the tray entry, and the
-  menu size at the monitor's DPI.
+  logo (and take the keyboard), the size at the monitor's DPI, the status
+  capsule shaped like the bar and the bar's glass, the Windows start menu's
+  pins (not the bar's), turning pages with the wheel and the dots, type to
+  search, Esc, toggle with the logo, close on an outside click, pin a search
+  result to the bar, the power card (dry run: nothing is shut down), launch
+  with Enter and the tray entry.
 
 .DESCRIPTION
   Moves the mouse and types, so it only runs after the user has been idle for
@@ -68,6 +70,7 @@ function Check($name, $ok, $detail) {
     if (-not $ok) { $script:failed++ }
     "{0} {1}: {2}" -f $(if ($ok) { "PASS" } else { "FAIL" }), $name, $detail
 }
+function Wheel($x, $y, $delta) { [U]::SetCursorPos([int]$x, [int]$y) | Out-Null; Start-Sleep -Milliseconds 150; [U]::mouse_event(0x0800, 0, 0, [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$delta), 0), [UIntPtr]::Zero); Start-Sleep -Milliseconds 700 }
 function NewLog { (Get-Content $logFile -Encoding UTF8 | Select-Object -Skip $script:logStart) }
 function LastState {
     Start-Process $Core -ArgumentList "--command", "start-state" -Wait
@@ -132,7 +135,30 @@ try {
     $m = [regex]::Match((LastState), "rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)")
     $r = @([int]$m.Groups[1].Value, [int]$m.Groups[2].Value, [int]$m.Groups[3].Value, [int]$m.Groups[4].Value)
     $bar = ItemRect "#start"
-    Check "size-at-dpi" ([math]::Abs(($r[2] - $r[0]) - 640 * $s) -le 1 -and ($r[3] - $r[1]) -le 720 * $s + 1 -and $r[3] -le $bar[1]) "menu $($r[2] - $r[0])x$($r[3] - $r[1]) px at $([int]($s * 100))% scale, bottom $($r[3]) above the bar top $($bar[1])"
+    Check "size-at-dpi" ([math]::Abs(($r[2] - $r[0]) - 560 * $s) -le 1 -and ($r[3] - $r[1]) -le (392 + 12 + 60) * $s + 1 -and $r[3] -le $bar[1]) "menu $($r[2] - $r[0])x$($r[3] - $r[1]) px at $([int]($s * 100))% scale, bottom $($r[3]) above the bar top $($bar[1])"
+
+    # Two pieces of the bar's glass: the panel and a capsule as high as the bar
+    # (60 DIP here) and as round; the glass's tint is the bar's (transparency 0.95).
+    $st = LastState
+    $glass = @(NewLog | Where-Object { $_ -match "popup glass ready for Atrium Start" })[-1]
+    Check "capsule-like-bar" ($st -match "radius=30 panel=560x\d+ shelf=560x60 shelfRadius=30" -and $glass -match "2 shapes, radius 60 px, tint 0\.05") "$(([regex]::Match($st, ' radius=.*')).Value.Trim()); $($glass -replace '.*render: ', '')"
+
+    # The pins are the Windows start menu's (Export-StartLayout), not the bar's (where.exe).
+    $layout = @(NewLog | Where-Object { $_ -match "start layout exported \((\d+) entries\)" })[-1]
+    $entries = if ($layout -match "\((\d+) entries\)") { [int]$Matches[1] } else { -1 }
+    $pins = if ($st -match " pins=(\d+) ") { [int]$Matches[1] } else { -1 }
+    Check "windows-start-pins" ($entries -gt 0 -and $pins -gt 0 -and $pins -le $entries -and $st -notmatch "first='where'") "layout entries $entries, menu pins $pins, $(([regex]::Match($st, "first='[^']*'")).Value)"
+
+    # Pages: 21 pins each; the wheel turns them, the dots too.
+    if ($st -match "page=1/([2-9])") {
+        $p = Spot "first"; Wheel $p[0] $p[1] -120
+        $paged = LastState
+        $d = Spot "page:0"; ClickAt $d[0] $d[1]
+        $back = LastState
+        Check "pages" ($paged -match "page=2/" -and $back -match "page=1/") "after the wheel: $(([regex]::Match($paged, 'page=\S+')).Value); after the first dot: $(([regex]::Match($back, 'page=\S+')).Value)"
+    } else {
+        "SKIP pages: one page of pins ($(([regex]::Match($st, 'page=\S+')).Value))"
+    }
 
     TypeText "calc"
     $st = LastState
@@ -150,25 +176,16 @@ try {
     FocusTestWindow
     Check "outside-click-closes" (-not [U]::IsWindowVisible($menu) -and [U]::GetForegroundWindow() -eq $a) "clicking the test window closes the menu and keeps the click's window in front"
 
-    # Pin from all apps: the first app of the list, through its context menu.
+    # Pin a search result to the bar, through its context menu (the bar's pins
+    # change; the menu's, Windows', do not).
     $pinsBefore = PinCount
     ClickLogo; Start-Sleep -Milliseconds 300
-    $p = Spot "toggle"; ClickAt $p[0] $p[1]              # "all apps"
-    $p = Spot "first"; ClickAt $p[0] $p[1] -Right       # first row
-    Key 0x28; Key 0x28; Key 0x0D                          # Down, Down, Enter: "pin to Atrium"
+    TypeText "calc"
+    $p = Spot "first"; ClickAt $p[0] $p[1] -Right       # first result
+    Key 0x28; Key 0x28; Key 0x0D                          # Down, Down, Enter: "pin to the dock"
     Start-Sleep 1
     $after = PinCount
-    Check "pin-from-all-apps" ($after -eq $pinsBefore + 1) "pins $pinsBefore -> $after"
-
-    # Unpin it again from the pinned grid (second tile).
-    $st = LastState
-    if (-not [U]::IsWindowVisible($menu)) { ClickLogo; Start-Sleep -Milliseconds 300 }
-    if ($st -match "view=all") { $p = Spot "toggle"; ClickAt $p[0] $p[1] }
-    $p = Spot "second"; ClickAt $p[0] $p[1] -Right      # second tile
-    Key 0x28; Key 0x28; Key 0x0D
-    Start-Sleep 1
-    $final = PinCount
-    Check "unpin-from-menu" ($final -eq $pinsBefore) "pins $after -> $final"
+    Check "pin-to-bar-from-search" ($after -eq $pinsBefore + 1) "bar pins $pinsBefore -> $after"
 
     # Power menu, dry run.
     if (-not [U]::IsWindowVisible($menu)) { ClickLogo; Start-Sleep -Milliseconds 300 }
