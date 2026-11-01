@@ -18,7 +18,7 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
 </div>
 
 > [!NOTE]
-> **v0.6 development build.** A C++ glass taskbar that coexists with the Windows taskbar: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), Atrium's own tray panel, one combined Wi-Fi / battery status icon (it opens a control centre: network, volume, battery), a clock, and Atrium notifications that also show Windows notifications and WeChat messages, plus a settings app with a live preview. Every popup is exactly the bar's liquid glass, and the icons swell like the macOS Dock under the pointer. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
+> **v0.7 development build.** A C++ glass taskbar that coexists with the Windows taskbar: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), Atrium's own tray panel, one combined Wi-Fi / battery status icon (it opens a control centre: network, volume, battery), a clock (it opens Atrium's calendar, with Chinese lunar dates), and Atrium notifications that also show Windows notifications and WeChat messages, plus a settings app with a live preview. Every popup is exactly the bar's liquid glass, and the icons swell like the macOS Dock under the pointer. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
 
 <p align="center">
   <img src="docs/images/v04-magnify.png" alt="v0.4 taskbar: magnification" width="80%"><br>
@@ -99,7 +99,7 @@ Atrium redesigns the layer you look at every day: a floating glass taskbar with 
 1. Download the `Atrium-win-x64` artifact from the latest successful run in [Actions](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml), or build it as described below.
 2. Unzip and run `Atrium.Core.exe`. The glass taskbar appears at the bottom of the screen; on first run it imports your current Windows taskbar pins.
 3. Left-click an app to open it, bring it to the front or minimize it; middle-click or Shift+click for a new window; right-click to pin, unpin, open the file location or close. Drag icons to reorder; drop a file on an app to open it there.
-4. Click the Windows logo on the left for the Atrium start menu (type to search apps), the bell on the right for notifications, the clock for the Windows calendar. Icons grow under the pointer (“悬停放大”, magnification, on the 形状 (Shape) page of Settings adjusts or turns it off); the bar hides while a full-screen video or game is in front.
+4. Click the Windows logo on the left for the Atrium start menu (type to search apps), the bell on the right for notifications, the clock for Atrium's calendar (a month with Chinese lunar dates). Icons grow under the pointer (“悬停放大”, magnification, on the 形状 (Shape) page of Settings adjusts or turns it off); the bar hides while a full-screen video or game is in front.
 5. Double-click the tray icon (or right-click it → the first menu item) to open the settings: material, size, pinned apps, notifications and more.
 6. Right-click the tray icon → the last menu item to quit. Nothing is written to the registry and no service is installed; settings live in `%LOCALAPPDATA%\Atrium`.
 
