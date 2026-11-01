@@ -12,6 +12,7 @@
 #include "shell/notification_listener.h"
 #include "shell/system_status.h"
 #include "shell/tray_model.h"
+#include "shell/feishu_source.h"
 #include "shell/wechat_source.h"
 #include "ui/calendar_panel.h"
 #include "ui/control_center.h"
@@ -65,6 +66,7 @@ struct App {
     std::unique_ptr<Notifications> notes;
     std::unique_ptr<NotificationListener> listener;
     std::unique_ptr<WeChatSource> wechat;
+    std::unique_ptr<FeishuSource> feishu;
     std::unique_ptr<TrayModel> tray;
     std::unique_ptr<TrayPanel> trayPanel;
     std::unique_ptr<ControlCenter> control;
@@ -387,6 +389,43 @@ void ShowMenu(POINT pt)
     }
 }
 
+// The tray icon of a notice's sender: its program's file name or the start of
+// its tooltip is the sender's name or id ("QQ" -> qq.exe, "QQ: 12345").
+const TrayIcon* TrayIconOf(const Notice& n)
+{
+    static std::vector<TrayIcon> icons;
+    icons = g_app.tray->Icons();
+    auto lower = [](std::wstring s) {
+        for (auto& c : s)
+            c = wchar_t(towlower(c));
+        return s;
+    };
+    std::vector<std::wstring> names;
+    for (const std::wstring& s : {n.app, n.appId}) {
+        std::wstring v = lower(s);
+        if (size_t bang = v.find(L'!'); bang != std::wstring::npos) // packaged: "publisher.app_hash!App"
+            v = v.substr(0, bang);
+        if (size_t slash = v.find_last_of(L"\\/"); slash != std::wstring::npos) // a path
+            v = v.substr(slash + 1);
+        if (v.size() > 4 && v.ends_with(L".exe"))
+            v.resize(v.size() - 4);
+        if (v.size() >= 2)
+            names.push_back(v);
+    }
+    for (const TrayIcon& icon : icons) {
+        std::wstring stem = lower(icon.exe.substr(icon.exe.find_last_of(L'\\') + 1));
+        if (stem.size() > 4 && stem.ends_with(L".exe"))
+            stem.resize(stem.size() - 4);
+        std::wstring tip = lower(TrayModel::Title(icon.tip));
+        for (const std::wstring& name : names) {
+            bool tipNames = tip.rfind(name, 0) == 0 && (tip.size() == name.size() || !iswalnum(tip[name.size()]));
+            if ((!icon.exe.empty() && stem == name) || tipNames)
+                return &icon;
+        }
+    }
+    return nullptr;
+}
+
 // What clicking a notification does: open its link, or bring its app to the
 // front (start it if it is not running).
 bool RunNoticeAction(const Notice& n)
@@ -399,6 +438,15 @@ bool RunNoticeAction(const Notice& n)
         std::wstring aumid = n.action.substr(4), key = aumid;
         for (auto& c : key)
             c = wchar_t(towlower(c));
+        // An app living in the tray (QQ, WeChat, Feishu): its own tray click
+        // opens what is new, the chat of the unread message. Starting it again
+        // would open a second instance's login window instead.
+        if (const TrayIcon* icon = TrayIconOf(n)) {
+            AllowSetForegroundWindow(ASFW_ANY);
+            g_app.tray->Click(*icon, false);
+            Log(L"notify: action through the tray icon of %s", n.app.c_str());
+            return true;
+        }
         for (const TaskItem& t : g_app.tasks->Snapshot())
             if (t.key == key && !t.windows.empty()) {
                 g_app.tasks->Show(key);
@@ -435,6 +483,10 @@ void ApplySettings(const Settings& s)
         g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE);
     else if (!s.notifyWeChat && g_app.wechat)
         g_app.wechat.reset();
+    if (s.notifyFeishu && !g_app.feishu)
+        g_app.feishu = std::make_unique<FeishuSource>(g_app.host, WM_NOTICE);
+    else if (!s.notifyFeishu && g_app.feishu)
+        g_app.feishu.reset();
     g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
     g_app.tasks->SetShowRunning(s.showRunning);
     g_app.bar->Apply(s);
@@ -621,7 +673,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_NOTICE:
         if (auto* n = reinterpret_cast<Notice*>(l)) {
             // Only from sources still turned on (a notice may arrive just after).
-            bool on = n->source == L"wechat" ? bool(g_app.wechat) : bool(g_app.listener);
+            bool on = n->source == L"wechat" ? bool(g_app.wechat) : n->source == L"feishu" ? bool(g_app.feishu) : bool(g_app.listener);
             if (g_app.notes && on)
                 g_app.notes->Post(*n);
             delete n;
@@ -842,6 +894,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.server.reset();
     g_app.listener.reset();
     g_app.wechat.reset();
+    g_app.feishu.reset();
     g_app.notes.reset();
     g_app.calendar.reset();
     g_app.control.reset();

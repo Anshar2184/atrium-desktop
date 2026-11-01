@@ -116,7 +116,7 @@ function TestWindow($title) {
 }
 
 try {
-    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"pins":[{"name":"where","path":"C:\\Windows\\System32\\where.exe"}],"showRunning":true}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"pins":[{"name":"where","path":"C:\\Windows\\System32\\where.exe"}],"showRunning":true}')
     $env:ATRIUM_POWER_DRYRUN = "1"
     # Without %ALLUSERSPROFILE% in its environment (Atrium started by a tool or a
     # service), the pins under it must still be found.

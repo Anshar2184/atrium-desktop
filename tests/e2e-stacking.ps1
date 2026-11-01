@@ -78,7 +78,7 @@ function TestForm($title, $setup) {
 function Click($x, $y) { MoveTo $x $y; Start-Sleep -Milliseconds 120; [U]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60; [U]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }
 
 try {
-    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"pins":[],"showRunning":false,"showClock":true}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"pins":[],"showRunning":false,"showClock":true}')
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 2
     $bar = [U]::FindWindow("AtriumBarVisual", [NullString]::Value)

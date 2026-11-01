@@ -5,6 +5,7 @@
   WinForms NotifyIcon in a child process), a left and a right click on it in
   the panel reaching that program as its own tray clicks, the control centre's
   pieces of glass, the wheel over the status icon and the volume slider, and
+  a notice from that program opening it through its tray icon, and
   the calendar from the clock (a month with lunar dates, turning the page).
 
 .DESCRIPTION
@@ -96,7 +97,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::Run()
 "@
     $child = Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile", "-EncodedCommand", ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))) -PassThru -WindowStyle Hidden
-    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"pins":[],"showRunning":false,"showClock":true}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"pins":[],"showRunning":false,"showClock":true}')
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 4
 
@@ -125,6 +126,19 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
         Check "right-click-reaches-app" ($got -contains "Right") "the icon's program got: $($got -join ',')"
         $st = TrayState
         if ((Field $st "visible") -eq "1") { Key 0x1B }
+
+        # A notice from an app that lives in the tray: clicking it is the app's
+        # own tray click (QQ then opens the unread chat, not a second instance's login).
+        $lefts = @($got | Where-Object { $_ -eq "Left" }).Count
+        C notify-quiet 5
+        C notify "Atrium tray test|Message|From an app in the tray|app:Atrium tray test"
+        Start-Sleep 1
+        C notify-click card:0
+        Start-Sleep 1.5
+        $got = if (Test-Path $clicks) { @(Get-Content $clicks) } else { @() }
+        $via = @(NewLog | Where-Object { $_ -match "notify: action through the tray icon" })
+        Check "notice-opens-tray-app" (@($got | Where-Object { $_ -eq "Left" }).Count -gt $lefts -and $via.Count -ge 1) "the icon's program got: $($got -join ','); $(@($via)[-1])"
+        C notify-clear
     }
 
     # The calendar from the clock: this month, a month card and a capsule; the arrow turns the page.

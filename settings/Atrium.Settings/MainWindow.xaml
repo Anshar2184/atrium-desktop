@@ -524,6 +524,27 @@
                                                    Text="微信不发出系统通知。Atrium 读取微信窗口里的会话列表（只读，不改动微信），有新的未读消息时显示卡片；免打扰的会话不提醒。微信窗口需要打开过一次。" />
                                     </Grid>
                                 </Border>
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE8F2;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                <TextBlock Text="显示飞书消息" Style="{StaticResource CardTitleStyle}" />
+                                                <TextBlock Text="实验" Style="{StaticResource HintStyle}" />
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="FeishuSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
+                                                          AutomationProperties.Name="显示飞书消息" VerticalAlignment="Center" Toggled="OnFeishuToggled" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="飞书用自己的弹窗提醒，不发出系统通知。Atrium 读取飞书弹窗里的文字（只读，不改动飞书），同时显示为卡片；点击卡片打开飞书。" />
+                                    </Grid>
+                                </Border>
                             </local:ResponsiveGrid>
                             </StackPanel>
                         </ScrollViewer>

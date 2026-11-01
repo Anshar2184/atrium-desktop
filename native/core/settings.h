@@ -42,6 +42,7 @@ struct Settings {
     double notifyTimeout = 6;        // seconds a popup stays (3..30)
     bool notifyHideBody = false;     // privacy: no message text; cards excluded from screen capture
     bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)
+    bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
     bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;

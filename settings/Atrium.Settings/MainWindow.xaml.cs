@@ -336,6 +336,7 @@ public sealed partial class MainWindow : Window
         HideBodySwitch.IsOn = _current.NotifyHideBody;
         ListenerSwitch.IsOn = _current.NotifyListener;
         WeChatSwitch.IsOn = _current.NotifyWeChat;
+        FeishuSwitch.IsOn = _current.NotifyFeishu;
         _autoWidthGlyph?.Update(_current.AutoWidth ? 1 : 0);
         _clockGlyph?.Update(_current.ShowClock ? 1 : 0);
         _runningGlyph?.Update(_current.ShowRunning ? 1 : 0);
@@ -422,6 +423,13 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.NotifyListener = ListenerSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnFeishuToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.NotifyFeishu = FeishuSwitch.IsOn;
         Changed();
     }
 

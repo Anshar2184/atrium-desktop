@@ -35,6 +35,7 @@ add_executable(atrium_core WIN32
     shell/wifi.cpp
     shell/tray_model.cpp
     shell/wechat_source.cpp
+    shell/feishu_source.cpp
     ui/surface.cpp
     ui/start_menu.cpp
     ui/notifications.cpp
