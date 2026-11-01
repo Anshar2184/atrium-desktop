@@ -69,6 +69,7 @@ private:
     SystemStatus status_;
     RadioState radios_;
     bool radiosRead_ = false;
+    bool brightRead_ = false; // the brightness, once per opening (WMI is slow)
     std::vector<BluetoothDevice> devices_;
     bool devicesRead_ = false;
     int brightness_ = -1; // -1: not adjustable (no built-in screen), -2: not read yet

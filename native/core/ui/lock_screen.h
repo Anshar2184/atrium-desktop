@@ -45,12 +45,16 @@ private:
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
     void BuildClock(); // the digits' distance field for the current time
     void LoadWallpaper();
+    void Finish(); // takes the cover down
+    void CoverOtherMonitors(bool show);
     static LRESULT CALLBACK BackdropProc(HWND, UINT, WPARAM, LPARAM);
     static LRESULT CALLBACK KeyHook(int code, WPARAM w, LPARAM l);
 
     HINSTANCE instance_;
     Surface surface_;
     HWND backdrop_ = nullptr;
+    std::vector<HWND> others_; // the other monitors, covered too (a click there also hands over)
+    bool locking_ = false;      // LockWorkStation asked; the cover stays until the session is locked
     HBITMAP wallpaper_ = nullptr;
     SIZE wallpaperSize_{};
     RECT monitor_{};

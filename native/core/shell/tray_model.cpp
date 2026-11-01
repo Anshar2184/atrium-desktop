@@ -515,12 +515,19 @@ void TrayModel::Worker()
                     bool ordered = false;
                     std::vector<Record> records;
                     std::vector<int> match = MatchButtons(buttons, records, ordered);
-                    for (size_t b = 0; b < buttons.size() && it == buttons.end(); ++b)
-                        if (match[b] >= 0 && records[size_t(match[b])].exe == job.icon.exe && (buttons[b].tip == job.icon.tip || job.icon.tip.empty()))
-                            it = buttons.begin() + ptrdiff_t(b);
-                    for (size_t b = 0; b < buttons.size() && it == buttons.end(); ++b)
+                    // Several icons of one program: the one in the same place, else the same tooltip, else the first.
+                    std::vector<size_t> same;
+                    for (size_t b = 0; b < buttons.size(); ++b)
                         if (match[b] >= 0 && records[size_t(match[b])].exe == job.icon.exe)
+                            same.push_back(b);
+                    for (size_t b : same)
+                        if (it == buttons.end() && buttons[b].promoted == job.icon.promoted && buttons[b].index == job.icon.index)
                             it = buttons.begin() + ptrdiff_t(b);
+                    for (size_t b : same)
+                        if (it == buttons.end() && buttons[b].tip == job.icon.tip)
+                            it = buttons.begin() + ptrdiff_t(b);
+                    if (it == buttons.end() && !same.empty())
+                        it = buttons.begin() + ptrdiff_t(same.front());
                 }
                 if (it == buttons.end())
                     it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) {

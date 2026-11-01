@@ -163,6 +163,7 @@ void Notifications::Post(Notice n)
     }
     if (!n.id)
         n.id = nextId_++;
+    leaving_.erase(n.id); // a card closing just now that the new message continues stays
     notices_.insert(notices_.begin(), n);
     if (notices_.size() > kMaxNotices)
         notices_.resize(kMaxNotices);
@@ -216,7 +217,7 @@ void Notifications::ToggleCenter(bool expand)
         Log(L"notify: center closed");
         return;
     }
-    if (GetTickCount64() - centerClosed_ < 400)
+    if (!expand && GetTickCount64() - centerClosed_ < 400)
         return; // the click on the bell that just closed it
     if (!handoffPending_)
         HidePopup(L"center opened");
@@ -328,7 +329,8 @@ void Notifications::Changed()
 {
     if (onUnread)
         onUnread(Unread());
-    if (popup_.surface->Visible() || !popupIds_.empty())
+    // While the stack turns into the list the popup waits for the list's glass (onReady).
+    if (!handoffPopup_ && (popup_.surface->Visible() || !popupIds_.empty()))
         Layout(Mode::Popup);
     if (center_.surface->Visible())
         Layout(Mode::Center);

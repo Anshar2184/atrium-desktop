@@ -5,6 +5,7 @@
 
 #define SECURITY_WIN32
 #include <security.h>
+#include <wtsapi32.h>
 #include <shellscalingapi.h>
 #include <wincodec.h>
 #include <windowsx.h>
@@ -15,6 +16,7 @@
 
 #pragma comment(lib, "secur32.lib")
 #pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "wtsapi32.lib")
 
 namespace atrium {
 
@@ -126,10 +128,14 @@ LockScreen::LockScreen(HINSTANCE instance) : instance_(instance), surface_(insta
     backdrop_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, kBackdropClass, L"Atrium Lock Backdrop", WS_POPUP, 0, 0, 1, 1,
                                 nullptr, nullptr, instance, nullptr);
     SetWindowLongPtrW(backdrop_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    // The session's lock and unlock arrive at the cover's window.
+    WTSRegisterSessionNotification(surface_.Hwnd(), NOTIFY_FOR_THIS_SESSION);
 }
 
 LockScreen::~LockScreen()
 {
+    WTSUnRegisterSessionNotification(surface_.Hwnd());
+    CoverOtherMonitors(false);
     if (hook_)
         UnhookWindowsHookEx(hook_);
     hook_ = nullptr;
@@ -207,6 +213,8 @@ LRESULT CALLBACK LockScreen::BackdropProc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     if (m == WM_MOUSEACTIVATE)
         return MA_NOACTIVATE;
+    if ((m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN) && target_)
+        PostMessageW(target_, WM_LOCK_KEY, 0, 0); // a click on any screen hands over too
     if (m == WM_ERASEBKGND)
         return 1;
     return DefWindowProcW(h, m, w, l);
@@ -302,6 +310,32 @@ void LockScreen::BuildClock()
     (void)om;
 }
 
+void LockScreen::CoverOtherMonitors(bool show)
+{
+    for (HWND h : others_)
+        DestroyWindow(h);
+    others_.clear();
+    if (!show)
+        return;
+    EnumDisplayMonitors(
+        nullptr, nullptr,
+        [](HMONITOR mon, HDC, LPRECT, LPARAM l) -> BOOL {
+            auto* self = reinterpret_cast<LockScreen*>(l);
+            MONITORINFO mi{sizeof(mi)};
+            GetMonitorInfoW(mon, &mi);
+            if (EqualRect(&mi.rcMonitor, &self->monitor_))
+                return TRUE;
+            HWND h = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, kBackdropClass, L"Atrium Lock Backdrop", WS_POPUP,
+                                     mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                                     nullptr, nullptr, self->instance_, nullptr);
+            SetWindowLongPtrW(h, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+            ShowWindow(h, SW_SHOWNOACTIVATE);
+            self->others_.push_back(h);
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(this));
+}
+
 void LockScreen::Open(std::vector<Notice> notices)
 {
     if (open_)
@@ -330,11 +364,25 @@ void LockScreen::Open(std::vector<Notice> notices)
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
     InvalidateRect(backdrop_, nullptr, FALSE);
     UpdateWindow(backdrop_);
-    open_ = true;
-    closingMs_ = 0;
-    BuildClock();
     target_ = surface_.Hwnd();
     hook_ = SetWindowsHookExW(WH_KEYBOARD_LL, KeyHook, instance_, 0);
+    if (!hook_) {
+        // No way to keep keys from the desktop: no cover, Windows' lock at once.
+        Log(L"lock: keyboard hook unavailable (%lu), locking without the cover", GetLastError());
+        ShowWindow(backdrop_, SW_HIDE);
+        target_ = nullptr;
+        if (onShown)
+            onShown(false);
+        wchar_t dry[8] = {};
+        if (!(GetEnvironmentVariableW(L"ATRIUM_LOCK_DRYRUN", dry, 8) && dry[0] == L'1'))
+            LockWorkStation();
+        return;
+    }
+    CoverOtherMonitors(true);
+    open_ = true;
+    locking_ = false;
+    closingMs_ = 0;
+    BuildClock();
     pendingShow_ = true;
     SetTimer(surface_.Hwnd(), kShowTimer, kShowDelayMs, nullptr);
     SetTimer(surface_.Hwnd(), kTickTimer, 1000, nullptr);
@@ -343,9 +391,30 @@ void LockScreen::Open(std::vector<Notice> notices)
 
 void LockScreen::Dismiss(bool lock)
 {
-    if (!open_)
+    if (!open_ || locking_)
         return;
+    wchar_t dry[8] = {};
+    bool dryRun = GetEnvironmentVariableW(L"ATRIUM_LOCK_DRYRUN", dry, 8) && dry[0] == L'1';
+    if (lock && !dryRun) {
+        // Windows' own lock and sign-in (Hello, PIN) take over. The call only
+        // asks for it: the cover and the key guard stay until the session is
+        // really locked (WTS_SESSION_LOCK), and stay if it is refused.
+        if (!LockWorkStation()) {
+            Log(L"lock: LockWorkStation failed (%lu), the cover stays", GetLastError());
+            return;
+        }
+        locking_ = true;
+        Log(L"lock: Windows' lock asked for; the cover goes once the session is locked");
+        return;
+    }
+    Log(L"lock: cover ended%s", !lock ? L"" : L", the hand-over to Windows' lock logged only (dry run)");
+    Finish();
+}
+
+void LockScreen::Finish()
+{
     open_ = false;
+    locking_ = false;
     if (hook_)
         UnhookWindowsHookEx(hook_);
     hook_ = nullptr;
@@ -353,13 +422,9 @@ void LockScreen::Dismiss(bool lock)
     KillTimer(surface_.Hwnd(), kTickTimer);
     KillTimer(surface_.Hwnd(), kShowTimer);
     pendingShow_ = false;
-    wchar_t dry[8] = {};
-    bool dryRun = GetEnvironmentVariableW(L"ATRIUM_LOCK_DRYRUN", dry, 8) && dry[0] == L'1';
-    if (lock && !dryRun)
-        LockWorkStation(); // Windows' own lock and sign-in (Hello, PIN) take over
-    Log(L"lock: cover ended%s", !lock ? L"" : dryRun ? L", the hand-over to Windows' lock logged only (dry run)" : L", Windows' lock engaged");
-    surface_.Hide();
+    surface_.Hide(false);
     ShowWindow(backdrop_, SW_HIDE);
+    CoverOtherMonitors(false);
     if (onShown)
         onShown(false);
 }
@@ -456,6 +521,12 @@ bool LockScreen::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return false;
     case WM_ACTIVATE:
         return true; // stays up when another window takes the focus
+    case WM_WTSSESSION_CHANGE:
+        if (w == WTS_SESSION_LOCK && open_) {
+            Log(L"lock: the session is locked, cover ended");
+            Finish();
+        }
+        return false;
     }
     return false;
 }

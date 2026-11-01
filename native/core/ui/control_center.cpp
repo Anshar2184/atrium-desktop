@@ -122,6 +122,7 @@ void ControlCenter::Open(RECT anchor, RECT bar)
     page_ = Page::Main;
     pageMs_ = ClockMs();
     pageDir_ = 0;
+    brightRead_ = false; // changed meanwhile with the keyboard or in Settings
     status_ = QuerySystemStatus();
     Place();
     ReadRadios(true);
@@ -169,7 +170,8 @@ void ControlCenter::Scan(bool rescan)
 void ControlCenter::ReadRadios(bool devices)
 {
     HWND h = surface_.Hwnd();
-    bool bright = !radiosRead_; // the brightness once per opening (WMI is slow)
+    bool bright = !brightRead_;
+    brightRead_ = true;
     OnWorker([h, devices, bright] {
         auto* r = new RadioRead();
         r->radios = QueryRadios();
