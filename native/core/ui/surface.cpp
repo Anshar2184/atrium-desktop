@@ -1,8 +1,12 @@
 #include "ui/surface.h"
 
+#include "clock.h"
 #include "log.h"
+#include "render/glass_renderer.h"
 
 #include <dwmapi.h>
+#include <shellscalingapi.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <cmath>
@@ -14,42 +18,60 @@ namespace atrium {
 namespace {
 
 constexpr wchar_t kClass[] = L"AtriumSurface";
+constexpr UINT_PTR kHideTimer = 0x5A01, kFrameTimer = 0x5A02, kGlassWaitTimer = 0x5A03;
+constexpr UINT kHideMs = 140;     // the closing pop (PopVisual) lasts 130 ms
+constexpr double kGlassWaitMs = 300; // then a plain panel stands in for missing glass
 
 D2D1_COLOR_F Rgba(uint32_t rgb, float a) { return D2D1::ColorF(rgb, a); }
 
-bool SystemLight()
+uint32_t g_tint = 0xFFFFFF;
+double g_transparency = 0.95;
+
+float MonitorScale(RECT r)
 {
-    DWORD v = 0, size = sizeof(v);
-    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme",
-                     RRF_RT_REG_DWORD, nullptr, &v, &size) != ERROR_SUCCESS)
-        return false;
-    return v != 0;
+    HMONITOR mon = MonitorFromRect(&r, MONITOR_DEFAULTTOPRIMARY);
+    UINT x = 96, y = 96;
+    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &x, &y);
+    return float(x) / 96.f;
 }
 
 } // namespace
 
+GlassHost* Surface::host_ = nullptr;
+bool Surface::capturable_ = false;
+
+void Theme::SetGlass(uint32_t tint, double transparency)
+{
+    g_tint = tint;
+    g_transparency = transparency;
+}
+
 Theme Theme::Current()
 {
     Theme t;
-    t.light = SystemLight();
+    PanelTone tone = PanelToneFor(g_tint, g_transparency);
+    t.light = tone.light;
+    t.panel = Rgba(tone.tint, 0.96f);
     if (t.light) {
-        t.panel = Rgba(0xF3F3F6, 0.975f);
-        t.border = Rgba(0x000000, 0.10f);
-        t.text = Rgba(0x16181D, 0.95f);
-        t.subtext = Rgba(0x16181D, 0.62f);
-        t.faint = Rgba(0x16181D, 0.40f);
-        t.hover = Rgba(0x000000, 0.055f);
-        t.press = Rgba(0x000000, 0.09f);
+        t.border = Rgba(0xFFFFFF, 0.55f);
+        t.text = Rgba(0x111317, 0.94f);
+        t.subtext = Rgba(0x111317, 0.64f);
+        t.faint = Rgba(0x111317, 0.42f);
+        t.hover = Rgba(0x000000, 0.06f);
+        t.press = Rgba(0x000000, 0.10f);
         t.divider = Rgba(0x000000, 0.08f);
+        t.card = Rgba(0xFFFFFF, 0.50f);
+        t.cardHot = Rgba(0xFFFFFF, 0.72f);
     } else {
-        t.panel = Rgba(0x202127, 0.97f);
-        t.border = Rgba(0xFFFFFF, 0.10f);
+        t.border = Rgba(0xFFFFFF, 0.14f);
         t.text = Rgba(0xFFFFFF, 0.95f);
-        t.subtext = Rgba(0xFFFFFF, 0.62f);
-        t.faint = Rgba(0xFFFFFF, 0.40f);
-        t.hover = Rgba(0xFFFFFF, 0.07f);
-        t.press = Rgba(0xFFFFFF, 0.11f);
-        t.divider = Rgba(0xFFFFFF, 0.08f);
+        t.subtext = Rgba(0xFFFFFF, 0.66f);
+        t.faint = Rgba(0xFFFFFF, 0.42f);
+        t.hover = Rgba(0xFFFFFF, 0.08f);
+        t.press = Rgba(0xFFFFFF, 0.13f);
+        t.divider = Rgba(0xFFFFFF, 0.09f);
+        t.card = Rgba(0xFFFFFF, 0.07f);
+        t.cardHot = Rgba(0xFFFFFF, 0.12f);
     }
     t.accent = Rgba(0x0A84FF, 1);
     t.accentText = Rgba(0xFFFFFF, 1);
@@ -62,6 +84,7 @@ D2D1_RECT_F Canvas::Px(D2D1_RECT_F r) const { return D2D1::RectF(r.left * scale,
 
 ID2D1SolidColorBrush* Canvas::Brush(D2D1_COLOR_F c)
 {
+    c.a *= alpha_; // the fade of the enclosing groups
     if (!s_.brush_)
         d2d_->CreateSolidColorBrush(c, s_.brush_.put());
     else
@@ -153,11 +176,80 @@ void Canvas::Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F 
                                       b.put())))
             return;
     }
-    d2d_->DrawBitmap(b.get(), Px(r), opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    d2d_->DrawBitmap(b.get(), Px(r), opacity * alpha_, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+}
+
+bool Canvas::Cached(const std::wstring& key) const
+{
+    auto it = s_.bitmaps_.find(key);
+    return it != s_.bitmaps_.end() && it->second;
+}
+
+void Canvas::ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r)
+{
+    winrt::com_ptr<ID2D1Factory> f;
+    d2d_->GetFactory(f.put());
+    winrt::com_ptr<ID2D1EllipseGeometry> g;
+    D2D1_RECT_F p = Px(r);
+    if (FAILED(f->CreateEllipseGeometry(D2D1::Ellipse(D2D1::Point2F((p.left + p.right) / 2, (p.top + p.bottom) / 2), (p.right - p.left) / 2,
+                                                      (p.bottom - p.top) / 2),
+                                        g.put())))
+        return;
+    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
+    Image(key, image, r);
+    d2d_->PopLayer();
+}
+
+void Canvas::Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1_COLOR_F c)
+{
+    t = std::clamp(t, 0.f, 1.f);
+    winrt::com_ptr<ID2D1Factory> f;
+    d2d_->GetFactory(f.put());
+    winrt::com_ptr<ID2D1RoundedRectangleGeometry> g;
+    if (FAILED(f->CreateRoundedRectangleGeometry(D2D1::RoundedRect(Px(r), radius * scale, radius * scale), g.put())))
+        return;
+    float reach = std::hypot(r.right - r.left, r.bottom - r.top) * scale;
+    float rr = std::max(1.f, reach * (1 - (1 - t) * (1 - t) * (1 - t)));
+    float a = c.a * alpha_ * (1 - t) * (1 - t);
+    D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(c.r, c.g, c.b, a * 0.55f)}, {0.75f, D2D1::ColorF(c.r, c.g, c.b, a)}, {1.f, D2D1::ColorF(c.r, c.g, c.b, 0)}};
+    winrt::com_ptr<ID2D1GradientStopCollection> coll;
+    winrt::com_ptr<ID2D1RadialGradientBrush> brush;
+    D2D1_POINT_2F centre = D2D1::Point2F(x * scale, y * scale);
+    if (FAILED(d2d_->CreateGradientStopCollection(stops, 3, coll.put())) ||
+        FAILED(d2d_->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(centre, D2D1::Point2F(), rr, rr), coll.get(), brush.put())))
+        return;
+    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
+    d2d_->FillEllipse(D2D1::Ellipse(centre, rr, rr), brush.get());
+    d2d_->PopLayer();
 }
 
 void Canvas::Clip(D2D1_RECT_F r) { d2d_->PushAxisAlignedClip(Px(r), D2D1_ANTIALIAS_MODE_ALIASED); }
 void Canvas::Unclip() { d2d_->PopAxisAlignedClip(); }
+
+void Canvas::Continue() { s_.frameWanted_ = true; }
+
+// Opacity multiplies into every colour drawn inside the group instead of a
+// D2D layer: layers allocate intermediate surfaces, which WARP keeps cached
+// (tens of MB with a fading tile per row). Overlapping shapes in a group fade
+// individually, which these groups never notice.
+void Canvas::BeginGroup(float opacity, float k, float cx, float cy, float dx, float dy)
+{
+    D2D1_MATRIX_3X2_F current;
+    d2d_->GetTransform(&current);
+    groups_.push_back({current, alpha_});
+    D2D1_MATRIX_3X2_F local = D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(cx * scale, cy * scale)) * D2D1::Matrix3x2F::Translation(dx * scale, dy * scale);
+    d2d_->SetTransform(local * current);
+    alpha_ *= std::clamp(opacity, 0.f, 1.f);
+}
+
+void Canvas::EndGroup()
+{
+    if (groups_.empty())
+        return;
+    d2d_->SetTransform(groups_.back().first);
+    alpha_ = groups_.back().second;
+    groups_.pop_back();
+}
 
 // ---- Surface -----------------------------------------------------------------
 
@@ -199,7 +291,7 @@ std::shared_ptr<Surface::Shared> Surface::SharedDevice()
     return s;
 }
 
-Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable) : activatable_(activatable)
+Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip) : activatable_(activatable), insetDip_(insetDip)
 {
     static bool registered = false;
     if (!registered) {
@@ -214,26 +306,116 @@ Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable) : a
     DWORD ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP | (activatable ? 0 : WS_EX_NOACTIVATE);
     hwnd_ = CreateWindowExW(ex, kClass, title, WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, this);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    // The glass below the content samples the screen: the window must not be in it.
+    if (!capturable_ && !SetWindowDisplayAffinity(hwnd_, WDA_EXCLUDEFROMCAPTURE))
+        Log(L"surface: WDA_EXCLUDEFROMCAPTURE failed (%lu); the glass would show this popup", GetLastError());
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dwrite_.put()));
 }
 
 Surface::~Surface()
 {
     if (hwnd_) {
+        if (host_) {
+            GlassPanel p;
+            p.hwnd = hwnd_;
+            host_->SetPanel(p); // not visible: removes the layer
+        }
         SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
         DestroyWindow(hwnd_);
     }
 }
 
-float Surface::Scale() const { return float(GetDpiForWindow(hwnd_)) / 96.f; }
+void Surface::SetGlassHost(GlassHost* host) { host_ = host; }
+void Surface::SetCapturable(bool capturable) { capturable_ = capturable; }
 
-void Surface::ExcludeFromCapture(bool on) { SetWindowDisplayAffinity(hwnd_, on ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE); }
+int Surface::InsetPx() const { return int(std::lround(insetDip_ * scale_)); }
+
+POINT Surface::ScreenToContent(POINT p) const { return POINT{p.x - rect_.left, p.y - rect_.top}; }
+POINT Surface::ContentToScreen(POINT p) const { return POINT{p.x + rect_.left, p.y + rect_.top}; }
+
+void Surface::SetRadius(float dip)
+{
+    if (radius_ == dip)
+        return;
+    radius_ = dip;
+    if (visible_)
+        PublishPanel();
+}
+
+void Surface::PublishPanel()
+{
+    if (!host_)
+        return;
+    GlassPanel p;
+    p.hwnd = hwnd_;
+    p.window = window_;
+    p.inset = float(InsetPx());
+    p.radius = radius_ * scale_;
+    p.visible = visible_ || hiding_;
+    p.pop = pop_;
+    p.popOpen = popOpen_;
+    p.popX = float(anchor_.x - window_.left);
+    p.popY = float(anchor_.y - window_.top);
+    p.rippleX = rippleX_;
+    p.rippleY = rippleY_;
+    p.rippleMs = rippleMs_;
+    host_->SetPanel(p);
+}
+
+void Surface::Ripple(float x, float y)
+{
+    int inset = InsetPx();
+    rippleX_ = x * scale_ + float(inset);
+    rippleY_ = y * scale_ + float(inset);
+    rippleMs_ = ClockMs();
+    PublishPanel();
+}
 
 LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     auto* self = reinterpret_cast<Surface*>(GetWindowLongPtrW(h, GWLP_USERDATA));
     if (!self)
         return DefWindowProcW(h, m, w, l);
+    switch (m) {
+    case WM_TIMER:
+        if (w == kHideTimer) {
+            self->FinishHide();
+            return 0;
+        }
+        if (w == kFrameTimer) {
+            KillTimer(h, kFrameTimer);
+            self->Paint();
+            return 0;
+        }
+        if (w == kGlassWaitTimer) {
+            KillTimer(h, kGlassWaitTimer);
+            self->Invalidate(); // a plain panel if the glass still has not come
+            return 0;
+        }
+        break;
+    case WM_GLASS_READY:
+        if (!self->glassReady_ && self->visible_) {
+            self->glassReady_ = true;
+            KillTimer(h, kGlassWaitTimer);
+            self->Invalidate();
+        }
+        return 0;
+    }
+    // Mouse positions in content coordinates; presses on the margin are the caller's to decide.
+    const bool mouse = (m >= WM_MOUSEFIRST && m <= WM_MBUTTONDBLCLK && m != WM_MOUSEWHEEL) || m == WM_MOUSEHWHEEL;
+    if (mouse && m != WM_MOUSEHWHEEL) {
+        int inset = self->InsetPx();
+        int x = GET_X_LPARAM(l) - inset, y = GET_Y_LPARAM(l) - inset;
+        bool outside = x < 0 || y < 0 || x >= self->rect_.right - self->rect_.left || y >= self->rect_.bottom - self->rect_.top;
+        if (outside && (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)) {
+            if (self->onMargin)
+                self->onMargin();
+            return 0;
+        }
+        if (self->hiding_)
+            return 0;
+        l = MAKELPARAM(x, y);
+    }
     if (self->message) {
         LRESULT result = 0;
         if (self->message(m, w, l, result))
@@ -258,41 +440,96 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-void Surface::Show(RECT rect, bool activate)
+void Surface::Place(RECT rect)
 {
-    Move(rect);
+    rect_ = rect;
+    scale_ = MonitorScale(rect);
+    int inset = InsetPx();
+    window_ = RECT{rect.left - inset, rect.top - inset, rect.right + inset, rect.bottom + inset};
+    SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top, SWP_NOACTIVATE);
+}
+
+void Surface::Show(RECT rect, bool activate, POINT anchor)
+{
+    KillTimer(hwnd_, kHideTimer);
+    Place(rect);
+    anchor_ = anchor;
+    bool wasHiding = hiding_;
+    hiding_ = false;
     if (!visible_) {
         visible_ = true;
-        firstPaint_ = true;
+        firstPaint_ = !wasHiding;
+        if (!wasHiding) {
+            glassReady_ = false;
+            shownMs_ = ClockMs();
+            SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
+        }
         ShowWindow(hwnd_, activate && activatable_ ? SW_SHOW : SW_SHOWNOACTIVATE);
     }
     SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | (activate && activatable_ ? 0 : SWP_NOACTIVATE));
     if (activate && activatable_ && !SetForegroundWindow(hwnd_))
         SwitchToThisWindow(hwnd_, TRUE);
-    Invalidate();
+    // Content and glass pop out of the anchor together (DWM runs both
+    // animations). The animation is in place before the first frame shows.
+    ++pop_;
+    popOpen_ = true;
+    if (EnsureDevice())
+        PopVisual(shared_->dcomp.get(), visual_.get(), true, float(anchor.x - window_.left), float(anchor.y - window_.top));
+    Paint();
+    PublishPanel();
 }
 
 void Surface::Move(RECT rect)
 {
-    rect_ = rect;
-    SetWindowPos(hwnd_, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOACTIVATE);
-    if (visible_)
+    if (EqualRect(&rect, &rect_))
+        return;
+    Place(rect);
+    if (visible_) {
         Invalidate();
+        PublishPanel();
+    }
 }
 
-void Surface::Hide()
+void Surface::Hide(bool animate)
 {
     if (!visible_)
         return;
     visible_ = false;
+    KillTimer(hwnd_, kFrameTimer);
+    if (!animate || !visual_ || !shared_) {
+        FinishHide();
+        return;
+    }
+    hiding_ = true;
+    ++pop_;
+    popOpen_ = false;
+    PopVisual(shared_->dcomp.get(), visual_.get(), false, float(anchor_.x - window_.left), float(anchor_.y - window_.top));
+    PublishPanel();
+    SetTimer(hwnd_, kHideTimer, kHideMs, nullptr);
+}
+
+void Surface::FinishHide()
+{
+    KillTimer(hwnd_, kHideTimer);
+    KillTimer(hwnd_, kGlassWaitTimer);
+    hiding_ = false;
+    visible_ = false;
+    glassReady_ = false;
     ShowWindow(hwnd_, SW_HIDE);
-    ResetDevice(); // the swap chain is recreated on the next Show
+    PublishPanel(); // not visible: the glass layer goes too
+    ResetDevice();  // the swap chain is recreated on the next Show
 }
 
 void Surface::Invalidate()
 {
     if (visible_)
         Paint();
+}
+
+void Surface::RequestFrame()
+{
+    if (visible_)
+        SetTimer(hwnd_, kFrameTimer, 10, nullptr);
 }
 
 void Surface::ResetDevice()
@@ -318,7 +555,7 @@ bool Surface::EnsureDevice()
     shared_ = SharedDevice();
     if (!shared_)
         return false;
-    int w = std::max(1, int(rect_.right - rect_.left)), h = std::max(1, int(rect_.bottom - rect_.top));
+    int w = std::max(1, int(window_.right - window_.left)), h = std::max(1, int(window_.bottom - window_.top));
     DXGI_SWAP_CHAIN_DESC1 desc{};
     desc.Width = UINT(w);
     desc.Height = UINT(h);
@@ -347,7 +584,7 @@ void Surface::Paint()
 {
     if (!visible_ || !EnsureDevice())
         return;
-    int w = std::max(1, int(rect_.right - rect_.left)), h = std::max(1, int(rect_.bottom - rect_.top));
+    int w = std::max(1, int(window_.right - window_.left)), h = std::max(1, int(window_.bottom - window_.top));
     if (w != bufW_ || h != bufH_) {
         d2d_->SetTarget(nullptr);
         if (FAILED(swap_->ResizeBuffers(2, UINT(w), UINT(h), DXGI_FORMAT_B8G8R8A8_UNORM, 0))) {
@@ -371,9 +608,16 @@ void Surface::Paint()
     d2d_->BeginDraw();
     d2d_->Clear(D2D1::ColorF(0, 0, 0, 0));
     d2d_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    frameWanted_ = false;
     if (paint) {
-        Canvas c(*this, d2d_.get(), Scale());
+        float inset = float(InsetPx());
+        D2D1_MATRIX_3X2_F base = D2D1::Matrix3x2F::Translation(inset, inset);
+        d2d_->SetTransform(base);
+        Canvas c(*this, d2d_.get(), scale_, base);
+        c.now = ClockMs();
+        c.panel = !host_ || (!glassReady_ && c.now - shownMs_ > kGlassWaitMs);
         paint(c);
+        d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
     }
     HRESULT hr = d2d_->EndDraw();
     d2d_->SetTarget(nullptr);
@@ -393,7 +637,10 @@ void Surface::Paint()
         if (shared_)
             shared_->lost = true;
         ResetDevice();
+        return;
     }
+    if (frameWanted_)
+        RequestFrame();
 }
 
 } // namespace atrium

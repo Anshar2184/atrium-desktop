@@ -45,7 +45,8 @@ struct TaskItem {
 // Icon of a shell item (a path or "shell:AppsFolder\\<id>") through
 // IShellItemImageFactory, square, premultiplied. Blocking; call it off the UI
 // thread. COM must be initialised on the calling thread.
-bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out);
+// thumbnail: the picture itself (an image file) rather than its icon.
+bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out, bool thumbnail = false);
 
 class TaskModel {
 public:

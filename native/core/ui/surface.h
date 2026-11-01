@@ -1,8 +1,13 @@
-// A popup window drawn with Direct2D into a DirectComposition swap chain with
-// premultiplied alpha (the start menu and the notification panels). Lives on
-// the UI thread; paints synchronously when invalidated.
+// A popup window (the start menu and the notification panels). Two
+// composition layers: the glass below, drawn by the bar's render thread with
+// the bar's material (GlassHost, D25), and the content above, drawn here with
+// Direct2D into a DirectComposition swap chain with premultiplied alpha. Lives
+// on the UI thread; paints synchronously when invalidated and runs frame
+// animations from a timer. The window is the content rectangle plus a margin
+// for the glass's shadow; callers work in content coordinates only.
 #pragma once
 
+#include "render/glass_panel.h"
 #include "shell/task_model.h"
 
 #include <windows.h>
@@ -18,15 +23,18 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <vector>
 
 namespace atrium {
 
-// Colours of the placeholder material: a plain translucent panel following
-// the system light/dark setting (no glass shader for popups yet).
+// Ink and fills over the popup glass: light glass (dark text) or dark glass,
+// from PanelToneFor. `panel` is only painted when the glass is unavailable.
 struct Theme {
     bool light = false;
-    D2D1_COLOR_F panel, border, text, subtext, faint, hover, press, accent, accentText, divider;
+    D2D1_COLOR_F panel, border, text, subtext, faint, hover, press, accent, accentText, divider, card, cardHot;
     static Theme Current();
+    // The bar's tint and transparency (ApplySettings), which decide the tone.
+    static void SetGlass(uint32_t tint, double transparency);
 };
 
 class Surface;
@@ -34,8 +42,16 @@ class Surface;
 // Drawing helpers bound to one surface's device context.
 class Canvas {
 public:
-    Canvas(Surface& surface, ID2D1DeviceContext* d2d, float scale) : s_(surface), d2d_(d2d), scale(scale) {}
+    Canvas(Surface& surface, ID2D1DeviceContext* d2d, float scale, D2D1_MATRIX_3X2_F base) : scale(scale), s_(surface), d2d_(d2d), base_(base) {}
     float scale; // px per DIP; every coordinate below is in DIP
+    bool panel = false; // the glass is not there (yet): paint a plain panel instead
+    double now = 0;     // ClockMs() of this frame
+
+    // Asks for another frame (an animation is still running).
+    void Continue();
+    // Draws what follows faded and scaled around (cx, cy), moved by (dx, dy); DIP. Groups nest.
+    void BeginGroup(float opacity, float scale, float cx, float cy, float dx = 0, float dy = 0);
+    void EndGroup();
 
     D2D1_RECT_F Px(D2D1_RECT_F dip) const;
     void Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c);
@@ -49,6 +65,11 @@ public:
     float TextWidth(const std::wstring& s, float size, DWRITE_FONT_WEIGHT w = DWRITE_FONT_WEIGHT_NORMAL);
     // An icon by a stable cache key; `image` is only read the first time.
     void Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity = 1);
+    void ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r);
+    bool Cached(const std::wstring& key) const;
+    // A press ripple: a soft disc growing from (x, y) inside the rounded
+    // rectangle r, at progress t (0..1).
+    void Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1_COLOR_F c);
     void Clip(D2D1_RECT_F r);
     void Unclip();
     ID2D1DeviceContext* D2D() const { return d2d_; }
@@ -58,30 +79,48 @@ private:
     ID2D1SolidColorBrush* Brush(D2D1_COLOR_F c);
     Surface& s_;
     ID2D1DeviceContext* d2d_;
+    D2D1_MATRIX_3X2_F base_;
+    float alpha_ = 1; // opacity of the current group
+    std::vector<std::pair<D2D1_MATRIX_3X2_F, float>> groups_;
 };
 
 class Surface {
 public:
     // paint: draws the content (DIP coordinates, the window is width x height DIP).
     // message: window messages before default handling; return true if handled (result in `result`).
-    Surface(HINSTANCE instance, const wchar_t* title, bool activatable);
+    // insetDip: the margin around the content for the glass's shadow.
+    Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip = 12);
     ~Surface();
     Surface(const Surface&) = delete;
     Surface& operator=(const Surface&) = delete;
 
     std::function<void(Canvas&)> paint;
+    // Mouse messages arrive in content coordinates.
     std::function<bool(UINT, WPARAM, LPARAM, LRESULT&)> message;
+    std::function<void()> onMargin; // a press on the shadow margin, outside the content
 
-    // Shows the window at `rect` (screen px); activatable surfaces take the foreground.
-    void Show(RECT rect, bool activate);
+    // The bar draws the glass layers; development screenshots keep popups capturable.
+    static void SetGlassHost(GlassHost* host);
+    static void SetCapturable(bool capturable);
+
+    // Shows the content at `rect` (screen px), popping out of `anchor` (a
+    // screen point); activatable surfaces take the foreground.
+    void Show(RECT rect, bool activate, POINT anchor);
     void Move(RECT rect);
-    void Hide();
+    // Plays the closing animation, then hides the window. Visible() is false at once.
+    void Hide(bool animate = true);
     bool Visible() const { return visible_; }
     void Invalidate();
+    void RequestFrame();
     HWND Hwnd() const { return hwnd_; }
-    float Scale() const;
-    RECT Rect() const { return rect_; }
-    void ExcludeFromCapture(bool on);
+    float Scale() const { return scale_; }
+    RECT Rect() const { return rect_; } // the content, screen px
+    // Corner radius of the glass shape (DIP), matching the bar's.
+    void SetRadius(float dip);
+    // A press at (x, y) DIP in content coordinates: the glass ripples from there.
+    void Ripple(float x, float y);
+    POINT ScreenToContent(POINT screen) const;
+    POINT ContentToScreen(POINT content) const;
 
 private:
     friend class Canvas;
@@ -89,12 +128,31 @@ private:
     void Paint();
     bool EnsureDevice();
     void ResetDevice();
+    void Place(RECT rect);   // window = content + margin
+    void PublishPanel();
+    void FinishHide();
+    int InsetPx() const;
 
     HWND hwnd_ = nullptr;
     bool activatable_;
+    float insetDip_;
     bool visible_ = false;
+    bool hiding_ = false;    // closing animation running
     bool firstPaint_ = false;
-    RECT rect_{};
+    bool glassReady_ = false;
+    bool frameWanted_ = false;
+    double shownMs_ = 0;
+    RECT rect_{};            // content, screen px
+    RECT window_{};          // window, screen px
+    float scale_ = 1;
+    float radius_ = 20;
+    POINT anchor_{};
+    unsigned pop_ = 0;
+    bool popOpen_ = true;
+    float rippleX_ = 0, rippleY_ = 0;
+    double rippleMs_ = 0;
+    static GlassHost* host_;
+    static bool capturable_;
     int bufW_ = 0, bufH_ = 0;
     // One D3D11/D2D/DirectComposition device for all popups (a device per
     // window costs tens of MB and dozens of driver threads); per window only

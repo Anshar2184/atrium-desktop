@@ -169,6 +169,8 @@ void OpenSystem(const std::wstring& what)
         ShellExecuteW(nullptr, L"open", L"ms-settings:batterysaver", nullptr, nullptr, SW_SHOWNORMAL);
     else if (what == L"tray")
         OpenTray();
+    else if (what == L"account")
+        ShellExecuteW(nullptr, L"open", L"ms-settings:yourinfo", nullptr, nullptr, SW_SHOWNORMAL);
     Log(L"start: system entry %s", what.c_str());
 }
 
@@ -183,13 +185,16 @@ void RunCommand(const std::wstring& line)
         verb.pop_back();
     Log(L"command: %s", line.c_str());
     if (verb == L"start")
-        g_app.start->Visible() ? g_app.start->Close(false) : g_app.start->Open(g_app.bar->BarRect(), GetForegroundWindow());
+        g_app.start->Visible() ? g_app.start->Close(false)
+                               : g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), GetForegroundWindow());
     else if (verb == L"start-type")
         g_app.start->Type(arg);
     else if (verb == L"start-key" && !arg.empty())
         SendMessageW(g_app.start->Hwnd(), WM_CHAR, arg == L"enter" ? 13 : arg == L"esc" ? 27 : arg == L"back" ? 8 : arg[0], 0);
     else if (verb == L"start-state")
         g_app.start->LogState();
+    else if (verb == L"bar-state")
+        g_app.bar->LogState();
     else if (verb == L"notify") {
         // notify <app>|<title>|<body>|<action>
         std::vector<std::wstring> f;
@@ -240,7 +245,7 @@ void ToggleStart(RECT)
     // that click must not open it again.
     if (GetTickCount64() - g_app.start->LastClosed() < 400)
         return;
-    g_app.start->Open(g_app.bar->BarRect(), g_app.bar->PreviousForeground());
+    g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), g_app.bar->PreviousForeground());
 }
 
 void ShowMenu(POINT pt)
@@ -304,6 +309,11 @@ bool RunNoticeAction(const Notice& n)
 // Applies settings to the bar and the task model.
 void ApplySettings(const Settings& s)
 {
+    // Popups share the bar's material and corner radius (concentric inside).
+    Theme::SetGlass(s.tint, s.transparency);
+    float radius = float(std::clamp(s.cornerRadius, 8.0, std::max(8.0, s.height / 2)));
+    g_app.start->SetRadius(radius);
+    g_app.notes->SetRadius(radius);
     g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody);
     if (s.notifyListener && !g_app.listener)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
@@ -598,7 +608,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         settings.pins = TaskModel::ImportWindowsPins();
         Log(L"core: imported %zu Windows taskbar pins", settings.pins->size());
     }
-    g_app.bar = std::make_unique<Bar>(instance, wcsstr(cmdLine, L"--debug-capturable") != nullptr, wcsstr(cmdLine, L"--debug-layout") != nullptr);
+    const bool capturable = wcsstr(cmdLine, L"--debug-capturable") != nullptr;
+    g_app.bar = std::make_unique<Bar>(instance, capturable, wcsstr(cmdLine, L"--debug-layout") != nullptr);
+    // The bar's render thread draws the popups' glass from its capture.
+    Surface::SetGlassHost(g_app.bar.get());
+    Surface::SetCapturable(capturable);
     g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
         g_app.bar->SetItems(g_app.tasks->Snapshot());
         if (g_app.start)
@@ -661,6 +675,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.listener.reset();
     g_app.notes.reset();
     g_app.start.reset();
+    Surface::SetGlassHost(nullptr);
     g_app.catalog.reset();
     g_app.tasks.reset();
     g_app.bar.reset();

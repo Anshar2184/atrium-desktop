@@ -461,13 +461,14 @@ IconImage FitToSquare(const IconImage& src, int size)
 }
 
 // IShellItemImageFactory on a parsing name (path, .lnk or shell:AppsFolder\...).
-bool ShellImage(const std::wstring& parsingName, int size, IconImage& out)
+bool ShellImage(const std::wstring& parsingName, int size, IconImage& out, bool thumbnail = false)
 {
     winrt::com_ptr<IShellItemImageFactory> factory;
     if (FAILED(SHCreateItemFromParsingName(parsingName.c_str(), nullptr, IID_PPV_ARGS(factory.put()))) || !factory)
         return false;
-    const SIIGBF attempts[] = {SIIGBF_ICONONLY, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, SIIGBF_BIGGERSIZEOK};
-    for (SIIGBF flags : attempts) {
+    const SIIGBF icons[] = {SIIGBF_ICONONLY, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, SIIGBF_BIGGERSIZEOK};
+    const SIIGBF pictures[] = {SIIGBF_THUMBNAILONLY | SIIGBF_BIGGERSIZEOK, SIIGBF_RESIZETOFIT, SIIGBF_BIGGERSIZEOK};
+    for (SIIGBF flags : thumbnail ? pictures : icons) {
         HBITMAP bmp = nullptr;
         if (SUCCEEDED(factory->GetImage(SIZE{size, size}, flags, &bmp)) && bmp) {
             IconImage raw;
@@ -1389,10 +1390,10 @@ struct TaskModel::Impl {
 
 TaskModel::Impl* TaskModel::Impl::self = nullptr;
 
-bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out)
+bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out, bool thumbnail)
 {
     try {
-        return ShellImage(parsingName, sizePx, out);
+        return ShellImage(parsingName, sizePx, out, thumbnail);
     } catch (...) {
         return false;
     }

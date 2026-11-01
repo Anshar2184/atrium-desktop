@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -44,6 +45,8 @@ public:
     void ToggleCenter();
     void Clear();
     void SetOptions(double timeoutSeconds, bool hideBody);
+    // Corner radius (DIP), the bar's; the cards are concentric with it.
+    void SetRadius(float dip);
     int Unread() const;
     // Tests: pretend SHQueryUserNotificationState returned `state` (0: use the real one).
     void SetQuietOverride(int state) { quietOverride_ = state; }
@@ -55,16 +58,30 @@ private:
         D2D1_RECT_F rect;
         std::wstring id;
     };
+    // A card's displayed place; it eases towards where the layout wants it,
+    // so arrivals, expanding, collapsing and closing all glide.
+    struct CardAnim {
+        float y = 0, inset = 0, alpha = 0;
+        bool placed = false;
+    };
     struct View {
         std::unique_ptr<Surface> surface;
         std::vector<Hit> hits;
         std::wstring hover, pressed;
         bool tracking = false;
         float scroll = 0, contentH = 0, viewH = 0;
+        std::map<uint64_t, CardAnim> cards;
+        std::map<std::wstring, float> glow; // eased hover per element
+        double lastPaint = 0;
+        std::wstring rippleId;
+        float rippleX = 0, rippleY = 0;
+        double rippleMs = 0;
     };
 
     void Paint(Mode mode, Canvas& c);
-    float PaintCard(Canvas& c, const Notice& n, float x, float y, float w, int index, View& v, bool full);
+    void PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha);
+    float Ease(View& v, Canvas& c, const std::wstring& id, bool on, float dt);
+    void Sweep(); // drops the cards whose closing animation has finished
     bool Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& result);
     void Click(Mode mode, const std::wstring& id);
     void Activate(uint64_t id);
@@ -88,6 +105,8 @@ private:
     bool hideBody_ = false;
     int quietOverride_ = 0;
     ULONGLONG centerClosed_ = 0;
+    float radius_ = 20;
+    std::map<uint64_t, double> leaving_; // closing cards: ClockMs() when closed
 };
 
 } // namespace atrium

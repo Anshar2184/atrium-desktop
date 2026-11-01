@@ -1,5 +1,6 @@
 #include "ui/notifications.h"
 
+#include "clock.h"
 #include "log.h"
 
 #include <shellapi.h>
@@ -13,10 +14,27 @@ namespace atrium {
 
 namespace {
 
-constexpr float kW = 384, kPad = 12, kRadius = 20, kCardR = 14, kGap = 8, kPeek = 10, kHeader = 48;
+constexpr float kW = 384, kPad = 12, kGap = 8, kPeek = 10, kHeader = 48;
 constexpr int kMaxNotices = 50;
 constexpr ULONGLONG kMergeMs = 120000;
-constexpr UINT_PTR kPopupTimer = 1;
+constexpr UINT_PTR kPopupTimer = 1, kSweepTimer = 2;
+constexpr double kLeaveMs = 220, kRippleMs = 520;
+
+float Smooth(float t)
+{
+    t = std::clamp(t, 0.f, 1.f);
+    return 1 - (1 - t) * (1 - t) * (1 - t);
+}
+// Moves v towards target at `rate` per second; true while still moving.
+bool Glide(float& v, float target, float dt, float rate, float eps)
+{
+    v += (target - v) * (1 - std::exp(-dt / 1000.f * rate));
+    if (std::fabs(target - v) < eps) {
+        v = target;
+        return false;
+    }
+    return true;
+}
 
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
@@ -50,17 +68,26 @@ Notifications::Notifications(HINSTANCE instance)
         s.paint = [this, mode](Canvas& c) { Paint(mode, c); };
         s.message = [this, mode](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(mode, m, w, l, r); };
     }
+    center_.surface->onMargin = [this] { // a press next to the list closes it
+        center_.surface->Hide();
+        centerClosed_ = GetTickCount64();
+    };
 }
 
 void Notifications::SetOptions(double timeoutSeconds, bool hideBody)
 {
     timeout_ = std::clamp(timeoutSeconds, 3.0, 30.0);
     hideBody_ = hideBody;
-    // Hidden text also keeps the cards out of screenshots and screen sharing.
-    popup_.surface->ExcludeFromCapture(hideBody);
-    center_.surface->ExcludeFromCapture(hideBody);
+    // (The cards are always kept out of screen capture: the glass under them samples the screen.)
     popup_.surface->Invalidate();
     center_.surface->Invalidate();
+}
+
+void Notifications::SetRadius(float dip)
+{
+    radius_ = dip;
+    popup_.surface->SetRadius(dip);
+    center_.surface->SetRadius(dip);
 }
 
 int Notifications::Unread() const
@@ -165,20 +192,57 @@ void Notifications::ToggleCenter()
 void Notifications::Clear()
 {
     size_t n = notices_.size();
-    notices_.clear();
-    popupIds_.clear();
     HidePopup(L"cleared");
+    popupIds_.clear();
+    if (center_.surface->Visible() && n) {
+        // The cards fly out one after another, then go.
+        double now = ClockMs();
+        int i = 0;
+        for (const auto& notice : notices_)
+            leaving_.try_emplace(notice.id, now + 30.0 * std::min(i++, 8));
+        SetTimer(center_.surface->Hwnd(), kSweepTimer, UINT(kLeaveMs + 30 * 8 + 20), nullptr);
+        center_.surface->Invalidate();
+    } else {
+        notices_.clear();
+        leaving_.clear();
+    }
     Log(L"notify: cleared %zu", n);
     Changed();
 }
 
 void Notifications::Remove(uint64_t id)
 {
-    std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
     std::erase(popupIds_, id);
     if (popupIds_.empty())
         HidePopup(L"last card closed");
+    if (center_.surface->Visible() && std::any_of(notices_.begin(), notices_.end(), [&](const Notice& n) { return n.id == id; })) {
+        leaving_.try_emplace(id, ClockMs()); // slides out; the others close up
+        SetTimer(center_.surface->Hwnd(), kSweepTimer, UINT(kLeaveMs + 20), nullptr);
+        center_.surface->Invalidate();
+    } else {
+        std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
+    }
     Changed();
+}
+
+void Notifications::Sweep()
+{
+    double now = ClockMs();
+    bool swept = false;
+    for (auto it = leaving_.begin(); it != leaving_.end();) {
+        if (now - it->second >= kLeaveMs || !center_.surface->Visible()) {
+            uint64_t id = it->first;
+            std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
+            it = leaving_.erase(it);
+            swept = true;
+        } else {
+            ++it;
+        }
+    }
+    if (!leaving_.empty())
+        SetTimer(center_.surface->Hwnd(), kSweepTimer, 60, nullptr);
+    if (swept)
+        Changed();
 }
 
 void Notifications::Activate(uint64_t id)
@@ -195,6 +259,7 @@ void Notifications::Activate(uint64_t id)
         centerClosed_ = GetTickCount64();
     }
     Remove(id);
+    Sweep();
 }
 
 void Notifications::Changed()
@@ -258,46 +323,70 @@ void Notifications::Layout(Mode mode)
     // Right-aligned with the bell, inside the work area.
     int right = std::clamp(int(bell.right) + int(std::lround(14 * s)), int(wa.left) + margin + w, int(wa.right) - margin);
     RECT r{right - w, std::max(int(wa.top) + margin, bottom - h), right, bottom};
-    if (!v.surface->Visible())
-        v.surface->Show(r, mode == Mode::Center);
-    else
+    if (!v.surface->Visible()) {
+        v.cards.clear(); // the cards arrive afresh
+        v.glow.clear();
+        // Pops out of the bell.
+        v.surface->Show(r, mode == Mode::Center, POINT{(bell.left + bell.right) / 2, bottom});
+    } else {
         v.surface->Move(r);
+    }
 }
 
-float Notifications::PaintCard(Canvas& c, const Notice& n, float x, float y, float w, int index, View& v, bool full)
+float Notifications::Ease(View& v, Canvas& c, const std::wstring& id, bool on, float dt)
+{
+    float& g = v.glow[id];
+    if (Glide(g, on ? 1.f : 0.f, dt, on ? 20.f : 11.f, 0.01f))
+        c.Continue();
+    return g;
+}
+
+void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha)
 {
     const Theme t = Theme::Current();
-    const float h = CardHeight();
-    D2D1_RECT_F r = D2D1::RectF(x, y, x + w, y + h);
-    // Cards behind the newest one are a shade darker so their edges read as a stack.
-    D2D1_COLOR_F fill = full ? (t.light ? D2D1::ColorF(1, 1, 1, 0.92f) : D2D1::ColorF(1, 1, 1, 0.065f))
-                             : (t.light ? D2D1::ColorF(0.86f, 0.86f, 0.89f, 0.95f) : D2D1::ColorF(1, 1, 1, 0.035f));
+    const float cardR = std::clamp(radius_ - kPad, 8.f, 22.f);
     std::wstring cardId = L"card:" + std::to_wstring(index), closeId = L"close:" + std::to_wstring(index);
-    bool hot = v.hover == cardId || v.hover == closeId;
-    c.Fill(r, kCardR, hot && full ? (t.light ? D2D1::ColorF(1, 1, 1, 1) : D2D1::ColorF(1, 1, 1, 0.10f)) : fill);
-    c.Stroke(r, kCardR, t.divider);
-    if (!full)
-        return h;
-    float cx = x + 14, cy = y + 14;
+    bool hot = full && (v.hover == cardId || v.hover == closeId);
+    bool pressed = full && (v.pressed == cardId || (index == 0 && v.pressed == L"stack"));
+    float glow = full ? Ease(v, c, cardId, hot, float(std::clamp(c.now - v.lastPaint, 0.0, 100.0))) : 0;
+    float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+    // A pressed card gives way a little, like the glass under it.
+    c.BeginGroup(alpha, pressed ? 0.975f : 1 + 0.008f * glow, cx, cy);
+    // Cards behind the newest one are a shade fainter so their edges read as a stack.
+    D2D1_COLOR_F fill = full ? t.card : D2D1::ColorF(t.card.r, t.card.g, t.card.b, t.card.a * 0.7f);
+    c.Fill(r, cardR, fill);
+    if (glow > 0)
+        c.Fill(r, cardR, D2D1::ColorF(t.cardHot.r, t.cardHot.g, t.cardHot.b, (t.cardHot.a - t.card.a) * glow));
+    c.Stroke(r, cardR, t.border);
+    if (v.rippleId == cardId && c.now - v.rippleMs < kRippleMs) {
+        c.Ripple(r, cardR, v.rippleX, v.rippleY, float((c.now - v.rippleMs) / kRippleMs), t.light ? D2D1::ColorF(1, 1, 1, 0.95f) : D2D1::ColorF(1, 1, 1, 0.22f));
+        c.Continue();
+    }
+    if (!full) {
+        c.EndGroup();
+        return;
+    }
+    const float x = r.left, y = r.top, w = r.right - r.left;
+    float tx = x + 14, ty = y + 14;
     if (n.unread)
-        c.Circle(cx + 3, cy + 8, 3.5f, t.accent);
-    float nameX = cx + (n.unread ? 12 : 0);
+        c.Circle(tx + 3, ty + 8, 3.5f, t.accent);
+    float nameX = tx + (n.unread ? 12 : 0);
     std::wstring app = n.app.empty() ? L"Atrium" : n.app;
     if (n.count > 1)
-        app += L"  ·  " + std::to_wstring(n.count) + L" 条"; // · N 条
-    c.Text(app, D2D1::RectF(nameX, cy, x + w - 120, cy + 16), 12, t.subtext, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(Ago(n.time), D2D1::RectF(x + w - 120, cy, x + w - 44, cy + 16), 12, t.faint, DWRITE_FONT_WEIGHT_NORMAL, 2);
-    c.Text(n.title, D2D1::RectF(cx, cy + 22, x + w - 14, cy + 42), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    std::wstring body = BodyHidden() ? L"内容已隐藏" : n.body; // 内容已隐藏
-    c.Text(body, D2D1::RectF(cx, cy + 46, x + w - 14, cy + 46 + 36), 13, BodyHidden() ? t.faint : t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
+        app += L"  ·  " + std::to_wstring(n.count) + L" 条";
+    c.Text(app, D2D1::RectF(nameX, ty, x + w - 120, ty + 16), 12, t.subtext, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(Ago(n.time), D2D1::RectF(x + w - 120, ty, x + w - 44, ty + 16), 12, t.faint, DWRITE_FONT_WEIGHT_NORMAL, 2);
+    c.Text(n.title, D2D1::RectF(tx, ty + 22, x + w - 14, ty + 42), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    std::wstring body = BodyHidden() ? L"内容已隐藏" : n.body;
+    c.Text(body, D2D1::RectF(tx, ty + 46, x + w - 14, ty + 46 + 36), 13, BodyHidden() ? t.faint : t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
     // Dismiss: a round button in the top-right corner, shown with the pointer on the card.
     D2D1_RECT_F close = D2D1::RectF(x + w - 36, y + 8, x + w - 10, y + 34);
-    if (hot) {
-        c.Fill(close, 13, v.hover == closeId ? t.press : t.hover);
-        c.Glyph(L"\uE711", close, 10, t.text);
+    if (glow > 0.01f) {
+        c.Fill(close, 13, D2D1::ColorF(t.hover.r, t.hover.g, t.hover.b, (v.hover == closeId ? t.press.a * 1.6f : t.hover.a * 1.4f) * glow));
+        c.Glyph(L"\uE711", close, 10, D2D1::ColorF(t.text.r, t.text.g, t.text.b, t.text.a * glow));
     }
+    c.EndGroup();
     v.hits.push_back({close, closeId});
-    return h;
 }
 
 void Notifications::Paint(Mode mode, Canvas& c)
@@ -306,58 +395,100 @@ void Notifications::Paint(Mode mode, Canvas& c)
     const Theme t = Theme::Current();
     RECT rr = v.surface->Rect();
     const float w = float(rr.right - rr.left) / c.scale, h = float(rr.bottom - rr.top) / c.scale;
+    const float dt = v.lastPaint > 0 ? float(std::clamp(c.now - v.lastPaint, 0.0, 100.0)) : 16.f;
     v.hits.clear();
-    c.Fill(D2D1::RectF(0, 0, w, h), kRadius, t.panel);
-    c.Stroke(D2D1::RectF(0, 0, w, h), kRadius, t.border);
+    if (c.panel) // no glass (yet): a plain panel keeps the text readable
+        c.Fill(D2D1::RectF(0, 0, w, h), radius_, t.panel);
     auto shown = Shown(mode);
     float top = kPad;
     if (mode == Mode::Center) {
-        c.Text(L"通知", D2D1::RectF(kPad + 8, kPad, w / 2, kPad + 32), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD); // 通知
+        c.Text(L"通知", D2D1::RectF(kPad + 8, kPad, w / 2, kPad + 32), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         float x = w - kPad;
         auto button = [&](const std::wstring& id, const std::wstring& label) {
             float bw = c.TextWidth(label, 12) + 24;
             D2D1_RECT_F b = D2D1::RectF(x - bw, kPad + 2, x, kPad + 30);
-            c.Fill(b, 14, v.hover == id ? t.press : t.hover);
+            float g = Ease(v, c, id, v.hover == id, dt);
+            c.Fill(b, 14, t.card);
+            if (g > 0)
+                c.Fill(b, 14, D2D1::ColorF(t.cardHot.r, t.cardHot.g, t.cardHot.b, t.cardHot.a * g));
             c.Text(label, b, 12, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
             v.hits.push_back({b, id});
             x = b.left - 6;
         };
-        if (!shown.empty())
-            button(L"clear", L"全部清除"); // 全部清除
+        if (!shown.empty() && leaving_.size() < shown.size())
+            button(L"clear", L"全部清除");
         if (expanded_ && shown.size() > 1)
-            button(L"collapse", L"收起"); // 收起
+            button(L"collapse", L"收起");
         top += kHeader;
     }
     const float cw = w - 2 * kPad;
     if (shown.empty()) {
-        c.Text(L"没有新通知", D2D1::RectF(kPad, top, w - kPad, top + 64), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1); // 没有新通知
+        c.Text(L"没有新通知", D2D1::RectF(kPad, top, w - kPad, top + 64), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        v.lastPaint = c.now;
         return;
     }
     c.Clip(D2D1::RectF(0, top, w, top + v.viewH));
     const bool stack = mode == Mode::Popup || (!expanded_ && shown.size() > 1);
+    const float card = CardHeight();
+    // Where the layout wants each card; the displayed place glides there.
+    std::vector<D2D1_RECT_F> rects(shown.size());
+    std::vector<float> alphas(shown.size());
+    for (size_t i = 0; i < shown.size(); ++i) {
+        const Notice& n = *shown[i];
+        float ty, tinset, talpha;
+        if (stack) {
+            float k = float(std::min<size_t>(i, 2));
+            ty = top + kPeek * k;
+            tinset = 10.f * k;
+            talpha = i <= 2 ? 1.f : 0.f;
+        } else {
+            ty = top + float(i) * (card + kGap) - v.scroll;
+            tinset = 0;
+            talpha = 1;
+        }
+        CardAnim& a = v.cards[n.id];
+        if (!a.placed) { // a new card drops in from above
+            a = {ty - 18, tinset, 0, true};
+        }
+        bool moving = Glide(a.y, ty, dt, 16, 0.2f);
+        moving |= Glide(a.inset, tinset, dt, 16, 0.1f);
+        moving |= Glide(a.alpha, talpha, dt, 12, 0.01f);
+        float alpha = a.alpha, dx = 0;
+        if (auto l = leaving_.find(n.id); l != leaving_.end()) { // closing: slides away to the right
+            float e = Smooth(float((c.now - l->second) / kLeaveMs));
+            dx = 80 * e;
+            alpha *= 1 - e;
+            moving = true;
+        }
+        if (moving)
+            c.Continue();
+        rects[i] = D2D1::RectF(kPad + a.inset + dx, a.y, kPad + cw - a.inset + dx, a.y + card);
+        alphas[i] = alpha;
+    }
+    for (auto it = v.cards.begin(); it != v.cards.end();) // forget cards that are gone
+        it = std::any_of(shown.begin(), shown.end(), [&](const Notice* n) { return n->id == it->first; }) ? std::next(it) : v.cards.erase(it);
+    // Back to front: the newest card is drawn last, on top. In the stack only
+    // the edges of the cards behind show (the cards are translucent).
+    for (size_t i = shown.size(); i-- > 0;) {
+        bool full = !stack || i == 0;
+        if (alphas[i] <= 0.004f || rects[i].bottom < top || rects[i].top > top + v.viewH)
+            continue;
+        bool edge = stack && i > 0;
+        if (edge)
+            c.Clip(D2D1::RectF(0, rects[i - 1].bottom - 1, w, top + v.viewH));
+        PaintCard(c, *shown[i], rects[i], int(i), v, full, alphas[i]);
+        if (edge)
+            c.Unclip();
+        if (!stack)
+            v.hits.push_back({rects[i], L"card:" + std::to_wstring(i)});
+    }
     if (stack) {
-        // Collapsed: older cards peek out below the newest one.
-        size_t behind = std::min<size_t>(2, shown.size() - 1);
-        for (size_t k = behind; k >= 1; --k) {
-            float inset = 10.f * float(k);
-            PaintCard(c, *shown[k], kPad + inset, top + kPeek * float(k), cw - 2 * inset, int(k), v, false);
-        }
-        PaintCard(c, *shown[0], kPad, top, cw, 0, v, true);
-        D2D1_RECT_F all = D2D1::RectF(kPad, top, kPad + cw, top + v.contentH);
         // One card: clicking it runs its action. Several: clicking expands the list.
+        D2D1_RECT_F all = D2D1::RectF(kPad, top, kPad + cw, top + v.contentH);
         v.hits.push_back({all, shown.size() > 1 ? L"stack" : L"card:0"});
-    } else {
-        float y = top - v.scroll;
-        for (size_t i = 0; i < shown.size(); ++i) {
-            float ch = CardHeight();
-            if (y + ch >= top && y <= top + v.viewH) {
-                PaintCard(c, *shown[i], kPad, y, cw, int(i), v, true);
-                v.hits.push_back({D2D1::RectF(kPad, y, kPad + cw, y + ch), L"card:" + std::to_wstring(i)});
-            }
-            y += ch + kGap;
-        }
     }
     c.Unclip();
+    v.lastPaint = c.now;
 }
 
 void Notifications::Click(Mode mode, const std::wstring& id)
@@ -414,6 +545,11 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
             HidePopup(L"timeout");
             return true;
         }
+        if (w == kSweepTimer) {
+            KillTimer(v.surface->Hwnd(), kSweepTimer);
+            Sweep();
+            return true;
+        }
         return false;
     case WM_ACTIVATE:
         if (mode == Mode::Center && LOWORD(w) == WA_INACTIVE && v.surface->Visible()) {
@@ -447,15 +583,28 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
             SetTimer(v.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
         v.surface->Invalidate();
         return true;
-    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDOWN: {
         v.pressed = hitAt(pt);
+        if (!v.pressed.empty()) {
+            // The glass under the card gives way, and a soft light spreads from the press.
+            float s = v.surface->Scale();
+            v.rippleId = v.pressed == L"stack" ? L"card:0" : v.pressed;
+            v.rippleX = float(pt.x) / s;
+            v.rippleY = float(pt.y) / s;
+            v.rippleMs = ClockMs();
+            v.surface->Ripple(v.rippleX, v.rippleY);
+        }
+        v.surface->Invalidate();
         return true;
+    }
     case WM_LBUTTONUP: {
         std::wstring h = hitAt(pt);
         bool same = !h.empty() && h == v.pressed;
         v.pressed.clear();
         if (same)
             Click(mode, h);
+        else
+            v.surface->Invalidate();
         return true;
     }
     case WM_MOUSEWHEEL:
@@ -481,19 +630,27 @@ void Notifications::LogState() const
         const View& v = ViewOf(mode);
         if (!v.surface->Visible())
             continue;
+        // Screen px, for tests.
+        const RECT r = v.surface->Rect();
+        const float s = v.surface->Scale();
         std::wstring spots;
         for (const Hit& h : v.hits)
-            spots += L" " + h.id + L"@" + std::to_wstring(int((h.rect.left + h.rect.right) / 2)) + L"," +
-                     std::to_wstring(int((h.rect.top + h.rect.bottom) / 2));
+            spots += L" " + h.id + L"@" + std::to_wstring(int(float(r.left) + (h.rect.left + h.rect.right) / 2 * s)) + L"," +
+                     std::to_wstring(int(float(r.top) + (h.rect.top + h.rect.bottom) / 2 * s));
         Log(L"notify: spots %s%s", mode == Mode::Popup ? L"popup" : L"center", spots.c_str());
     }
+    // Cards that are flying out are already gone for the user.
+    std::vector<const Notice*> live;
+    for (const auto& n : notices_)
+        if (!leaving_.count(n.id))
+            live.push_back(&n);
     RECT p = popup_.surface->Rect(), c = center_.surface->Rect();
     HWND fg = GetForegroundWindow();
     Log(L"notify: state count=%zu unread=%d popup=%d popupCards=%zu center=%d expanded=%d bodyHidden=%d quiet=%d "
-        L"popupRect=%ld,%ld,%ld,%ld centerRect=%ld,%ld,%ld,%ld fgPopup=%d fgCenter=%d first='%s' firstCount=%d",
-        notices_.size(), Unread(), popup_.surface->Visible() ? 1 : 0, popupIds_.size(), center_.surface->Visible() ? 1 : 0, expanded_ ? 1 : 0,
+        L"popupRect=%ld,%ld,%ld,%ld centerRect=%ld,%ld,%ld,%ld fgPopup=%d fgCenter=%d first='%s' firstCount=%d radius=%.0f",
+        live.size(), Unread(), popup_.surface->Visible() ? 1 : 0, popupIds_.size(), center_.surface->Visible() ? 1 : 0, expanded_ ? 1 : 0,
         BodyHidden() ? 1 : 0, QuietState(), p.left, p.top, p.right, p.bottom, c.left, c.top, c.right, c.bottom, fg == popup_.surface->Hwnd() ? 1 : 0,
-        fg == center_.surface->Hwnd() ? 1 : 0, notices_.empty() ? L"" : notices_[0].title.c_str(), notices_.empty() ? 0 : notices_[0].count);
+        fg == center_.surface->Hwnd() ? 1 : 0, live.empty() ? L"" : live[0]->title.c_str(), live.empty() ? 0 : live[0]->count, radius_);
 }
 
 } // namespace atrium
