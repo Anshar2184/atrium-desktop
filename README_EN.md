@@ -18,7 +18,26 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
 </div>
 
 > [!NOTE]
-> **v0.3 development build.** A C++ glass taskbar that coexists with the Windows taskbar: an Atrium start menu, pinned and running apps (drag to reorder), a clock, Atrium's own notifications, and a settings app with a live preview. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
+> **v0.4 development build.** A C++ glass taskbar that coexists with the Windows taskbar: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), a clock, Atrium's own notifications, and a settings app with a live preview. The start menu and notifications are the same glass as the bar, with the same corners, and the icons swell like the macOS Dock under the pointer. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
+
+<p align="center">
+  <img src="docs/images/v04-magnify.png" alt="v0.4 taskbar: magnification" width="80%"><br>
+  <sub>The icon under the pointer grows, its neighbours less and less, and the glass stretches with them; running apps have a small dot (test backdrop)</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/v04-start.png" alt="Atrium start menu" width="52%">
+  <img src="docs/images/v04-center.png" alt="Atrium notifications" width="44%"><br>
+  <sub>Start menu and notifications on the bar's glass and corners: pinned apps, all apps grouped by initial (pinyin for Chinese names), search and a power card, with account, network, volume, battery and the system tray on the shelf; notifications in a collapsed stack that expands on click (account and network names hidden for the picture)</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/v03-settings.png" alt="Settings" width="70%"><br>
+  <sub>Settings: sidebar and cards; on top, a glass specimen rendered on the CPU from the real parameters, with a loupe on the rim's refraction and dispersion</sub>
+</p>
+
+<details>
+<summary>v0.3 screenshots</summary>
 
 <p align="center">
   <img src="docs/images/v03-bar.png" alt="v0.3 taskbar" width="80%"><br>
@@ -31,10 +50,7 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
   <sub>Start menu: pinned apps, all apps, search, power, with network, volume, battery and the system tray at the bottom; notifications: a collapsed stack that expands on click</sub>
 </p>
 
-<p align="center">
-  <img src="docs/images/v03-settings.png" alt="Settings" width="70%"><br>
-  <sub>Settings: sidebar and cards; on top, a glass specimen rendered on the CPU from the real parameters, with a loupe on the rim's refraction and dispersion</sub>
-</p>
+</details>
 
 <details>
 <summary>v0.2 screenshots</summary>
@@ -67,7 +83,7 @@ Atrium redesigns the layer you look at every day: a floating glass taskbar with 
 1. Download the `Atrium-win-x64` artifact from the latest successful run in [Actions](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml), or build it as described below.
 2. Unzip and run `Atrium.Core.exe`. The glass taskbar appears at the bottom of the screen; on first run it imports your current Windows taskbar pins.
 3. Left-click an app to open it, bring it to the front or minimize it; middle-click or Shift+click for a new window; right-click to pin, unpin, open the file location or close. Drag icons to reorder; drop a file on an app to open it there.
-4. Click the logo on the left for the Atrium start menu (type to search apps), the bell on the right for notifications, the clock for the Windows calendar.
+4. Click the Windows logo on the left for the Atrium start menu (type to search apps), the bell on the right for notifications, the clock for the Windows calendar. Icons grow under the pointer (“悬停放大”, magnification, on the 形状 (Shape) page of Settings adjusts or turns it off); the bar hides while a full-screen video or game is in front.
 5. Double-click the tray icon (or right-click it → the first menu item) to open the settings: material, size, pinned apps, notifications and more.
 6. Right-click the tray icon → the last menu item to quit. Nothing is written to the registry and no service is installed; settings live in `%LOCALAPPDATA%\Atrium`.
 
@@ -77,6 +93,7 @@ All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc
 
 | Area | Result |
 |---|---|
+| v0.4 motion, one material, stacking | ✅ magnification, launch bounce, press ripple, popups on the bar's glass: 7 checks; back on top after a topmost window covers it, hidden for full-screen apps, kept for maximized windows, below a revealed Windows taskbar: 5 checks; all v0.3 tests still pass |
 | v0.3 taskbar, start menu and notifications | ✅ coexistence mode; real mouse and keyboard tests: taskbar 11, start menu 11, notifications 14 checks pass; settings end to end 14 and protocol 7 checks pass |
 | v0.2 glass taskbar and settings | ✅ with a backdrop changing every frame, present p95 0.8 ms, about 4 % of one core, 144 MB |
 | Live glass | ✅ WGC capture with self-exclusion + D3D11; iGPU frame work p95 2.4 ms, content lag p95 1 frame |
