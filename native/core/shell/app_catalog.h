@@ -1,6 +1,7 @@
 // All installed apps, as the Windows start menu lists them (the shell's
-// AppsFolder: Store apps and start menu shortcuts). Enumerated and iconified
-// on a worker thread; the UI thread reads snapshots.
+// AppsFolder: Store apps and start menu shortcuts), and the apps pinned to the
+// Windows start menu, in its order. Enumerated and iconified on a worker
+// thread; the UI thread reads snapshots.
 #pragma once
 
 #include "shell/task_model.h"
@@ -19,7 +20,7 @@ namespace atrium {
 
 struct CatalogApp {
     std::wstring name;    // display name
-    std::wstring id;      // parsing name inside AppsFolder (AUMID or known-folder path)
+    std::wstring id;      // parsing name inside AppsFolder (AUMID or known-folder path), or a shortcut's full path
     std::wstring aumid;   // System.AppUserModel.ID, may be empty
     std::wstring target;  // link target exe, may be empty
 };
@@ -35,6 +36,8 @@ public:
     void Refresh();                       // enumerate again (asynchronous)
     bool Loaded() const;
     std::vector<CatalogApp> Apps() const; // sorted by name (user locale)
+    // Pinned to the Windows start menu (not the taskbar: those are the bar's pins).
+    std::vector<CatalogApp> StartPins() const;
     IconImage Icon(const std::wstring& id, int px); // empty until loaded
 
     static bool Launch(const CatalogApp& app);
@@ -48,7 +51,10 @@ private:
     UINT msg_;
     mutable std::mutex mutex_;
     std::condition_variable cv_;
-    std::vector<CatalogApp> apps_;
+    std::vector<CatalogApp> apps_, startPins_;
+    // Worker only: the exported layout and the layout file's time it is from.
+    std::vector<std::pair<std::wstring, std::wstring>> layout_; // key (packagedAppId | desktopAppLink), value
+    FILETIME layoutTime_{};
     bool loaded_ = false, refresh_ = false, stop_ = false;
     std::deque<std::pair<std::wstring, int>> iconJobs_;
     std::map<std::pair<std::wstring, int>, IconImage> icons_;
