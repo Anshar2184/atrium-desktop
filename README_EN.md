@@ -18,7 +18,7 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
 </div>
 
 > [!NOTE]
-> **v0.4 development build.** A C++ glass taskbar that coexists with the Windows taskbar: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), a clock, Atrium's own notifications, and a settings app with a live preview. The start menu and notifications are the same glass as the bar, with the same corners, and the icons swell like the macOS Dock under the pointer. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
+> **v0.5 development build.** A C++ glass taskbar that coexists with the Windows taskbar: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), a clock, Atrium's own notifications, and a settings app with a live preview. The start menu and every notification card are exactly the bar's liquid glass, and the icons swell like the macOS Dock under the pointer. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
 
 <p align="center">
   <img src="docs/images/v04-magnify.png" alt="v0.4 taskbar: magnification" width="80%"><br>
@@ -26,15 +26,26 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
 </p>
 
 <p align="center">
-  <img src="docs/images/v04-start.png" alt="Atrium start menu" width="52%">
-  <img src="docs/images/v04-center.png" alt="Atrium notifications" width="44%"><br>
-  <sub>Start menu and notifications on the bar's glass and corners: pinned apps, all apps grouped by initial (pinyin for Chinese names), search and a power card, with account, network, volume, battery and the system tray on the shelf; notifications in a collapsed stack that expands on click (account and network names hidden for the picture)</sub>
+  <img src="docs/images/v05-start.png" alt="Atrium start menu" width="52%">
+  <img src="docs/images/v05-center.png" alt="Atrium notifications" width="39%"><br>
+  <sub>Start menu: a search field and the Windows start menu's pins (7 × 3 a page), above a status capsule as high and as round as the bar; notifications: each card its own piece of glass, stacked and unfolding upwards. The material is exactly the bar's (Windows' own apps as pins for the picture; account and network names hidden)</sub>
 </p>
 
 <p align="center">
   <img src="docs/images/v03-settings.png" alt="Settings" width="70%"><br>
   <sub>Settings: sidebar and cards; on top, a glass specimen rendered on the CPU from the real parameters, with a loupe on the rim's refraction and dispersion</sub>
 </p>
+
+<details>
+<summary>v0.4 screenshots</summary>
+
+<p align="center">
+  <img src="docs/images/v04-start.png" alt="Atrium start menu v0.4" width="52%">
+  <img src="docs/images/v04-center.png" alt="Atrium notifications v0.4" width="44%"><br>
+  <sub>v0.4: the start menu with all apps grouped by initial, notifications stacked downwards, glass more frosted and tinted than the bar's</sub>
+</p>
+
+</details>
 
 <details>
 <summary>v0.3 screenshots</summary>
@@ -93,6 +104,7 @@ All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc
 
 | Area | Result |
 |---|---|
+| v0.5 start menu and notifications | ✅ the start menu shows the Windows start menu's pins (separate from the bar's), search only, pages; the status capsule shaped like the bar; each notification card its own glass, stacked upwards; popups exactly on the bar's material: start menu 13, notifications 15, motion 7 checks and the other regression tests pass |
 | v0.4 motion, one material, stacking | ✅ magnification, launch bounce, press ripple, popups on the bar's glass: 7 checks; back on top after a topmost window covers it, hidden for full-screen apps, kept for maximized windows, below a revealed Windows taskbar: 5 checks; all v0.3 tests still pass |
 | v0.3 taskbar, start menu and notifications | ✅ coexistence mode; real mouse and keyboard tests: taskbar 11, start menu 11, notifications 14 checks pass; settings end to end 14 and protocol 7 checks pass |
 | v0.2 glass taskbar and settings | ✅ with a backdrop changing every frame, present p95 0.8 ms, about 4 % of one core, 144 MB |
