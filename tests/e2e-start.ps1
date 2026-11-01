@@ -3,8 +3,8 @@
   Drives Atrium's start menu with the real mouse and keyboard: open from the
   logo (and take the keyboard), type to search, Esc, toggle with the logo,
   close on an outside click, launch with Enter, pin and unpin from the menu,
-  the power menu (dry run: nothing is shut down), the tray entry, and the
-  window size at the monitor's DPI.
+  the power card (dry run: nothing is shut down), the tray entry, and the
+  menu size at the monitor's DPI.
 
 .DESCRIPTION
   Moves the mouse and types, so it only runs after the user has been idle for
@@ -94,21 +94,14 @@ function ClickLogo { Start-Sleep -Milliseconds 300; Click (ItemRect "#start") }
 function Key($vk) { [U]::keybd_event($vk, 0, 0, [UIntPtr]::Zero); [U]::keybd_event($vk, 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 120 }
 function TypeText($text) { [U]::Type($text); Start-Sleep -Milliseconds 200 }
 function Menu { [U]::FindWindow("AtriumSurface", "Atrium Start") }
-# A point of the menu in DIP from its top-left (negative: from the right or bottom).
-function MenuPoint($dx, $dy) {
-    $h = Menu; $r = New-Object U+R; [U]::GetWindowRect($h, [ref]$r) | Out-Null
-    $s = [U]::GetDpiForWindow($h) / 96.0
-    $x = if ($dx -ge 0) { $r.l + $dx * $s } else { $r.r + $dx * $s }
-    $y = if ($dy -ge 0) { $r.t + $dy * $s } else { $r.b + $dy * $s }
-    @([int]$x, [int]$y)
-}
-# Centre (screen px) of a fixed menu button, from the positions the menu logs.
+# Centre (screen px) of a menu button or tile, from the positions the menu logs
+# ("first"/"second": the first two entries of the current view).
 function Spot($id) {
     LastState | Out-Null
     $line = @(NewLog | Where-Object { $_ -match "start: spots" })[-1]
-    $m = [regex]::Match($line, "$id@(\d+),(\d+)")
+    $m = [regex]::Match($line, " $id@(\d+),(\d+)")
     if (-not $m.Success) { throw "no position for $id" }
-    MenuPoint ([int]$m.Groups[1].Value) ([int]$m.Groups[2].Value)
+    @([int]$m.Groups[1].Value, [int]$m.Groups[2].Value)
 }
 function PinCount { $j = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json; @($j.pins).Count }
 function TestWindow($title) {
@@ -134,10 +127,12 @@ try {
     $menu = Menu
     Check "logo-opens-with-keyboard" ([U]::IsWindowVisible($menu) -and [U]::GetForegroundWindow() -eq $menu) "after clicking the logo the menu is visible and in the foreground ($([U]::Class([U]::GetForegroundWindow())))"
 
-    $r = New-Object U+R; [U]::GetWindowRect($menu, [ref]$r) | Out-Null
+    # The window is the menu plus a margin for the glass's shadow; the menu itself is logged.
     $s = [U]::GetDpiForWindow($menu) / 96.0
+    $m = [regex]::Match((LastState), "rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)")
+    $r = @([int]$m.Groups[1].Value, [int]$m.Groups[2].Value, [int]$m.Groups[3].Value, [int]$m.Groups[4].Value)
     $bar = ItemRect "#start"
-    Check "size-at-dpi" ([math]::Abs(($r.r - $r.l) - 600 * $s) -le 1 -and ($r.b - $r.t) -le 640 * $s + 1 -and $r.b -le $bar[1]) "menu $($r.r - $r.l)x$($r.b - $r.t) px at $([int]($s * 100))% scale, bottom $($r.b) above the bar top $($bar[1])"
+    Check "size-at-dpi" ([math]::Abs(($r[2] - $r[0]) - 640 * $s) -le 1 -and ($r[3] - $r[1]) -le 720 * $s + 1 -and $r[3] -le $bar[1]) "menu $($r[2] - $r[0])x$($r[3] - $r[1]) px at $([int]($s * 100))% scale, bottom $($r[3]) above the bar top $($bar[1])"
 
     TypeText "calc"
     $st = LastState
@@ -159,7 +154,7 @@ try {
     $pinsBefore = PinCount
     ClickLogo; Start-Sleep -Milliseconds 300
     $p = Spot "toggle"; ClickAt $p[0] $p[1]              # "all apps"
-    $p = MenuPoint 120 134; ClickAt $p[0] $p[1] -Right   # first row
+    $p = Spot "first"; ClickAt $p[0] $p[1] -Right       # first row
     Key 0x28; Key 0x28; Key 0x0D                          # Down, Down, Enter: "pin to Atrium"
     Start-Sleep 1
     $after = PinCount
@@ -169,8 +164,7 @@ try {
     $st = LastState
     if (-not [U]::IsWindowVisible($menu)) { ClickLogo; Start-Sleep -Milliseconds 300 }
     if ($st -match "view=all") { $p = Spot "toggle"; ClickAt $p[0] $p[1] }
-    $cell = (600 - 40) / 6
-    $p = MenuPoint (20 + $cell * 1.5) 150; ClickAt $p[0] $p[1] -Right
+    $p = Spot "second"; ClickAt $p[0] $p[1] -Right      # second tile
     Key 0x28; Key 0x28; Key 0x0D
     Start-Sleep 1
     $final = PinCount

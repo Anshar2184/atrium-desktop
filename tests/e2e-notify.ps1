@@ -72,13 +72,9 @@ function State {
 function Spot($view, $id) {
     State | Out-Null
     $line = @(NewLog | Where-Object { $_ -match "notify: spots $view" })[-1]
-    $m = [regex]::Match($line, "$([regex]::Escape($id))@(\d+),(\d+)")
+    $m = [regex]::Match($line, " $([regex]::Escape($id))@(\d+),(\d+)")
     if (-not $m.Success) { throw "no spot $id in: $line" }
-    $title = if ($view -eq "popup") { "Atrium Notification" } else { "Atrium Notifications" }
-    $h = [U]::FindWindow("AtriumSurface", $title)
-    $r = New-Object U+R; [U]::GetWindowRect($h, [ref]$r) | Out-Null
-    $s = [U]::GetDpiForWindow($h) / 96.0
-    @([int]($r.l + [int]$m.Groups[1].Value * $s), [int]($r.t + [int]$m.Groups[2].Value * $s))
+    @([int]$m.Groups[1].Value, [int]$m.Groups[2].Value)
 }
 function ClickAt($p) {
     [U]::SetCursorPos($p[0], $p[1]) | Out-Null; Start-Sleep -Milliseconds 200
@@ -113,7 +109,9 @@ try {
     Check "unread-badge" ($s.unread -eq "1") "unread=$($s.unread) after one notice"
 
     # Place and size: right-aligned near the bell, above the bar, inside the work area, 384 DIP wide.
-    $r = New-Object U+R; [U]::GetWindowRect($popup, [ref]$r) | Out-Null
+    # (The window adds a margin for the glass's shadow; the cards' area is logged.)
+    $pm = [regex]::Match((@(NewLog | Where-Object { $_ -match "notify: state" })[-1]), "popupRect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)")
+    $r = New-Object U+R; $r.l = [int]$pm.Groups[1].Value; $r.t = [int]$pm.Groups[2].Value; $r.r = [int]$pm.Groups[3].Value; $r.b = [int]$pm.Groups[4].Value
     $sc = [U]::GetDpiForWindow($popup) / 96.0
     $mi = New-Object U+MI; $mi.size = 40; [U]::GetMonitorInfo([U]::MonitorFromWindow($popup, 2), [ref]$mi) | Out-Null
     $bell = @(NewLog | Where-Object { $_ -match "layout: #notify" })[-1]
