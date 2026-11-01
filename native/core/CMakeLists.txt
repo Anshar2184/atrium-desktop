@@ -33,6 +33,7 @@ add_executable(atrium_core WIN32
     shell/app_catalog.cpp
     shell/system_status.cpp
     shell/wifi.cpp
+    shell/radios.cpp
     shell/tray_model.cpp
     shell/wechat_source.cpp
     shell/feishu_source.cpp

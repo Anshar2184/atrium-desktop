@@ -4,7 +4,7 @@
   and the status icon on the bar, the panel listing a test tray icon (a
   WinForms NotifyIcon in a child process), a left and a right click on it in
   the panel reaching that program as its own tray clicks, the control centre's
-  pieces of glass, the wheel over the status icon and the volume slider, and
+  pieces of glass and its Bluetooth page, the wheel over the status ring and the volume slider, and
   a notice from that program opening it through its tray icon, and
   the calendar from the clock (a month with lunar dates, turning the page).
 
@@ -102,7 +102,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     Start-Sleep 4
 
     $tray = ItemRect "#tray"; $status = ItemRect "#status"
-    Check "entries-on-bar" (($status[2] - $status[0]) -gt ($tray[2] - $tray[0]) -and $tray[2] -le $status[0]) "tray entry $($tray -join ','), status icon $($status -join ',') (wider, right of the tray entry)"
+    Check "entries-on-bar" (($status[2] - $status[0]) -gt 40 -and ($tray[2] - $tray[0]) -gt 40 -and $tray[2] -le $status[0]) "tray entry $($tray -join ','), status ring $($status -join ',') (right of the tray entry)"
 
     $p = Centre $tray; ClickAt $p[0] $p[1]; Start-Sleep 1
     $st = TrayState
@@ -154,12 +154,24 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     C calendar-state; $st = Last "calendar: state"
     Check "calendar-esc-closes" ((Field $st "visible") -eq "0") $st
 
-    # Control centre: one piece of glass for the network, one for the volume, one for the battery if any.
-    $p = Centre (ItemRect "#status"); ClickAt $p[0] $p[1]; Start-Sleep 2
+    # Control centre: pieces of glass for the connections, the battery, casting, the sound and,
+    # with a built-in screen, its brightness.
+    $p = Centre (ItemRect "#status"); ClickAt $p[0] $p[1]; Start-Sleep 2.5
     $st = ControlState
     $volume0 = [int](Field $st "volume"); $muted0 = Field $st "muted"
-    $expected = 2 + [int](Field $st "battery")
-    Check "control-centre-opens" ((Field $st "visible") -eq "1" -and [int](Field $st "shapes") -eq $expected) $st
+    $expected = 4 + $(if ([int](Field $st "brightness") -ge 0) { 1 } else { 0 })
+    Check "control-centre-opens" ((Field $st "visible") -eq "1" -and (Field $st "page") -eq "main" -and [int](Field $st "shapes") -eq $expected) $st
+    # The Bluetooth row opens its page in place (one piece of glass); Esc goes back.
+    if ((Field $st "bluetooth") -eq "1") {
+        $bt = Spot "control: spots" "bt-page"
+        ClickAt $bt[0] $bt[1]; Start-Sleep 2
+        $sb = ControlState
+        Key 0x1B; Start-Sleep 0.6
+        $back = ControlState
+        Check "bluetooth-page" ((Field $sb "page") -eq "bluetooth" -and [int](Field $sb "shapes") -eq 1 -and (Field $back "page") -eq "main" -and (Field $back "visible") -eq "1") "$sb; after Esc page=$(Field $back 'page')"
+    } else {
+        "SKIP bluetooth-page: no Bluetooth radio"
+    }
     $slider = Spot "control: spots" "slider"
     ClickAt $slider[0] $slider[1]; Start-Sleep 0.5
     $v = [int](Field (ControlState) "volume")

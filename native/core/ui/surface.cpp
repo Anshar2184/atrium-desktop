@@ -221,6 +221,30 @@ void Canvas::Circle(float cx, float cy, float radius, D2D1_COLOR_F c)
     d2d_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx * scale, cy * scale), radius * scale, radius * scale), Brush(c));
 }
 
+void Canvas::Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLOR_F c, float width)
+{
+    if (a1 - a0 < 0.5f)
+        return;
+    D2D1_COLOR_F unused;
+    c = InkAt(D2D1::RectF(cx - radius, cy - radius, cx + radius, cy + radius), c, unused);
+    winrt::com_ptr<ID2D1Factory> f;
+    d2d_->GetFactory(f.put());
+    winrt::com_ptr<ID2D1PathGeometry> g;
+    winrt::com_ptr<ID2D1GeometrySink> sink;
+    if (FAILED(f->CreatePathGeometry(g.put())) || FAILED(g->Open(sink.put())))
+        return;
+    const float k = 3.14159265f / 180.f, r = radius * scale;
+    a1 = std::min(a1, a0 + 359.9f);
+    sink->BeginFigure(D2D1::Point2F(cx * scale + r * std::cos(a0 * k), cy * scale + r * std::sin(a0 * k)), D2D1_FIGURE_BEGIN_HOLLOW);
+    sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(cx * scale + r * std::cos(a1 * k), cy * scale + r * std::sin(a1 * k)), D2D1::SizeF(r, r), 0,
+                                  D2D1_SWEEP_DIRECTION_CLOCKWISE, a1 - a0 > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
+    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    sink->Close();
+    winrt::com_ptr<ID2D1StrokeStyle> round;
+    f->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
+    d2d_->DrawGeometry(g.get(), Brush(c), width * scale, round.get());
+}
+
 IDWriteTextFormat* Canvas::Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, int align, bool wrap)
 {
     auto key = std::make_tuple(int(std::lround(px * 8)), int(w), glyph, align, wrap);

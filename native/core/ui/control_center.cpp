@@ -4,8 +4,9 @@
 #include "log.h"
 
 #include <shellapi.h>
-#include <shellscalingapi.h>
 #include <windowsx.h>
+
+#include <winrt/base.h>
 
 #include <algorithm>
 #include <cmath>
@@ -16,16 +17,46 @@ namespace atrium {
 
 namespace {
 
-constexpr float kW = 360, kGap = 10, kHeader = 64, kRowH = 44, kFooter = 44, kPad = 12;
+constexpr float kW = 340, kGap = 10, kTopH = 150, kSliderH = 68, kHeader = 58, kRowH = 44, kFooter = 46, kPad = 14;
 constexpr int kMaxRows = 6;
 constexpr UINT_PTR kStatusTimer = 1;
+constexpr double kPageMs = 240;
 constexpr UINT WM_WIFI_LIST = WM_APP + 0x50;  // wParam generation, lParam std::vector<WifiNetwork>*
 constexpr UINT WM_WIFI_AGAIN = WM_APP + 0x51; // after connecting: read the state and the list again
+constexpr UINT WM_CC_RADIOS = WM_APP + 0x52;  // lParam RadioRead*
+constexpr UINT WM_CC_BRIGHT = WM_APP + 0x53;  // the brightness worker is done (wParam: the value it set last)
+
+struct RadioRead {
+    RadioState radios;
+    bool devicesRead = false;
+    std::vector<BluetoothDevice> devices;
+    int brightness = -3; // -3: not read this time
+};
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
+float Ease(float t)
+{
+    t = std::clamp(t, 0.f, 1.f);
+    return 1 - (1 - t) * (1 - t) * (1 - t);
+}
 
 void OpenUri(const wchar_t* uri) { ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL); }
+
+// Win+K: the system's casting panel (a public shortcut, D11).
+void SendWinK()
+{
+    INPUT in[4] = {};
+    for (auto& i : in)
+        i.type = INPUT_KEYBOARD;
+    in[0].ki.wVk = VK_LWIN;
+    in[1].ki.wVk = 'K';
+    in[2].ki.wVk = 'K';
+    in[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    in[3].ki.wVk = VK_LWIN;
+    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(4, in, sizeof(INPUT));
+}
 
 // Signal as four rising bars.
 void Bars(Canvas& c, float x, float cy, int signal, D2D1_COLOR_F ink)
@@ -36,6 +67,16 @@ void Bars(Canvas& c, float x, float cy, int signal, D2D1_COLOR_F ink)
         D2D1_RECT_F b = D2D1::RectF(x + float(i) * 4.5f, cy + 6 - h, x + float(i) * 4.5f + 3, cy + 6);
         c.Fill(b, 1.2f, i < lit ? ink : Alpha(ink, 0.28f));
     }
+}
+
+// Runs `work` on a thread of its own with a multithreaded COM apartment (WinRT, WMI).
+template <class F> void OnWorker(F work)
+{
+    std::thread([work] {
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        work();
+        winrt::uninit_apartment();
+    }).detach();
 }
 
 } // namespace
@@ -49,28 +90,23 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
     private_ = GetEnvironmentVariableW(L"ATRIUM_PRIVACY", privacy, 8) && privacy[0] == L'1';
 }
 
-int ControlCenter::Rows() const
+float ControlCenter::MainHeight() const { return kTopH + kGap + kSliderH + (brightness_ >= 0 ? kGap + kSliderH : 0); }
+
+float ControlCenter::PageHeight() const
 {
-    if (networks_.empty())
-        return 1; // "searching", "no networks", "no Wi-Fi"
-    return std::min(kMaxRows, int(networks_.size()));
+    size_t n = page_ == Page::Wifi ? networks_.size() : devices_.size();
+    bool off = page_ == Page::Wifi ? radiosRead_ && !radios_.wifiOn : !radios_.btOn;
+    int rows = off ? 1 : std::clamp(int(n), 1, kMaxRows);
+    return kHeader + float(rows) * kRowH + kFooter + 6;
 }
 
-float ControlCenter::NetworkHeight() const { return kHeader + float(Rows()) * kRowH + kFooter + 4; }
-
-D2D1_SIZE_F ControlCenter::Size() const
-{
-    float h = NetworkHeight() + kGap + barH_;
-    if (status_.battery)
-        h += kGap + barH_;
-    return D2D1::SizeF(kW, h);
-}
+D2D1_SIZE_F ControlCenter::Size() const { return D2D1::SizeF(kW, page_ == Page::Main ? MainHeight() : PageHeight()); }
 
 void ControlCenter::Place()
 {
     RECT r = PopupRect(bar_, Size(), PopupAlign::Right);
     if (surface_.Visible())
-        surface_.Move(r); // pops out of its entry on the bar
+        surface_.Move(r);
     else
         surface_.Show(r, true, POINT{(anchor_.left + anchor_.right) / 2, r.bottom});
 }
@@ -81,13 +117,15 @@ void ControlCenter::Open(RECT anchor, RECT bar)
     bar_ = bar;
     hover_.clear();
     pressed_.clear();
-    dragging_ = false;
+    dragging_.clear();
     hoverAnim_.clear();
-    openedMs_ = ClockMs();
+    page_ = Page::Main;
+    pageMs_ = ClockMs();
+    pageDir_ = 0;
     status_ = QuerySystemStatus();
     Place();
-    Scan(false); // what the adapter already knows, at once
-    Scan(true);  // then a fresh scan
+    ReadRadios(true);
+    Scan(false); // what the adapter already knows, ready for the Wi-Fi page
     SetTimer(surface_.Hwnd(), kStatusTimer, 1500, nullptr);
     Log(L"control: opened");
 }
@@ -97,11 +135,23 @@ void ControlCenter::Close()
     if (!surface_.Visible())
         return;
     KillTimer(surface_.Hwnd(), kStatusTimer);
-    if (dragging_)
+    if (!dragging_.empty())
         ReleaseCapture();
-    dragging_ = false;
+    dragging_.clear();
     surface_.Hide();
     lastClosed_ = GetTickCount64();
+}
+
+void ControlCenter::ShowPage(Page page)
+{
+    if (page == page_)
+        return;
+    pageDir_ = page == Page::Main ? -1 : 1;
+    page_ = page;
+    pageMs_ = ClockMs();
+    hover_.clear();
+    Place();
+    surface_.Invalidate();
 }
 
 void ControlCenter::Scan(bool rescan)
@@ -114,6 +164,46 @@ void ControlCenter::Scan(bool rescan)
         if (!PostMessageW(h, WM_WIFI_LIST, gen, reinterpret_cast<LPARAM>(list)))
             delete list;
     }).detach();
+}
+
+void ControlCenter::ReadRadios(bool devices)
+{
+    HWND h = surface_.Hwnd();
+    bool bright = !radiosRead_; // the brightness once per opening (WMI is slow)
+    OnWorker([h, devices, bright] {
+        auto* r = new RadioRead();
+        r->radios = QueryRadios();
+        if (devices && r->radios.btOn) {
+            r->devices = ListBluetooth();
+            r->devicesRead = true;
+        }
+        if (bright)
+            r->brightness = GetBrightness();
+        if (!PostMessageW(h, WM_CC_RADIOS, 0, reinterpret_cast<LPARAM>(r)))
+            delete r;
+    });
+}
+
+void ControlCenter::SetRadioAsync(bool bluetooth, bool on)
+{
+    // Shown at once; the next reading confirms it (or puts it back).
+    (bluetooth ? radios_.btOn : radios_.wifiOn) = on;
+    surface_.Invalidate();
+    HWND h = surface_.Hwnd();
+    OnWorker([h, bluetooth, on] {
+        SetRadio(bluetooth, on);
+        Sleep(bluetooth ? 900 : 1500);
+        auto* r = new RadioRead();
+        r->radios = QueryRadios();
+        if (r->radios.btOn) {
+            r->devices = ListBluetooth();
+            r->devicesRead = true;
+        }
+        if (!PostMessageW(h, WM_CC_RADIOS, 0, reinterpret_cast<LPARAM>(r)))
+            delete r;
+        if (!bluetooth)
+            PostMessageW(h, WM_WIFI_AGAIN, 0, 0);
+    });
 }
 
 float ControlCenter::Hover(Canvas& c, const std::wstring& id, bool on)
@@ -134,57 +224,203 @@ void ControlCenter::Paint(Canvas& c)
 {
     const Theme& t = c.theme;
     hits_.clear();
-    const float w = kW, netH = NetworkHeight();
-    D2D1_RECT_F card = D2D1::RectF(0, 0, w, netH);
-    D2D1_RECT_F volume = D2D1::RectF(0, netH + kGap, w, netH + kGap + barH_);
-    D2D1_RECT_F battery = D2D1::RectF(0, volume.bottom + kGap, w, volume.bottom + kGap + barH_);
-    std::vector<ShapeDip> shapes{{card, radius_}, {volume, barH_ / 2}};
-    if (status_.battery)
-        shapes.push_back({battery, barH_ / 2});
-    if (c.panel)
-        for (const ShapeDip& sh : shapes)
-            c.Fill(sh.rect, sh.radius, t.panel);
+    std::vector<ShapeDip> shapes;
+    float e = pageDir_ ? Ease(float((c.now - pageMs_) / kPageMs)) : 1.f;
+    if (e < 1)
+        c.Continue();
+    const float h = Size().height;
+    // A new page slides in from the side it comes from.
+    c.BeginGroup(e, 1, kW / 2, h / 2, float(pageDir_) * 22 * (1 - e), 0);
+    if (page_ == Page::Main) {
+        PaintMain(c, t, shapes);
+    } else {
+        D2D1_RECT_F card = D2D1::RectF(0, 0, kW, h);
+        shapes.push_back({card, radius_});
+        if (c.panel)
+            c.Fill(card, radius_, t.panel);
+        if (page_ == Page::Wifi)
+            PaintWifi(c, t, card);
+        else
+            PaintBluetooth(c, t, card);
+    }
+    c.EndGroup();
     surface_.SetShapes(shapes);
-    PaintNetwork(c, t, card);
-    PaintVolume(c, t, volume);
-    if (status_.battery)
-        PaintBattery(c, t, battery);
 }
 
-void ControlCenter::PaintNetwork(Canvas& c, const Theme& t, D2D1_RECT_F card)
+void ControlCenter::Switch(Canvas& c, const Theme& t, D2D1_RECT_F r, bool on, float hv)
 {
-    const float w = card.right - card.left;
-    // Header: the connection.
-    D2D1_RECT_F disc = D2D1::RectF(16, 14, 52, 50);
-    bool on = status_.connected;
-    c.Circle(34, 32, 18, on ? Alpha(t.accent, 0.95f) : Alpha(t.hover, 1.6f));
-    {
+    float hh = (r.bottom - r.top) / 2;
+    c.Fill(r, hh, on ? t.accent : Alpha(t.text, 0.22f + 0.08f * hv));
+    float x = on ? r.right - hh : r.left + hh, cy = (r.top + r.bottom) / 2;
+    c.Circle(x, cy + 0.5f, hh - 2, D2D1::ColorF(0, 0, 0, 0.12f));
+    c.Circle(x, cy, hh - 2.5f, D2D1::ColorF(1, 1, 1, 0.98f));
+}
+
+void ControlCenter::PaintMain(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes)
+{
+    const float modR = std::min(radius_, 22.f), colW = (kW - kGap) / 2;
+    const D2D1_RECT_F conn = D2D1::RectF(0, 0, colW, kTopH);
+    const D2D1_RECT_F batt = D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2);
+    const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
+    float y = kTopH + kGap;
+    D2D1_RECT_F bright{};
+    if (brightness_ >= 0) {
+        bright = D2D1::RectF(0, y, kW, y + kSliderH);
+        y = bright.bottom + kGap;
+    }
+    const D2D1_RECT_F sound = D2D1::RectF(0, y, kW, y + kSliderH);
+    for (D2D1_RECT_F r : {conn, batt, cast})
+        shapes.push_back({r, modR});
+    if (brightness_ >= 0)
+        shapes.push_back({bright, modR});
+    shapes.push_back({sound, modR});
+    if (c.panel)
+        for (const ShapeDip& s : shapes)
+            c.Fill(s.rect, s.radius, t.panel);
+
+    // Connections: a round switch and the state; the row opens its page.
+    auto row = [&](int i, const std::wstring& id, const wchar_t* glyph, const std::wstring& title, const std::wstring& sub, bool on, bool avail) {
+        const float rh = (kTopH - 16) / 2, y0 = conn.top + 8 + float(i) * rh, cy = y0 + rh / 2;
+        const std::wstring page = id + L"-page";
+        D2D1_RECT_F text = D2D1::RectF(conn.left + 6, y0 + 2, conn.right - 6, y0 + rh - 2);
+        float th = Hover(c, page, hover_ == page);
+        if (th > 0.001f || pressed_ == page)
+            c.Fill(text, 16, pressed_ == page ? t.press : Alpha(t.hover, th));
+        hits_.push_back({text, page});
+        D2D1_RECT_F disc = D2D1::RectF(conn.left + 14, cy - 18, conn.left + 50, cy + 18);
+        float dh = Hover(c, id, hover_ == id);
+        c.Circle((disc.left + disc.right) / 2, cy, 18, on ? t.accent : Alpha(t.text, 0.16f + 0.08f * dh));
         bool halo = c.halo;
         c.halo = false;
-        c.Glyph(!on ? L"\uEB55" : status_.wifi ? L"\uE701" : L"\uE839", disc, 16, on ? t.accentText : t.subtext);
+        c.Glyph(glyph, disc, 15, on ? D2D1::ColorF(1, 1, 1, 0.98f) : avail ? t.text : t.faint);
         c.halo = halo;
-    }
-    std::wstring title = !on ? L"未连接" : private_ ? (status_.wifi ? L"Wi-Fi" : L"有线网络") : status_.network;
-    std::wstring sub = !on ? L"选择下面的网络连接"
-                           : (status_.wifi ? L"Wi-Fi · 信号 " + std::to_wstring(status_.signal) + L"%" : L"有线网络") +
-                                 (status_.online ? L" · 可访问 Internet" : L" · 无 Internet");
-    c.Text(title.empty() ? L"已连接" : title, D2D1::RectF(64, 12, w - 60, 34), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(sub, D2D1::RectF(64, 33, w - 60, 52), 12, t.subtext);
-    D2D1_RECT_F rescan = D2D1::RectF(w - 52, 14, w - 16, 50);
-    float rh = Hover(c, L"rescan", hover_ == L"rescan");
-    c.Fill(rescan, 18, Alpha(pressed_ == L"rescan" ? t.press : t.hover, 0.4f + 0.6f * rh));
-    c.Glyph(scanning_ ? L"\uE895" : L"\uE72C", rescan, 14, t.text);
-    hits_.push_back({rescan, L"rescan"});
-    c.Line(kPad + 8, kHeader, w - kPad - 8, kHeader, t.divider);
+        if (avail)
+            hits_.push_back({disc, id});
+        c.Text(title, D2D1::RectF(disc.right + 10, cy - 18, conn.right - 10, cy), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(sub, D2D1::RectF(disc.right + 10, cy, conn.right - 10, cy + 18), 11.5f, t.subtext);
+    };
+    std::wstring wifiSub = radiosRead_ && !radios_.wifiPresent ? (status_.connected ? L"有线网络" : L"没有无线网卡")
+                           : radiosRead_ && !radios_.wifiOn ? L"已关闭"
+                           : status_.connected && status_.wifi ? (private_ ? std::wstring(L"已连接") : status_.network)
+                           : status_.connected ? L"有线网络" : L"未连接";
+    bool wifiOn = radiosRead_ ? radios_.wifiOn : status_.wifi && status_.connected;
+    row(0, L"wifi", L"\uE701", L"Wi-Fi", wifiSub, wifiOn, !radiosRead_ || radios_.wifiPresent);
+    int connected = int(std::count_if(devices_.begin(), devices_.end(), [](const BluetoothDevice& d) { return d.connected; }));
+    std::wstring btSub = !radiosRead_ ? L"…" : !radios_.btPresent ? L"不可用" : !radios_.btOn ? L"已关闭"
+                         : connected ? std::to_wstring(connected) + L" 台设备已连接" : L"已打开";
+    row(1, L"bt", L"\uE702", L"蓝牙", btSub, radios_.btOn, radios_.btPresent);
 
-    // The networks in range.
-    float y = kHeader;
-    if (networks_.empty()) {
-        std::wstring msg = scanning_ && !scanned_ ? L"正在搜索网络…" : scanned_ ? L"没有找到 Wi-Fi 网络" : L"正在搜索网络…";
-        c.Text(msg, D2D1::RectF(kPad, y, w - kPad, y + kRowH), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
-        y += kRowH;
+    // Battery: a small ring, the level and the state.
+    {
+        float bh = Hover(c, L"battery", hover_ == L"battery");
+        if (bh > 0.001f || pressed_ == L"battery")
+            c.Fill(batt, modR, pressed_ == L"battery" ? t.press : Alpha(t.hover, bh));
+        float cx = batt.left + 32, cy = (batt.top + batt.bottom) / 2;
+        if (status_.battery) {
+            int pct = std::clamp(status_.batteryPercent, 0, 100);
+            D2D1_COLOR_F level = status_.charging ? D2D1::ColorF(0x30D158) : pct <= 20 ? D2D1::ColorF(0xFF453A) : t.text;
+            c.Arc(cx, cy, 15, -90, 270, Alpha(t.text, 0.18f), 4);
+            c.Arc(cx, cy, 15, -90, -90 + 360.f * float(pct) / 100.f, level, 4);
+            if (status_.charging)
+                c.Glyph(L"\uE945", D2D1::RectF(cx - 12, cy - 12, cx + 12, cy + 12), 11, t.text);
+            std::wstring state = status_.charging ? (pct >= 100 ? L"已充满" : L"正在充电")
+                                 : status_.batteryMinutes >= 0
+                                     ? L"剩余 " + (status_.batteryMinutes >= 60 ? std::to_wstring(status_.batteryMinutes / 60) + L" 小时"
+                                                                                     : std::to_wstring(status_.batteryMinutes) + L" 分钟")
+                                     : std::wstring(L"使用电池");
+            c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(cx + 24, cy - 18, batt.right - 8, cy + 1), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            c.Text(state, D2D1::RectF(cx + 24, cy + 1, batt.right - 8, cy + 18), 11.5f, t.subtext);
+        } else {
+            c.Circle(cx, cy, 16, Alpha(t.text, 0.16f));
+            c.Glyph(L"\uE945", D2D1::RectF(cx - 14, cy - 14, cx + 14, cy + 14), 13, t.text);
+            c.Text(L"电源", D2D1::RectF(cx + 24, cy - 18, batt.right - 8, cy + 1), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            c.Text(L"已接通电源", D2D1::RectF(cx + 24, cy + 1, batt.right - 8, cy + 18), 11.5f, t.subtext);
+        }
+        hits_.push_back({batt, L"battery"});
     }
-    for (int i = 0; i < Rows() && i < int(networks_.size()); ++i) {
+    // Casting (Win+K), like macOS's screen mirroring.
+    {
+        float ch = Hover(c, L"cast", hover_ == L"cast");
+        if (ch > 0.001f || pressed_ == L"cast")
+            c.Fill(cast, modR, pressed_ == L"cast" ? t.press : Alpha(t.hover, ch));
+        float cx = cast.left + 32, cy = (cast.top + cast.bottom) / 2;
+        c.Circle(cx, cy, 16, Alpha(t.text, 0.16f));
+        c.Glyph(L"\uE7F4", D2D1::RectF(cx - 14, cy - 14, cx + 14, cy + 14), 13, t.text);
+        c.Text(L"投屏", D2D1::RectF(cx + 24, cy - 18, cast.right - 8, cy + 1), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(L"无线显示器", D2D1::RectF(cx + 24, cy + 1, cast.right - 8, cy + 18), 11.5f, t.subtext);
+        hits_.push_back({cast, L"cast"});
+    }
+    if (brightness_ >= 0)
+        PaintSlider(c, t, bright, L"bright", L"显示器", L"\uE706", brightness_, false, std::to_wstring(brightness_) + L"%", brightTrack_);
+    std::wstring level = !status_.audio ? L"没有播放设备" : status_.muted ? L"静音" : std::to_wstring(status_.volume) + L"%";
+    const wchar_t* g = !status_.audio || status_.muted ? L"\uE74F" : status_.volume < 34 ? L"\uE993" : status_.volume < 67 ? L"\uE994" : L"\uE995";
+    PaintSlider(c, t, sound, L"slider", L"声音", g, status_.audio ? status_.volume : 0, status_.muted, level, volumeTrack_);
+}
+
+void ControlCenter::PaintSlider(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& id, const std::wstring& title, const std::wstring& glyph,
+                                int value, bool dim, const std::wstring& right, D2D1_RECT_F& track)
+{
+    c.Text(title, D2D1::RectF(card.left + kPad, card.top + 8, card.right - 130, card.top + 28), 12.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(right, D2D1::RectF(card.right - 130, card.top + 8, card.right - kPad, card.top + 28), 11.5f, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 2);
+    // A wide pill filled from the left, as on macOS, the symbol at its start.
+    track = D2D1::RectF(card.left + kPad, card.top + 34, card.right - kPad, card.top + 58);
+    const float th = track.bottom - track.top, r = th / 2;
+    float hv = Hover(c, id, hover_ == id || dragging_ == id);
+    c.Fill(track, r, Alpha(t.text, 0.14f + 0.04f * hv));
+    float k = float(std::clamp(value, 0, 100)) / 100.f;
+    D2D1_RECT_F fill = D2D1::RectF(track.left, track.top, track.left + th + (track.right - track.left - th) * k, track.bottom);
+    c.Fill(fill, r, dim ? Alpha(t.text, 0.45f) : Alpha(t.text, 0.9f));
+    bool halo = c.halo;
+    c.halo = false;
+    // The symbol sits on the fill: the glass's side of the ink.
+    D2D1_COLOR_F onFill = t.light ? D2D1::ColorF(1, 1, 1, 0.97f) : D2D1::ColorF(0.07f, 0.07f, 0.09f, 0.97f);
+    D2D1_RECT_F g = D2D1::RectF(track.left + 2, track.top, track.left + th + 2, track.bottom);
+    c.Glyph(glyph, g, 11, onFill);
+    c.halo = halo;
+    if (id == L"slider")
+        hits_.push_back({D2D1::RectF(g.left - 2, track.top - 4, g.right, track.bottom + 4), L"mute"});
+    hits_.push_back({D2D1::RectF(track.left - 4, track.top - 8, track.right + 4, track.bottom + 8), id});
+}
+
+float ControlCenter::PaintHeader(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& title, bool on, const std::wstring& toggleId)
+{
+    const float cy = card.top + kHeader / 2;
+    D2D1_RECT_F back = D2D1::RectF(card.left + 12, cy - 16, card.left + 44, cy + 16);
+    float bh = Hover(c, L"back", hover_ == L"back");
+    c.Fill(back, 16, pressed_ == L"back" ? t.press : Alpha(t.hover, 0.5f + 0.5f * bh));
+    c.Glyph(L"\uE76B", back, 11, t.text);
+    hits_.push_back({back, L"back"});
+    c.Text(title, D2D1::RectF(back.right + 10, cy - 12, card.right - 120, cy + 12), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    D2D1_RECT_F sw = D2D1::RectF(card.right - kPad - 6 - 44, cy - 13, card.right - kPad - 6, cy + 13);
+    Switch(c, t, sw, on, Hover(c, toggleId, hover_ == toggleId));
+    hits_.push_back({sw, toggleId});
+    c.Line(card.left + kPad + 4, card.top + kHeader, card.right - kPad - 4, card.top + kHeader, t.divider);
+    return sw.left;
+}
+
+void ControlCenter::PaintWifi(Canvas& c, const Theme& t, D2D1_RECT_F card)
+{
+    const float w = card.right - card.left;
+    float swLeft = PaintHeader(c, t, card, L"Wi-Fi", radios_.wifiOn, L"wifi");
+    if (radios_.wifiOn) {
+        D2D1_RECT_F rescan = D2D1::RectF(swLeft - 42, card.top + kHeader / 2 - 15, swLeft - 12, card.top + kHeader / 2 + 15);
+        float rh = Hover(c, L"rescan", hover_ == L"rescan");
+        if (rh > 0.001f)
+            c.Fill(rescan, 15, Alpha(t.hover, rh));
+        c.Glyph(scanning_ ? L"\uE895" : L"\uE72C", rescan, 12, t.subtext);
+        hits_.push_back({rescan, L"rescan"});
+    }
+    float y = card.top + kHeader;
+    auto message = [&](const wchar_t* text) {
+        c.Text(text, D2D1::RectF(kPad, y, w - kPad, y + kRowH), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        y += kRowH;
+    };
+    const bool on = !radiosRead_ || radios_.wifiOn;
+    if (!on)
+        message(L"Wi-Fi 已关闭");
+    else if (networks_.empty())
+        message(scanned_ ? L"没有找到 Wi-Fi 网络" : L"正在搜索网络…");
+    for (int i = 0; on && i < kMaxRows && i < int(networks_.size()); ++i) {
         const WifiNetwork& n = networks_[size_t(i)];
         D2D1_RECT_F row = D2D1::RectF(kPad - 4, y + 2, w - kPad + 4, y + kRowH - 2);
         std::wstring id = L"net:" + std::to_wstring(i);
@@ -197,9 +433,8 @@ void ControlCenter::PaintNetwork(Canvas& c, const Theme& t, D2D1_RECT_F card)
         std::wstring ssid = private_ ? L"Wi-Fi " + std::to_wstring(i + 1) : n.ssid;
         c.Text(ssid, D2D1::RectF(row.left + 44, row.top, row.right - 110, row.bottom), 14, t.text, n.connected ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
         float right = row.right - 12;
-        if (n.secured) {
+        if (n.secured)
             c.Glyph(L"\uE72E", D2D1::RectF(row.right - 112, row.top, row.right - 92, row.bottom), 11, t.faint);
-        }
         if (n.connected) {
             if (hv > 0.05f) {
                 std::wstring label = L"断开";
@@ -220,85 +455,71 @@ void ControlCenter::PaintNetwork(Canvas& c, const Theme& t, D2D1_RECT_F card)
         hits_.push_back({row, id});
         y += kRowH;
     }
-
-    // Footer: the system's pages.
-    c.Line(kPad + 8, y + 2, w - kPad - 8, y + 2, t.divider);
+    c.Line(kPad + 4, y + 2, w - kPad - 4, y + 2, t.divider);
     auto link = [&](const std::wstring& id, const std::wstring& label, float left, float right, int align) {
-        D2D1_RECT_F b = D2D1::RectF(left, y + 8, right, y + kFooter - 2);
+        D2D1_RECT_F b = D2D1::RectF(left, y + 9, right, y + kFooter - 3);
         float hv = Hover(c, id, hover_ == id);
         if (hv > 0.001f)
             c.Fill(b, (b.bottom - b.top) / 2, Alpha(t.hover, hv));
         c.Text(label, D2D1::RectF(b.left + 12, b.top, b.right - 12, b.bottom), 12.5f, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, align);
         hits_.push_back({b, id});
     };
-    link(L"netsettings", L"网络和 Internet 设置", kPad, w / 2 + 20, 0);
-    link(L"netlist", L"更多 Wi-Fi 网络", w / 2 + 28, w - kPad, 2);
+    link(L"netsettings", L"网络和 Internet 设置", kPad - 4, w / 2 + 20, 0);
+    link(L"netlist", L"更多 Wi-Fi 网络", w / 2 + 28, w - kPad + 4, 2);
 }
 
-void ControlCenter::PaintVolume(Canvas& c, const Theme& t, D2D1_RECT_F cap)
+void ControlCenter::PaintBluetooth(Canvas& c, const Theme& t, D2D1_RECT_F card)
 {
-    const float h = cap.bottom - cap.top, cy = (cap.top + cap.bottom) / 2, bh = std::min(44.f, h - 12);
-    const float edge = (h - bh) / 2;
-    D2D1_RECT_F mute = D2D1::RectF(cap.left + edge, cy - bh / 2, cap.left + edge + bh, cy + bh / 2);
-    float mh = Hover(c, L"mute", hover_ == L"mute");
-    if (mh > 0.001f || status_.muted)
-        c.Fill(mute, bh / 2, Alpha(status_.muted ? t.press : t.hover, std::max(mh, status_.muted ? 1.f : 0.f)));
-    const wchar_t* g = !status_.audio ? L"\uE74F" : status_.muted ? L"\uE74F" : status_.volume < 34 ? L"\uE993" : status_.volume < 67 ? L"\uE994" : L"\uE995";
-    c.Glyph(g, mute, 16, status_.audio ? t.text : t.faint);
-    hits_.push_back({mute, L"mute"});
-
-    std::wstring pct = !status_.audio ? L"" : status_.muted ? L"静音" : std::to_wstring(status_.volume) + L"%";
-    D2D1_RECT_F label = D2D1::RectF(cap.right - edge - 56, cap.top, cap.right - edge - 8, cap.bottom);
-    track_ = D2D1::RectF(mute.right + 14, cy - 3, label.left - 10, cy + 3);
-    if (!status_.audio) {
-        c.Text(L"没有播放设备", D2D1::RectF(track_.left, cap.top, cap.right - edge, cap.bottom), 13, t.subtext);
-        return;
+    const float w = card.right - card.left;
+    PaintHeader(c, t, card, L"蓝牙", radios_.btOn, L"bt");
+    float y = card.top + kHeader;
+    auto message = [&](const wchar_t* text) {
+        c.Text(text, D2D1::RectF(kPad, y, w - kPad, y + kRowH), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        y += kRowH;
+    };
+    if (radiosRead_ && !radios_.btPresent)
+        message(L"这台电脑没有蓝牙");
+    else if (!radios_.btOn)
+        message(L"蓝牙已关闭");
+    else if (devices_.empty())
+        message(devicesRead_ ? L"没有已配对的设备" : L"正在读取设备…");
+    for (int i = 0; radios_.btOn && i < kMaxRows && i < int(devices_.size()); ++i) {
+        const BluetoothDevice& d = devices_[size_t(i)];
+        D2D1_RECT_F row = D2D1::RectF(kPad - 4, y + 2, w - kPad + 4, y + kRowH - 2);
+        std::wstring id = L"bt:" + std::to_wstring(i);
+        float hv = Hover(c, id, hover_ == id);
+        if (hv > 0.001f)
+            c.Fill(row, (row.bottom - row.top) / 2, Alpha(pressed_ == id ? t.press : t.hover, hv));
+        float cy = (row.top + row.bottom) / 2;
+        D2D1_RECT_F disc = D2D1::RectF(row.left + 8, cy - 14, row.left + 36, cy + 14);
+        c.Circle((disc.left + disc.right) / 2, cy, 14, d.connected ? t.accent : Alpha(t.text, 0.14f));
+        bool halo = c.halo;
+        c.halo = false;
+        c.Glyph(L"\uE702", disc, 12, d.connected ? D2D1::ColorF(1, 1, 1, 0.98f) : t.text);
+        c.halo = halo;
+        std::wstring name = private_ ? L"蓝牙设备 " + std::to_wstring(i + 1) : d.name;
+        c.Text(name, D2D1::RectF(disc.right + 10, row.top, row.right - 80, row.bottom), 13.5f, t.text,
+               d.connected ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
+        c.Text(d.connected ? L"已连接" : L"未连接", D2D1::RectF(row.right - 80, row.top, row.right - 12, row.bottom), 12,
+               d.connected ? t.accent : t.faint, d.connected ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, 2);
+        hits_.push_back({row, id});
+        y += kRowH;
     }
-    float k = float(status_.volume) / 100.f, x = track_.left + (track_.right - track_.left) * k;
-    float sh = Hover(c, L"slider", hover_ == L"slider" || dragging_);
-    c.Fill(track_, 3, Alpha(t.text, 0.18f));
-    c.Fill(D2D1::RectF(track_.left, track_.top, x, track_.bottom), 3, status_.muted ? Alpha(t.text, 0.4f) : t.accent);
-    float knob = 8 + 2 * sh;
-    c.Circle(x, cy, knob + 1, Alpha(D2D1::ColorF(0, 0, 0), 0.18f));
-    c.Circle(x, cy, knob, D2D1::ColorF(1, 1, 1, 0.98f));
-    c.Text(pct, label, 13, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
-    hits_.push_back({D2D1::RectF(track_.left - 10, cap.top + 6, track_.right + 10, cap.bottom - 6), L"slider"});
-}
-
-void ControlCenter::PaintBattery(Canvas& c, const Theme& t, D2D1_RECT_F cap)
-{
-    const float h = cap.bottom - cap.top, cy = (cap.top + cap.bottom) / 2;
-    float hv = Hover(c, L"battery", hover_ == L"battery");
+    c.Line(kPad + 4, y + 2, w - kPad - 4, y + 2, t.divider);
+    D2D1_RECT_F b = D2D1::RectF(kPad - 4, y + 9, w / 2 + 40, y + kFooter - 3);
+    float hv = Hover(c, L"btsettings", hover_ == L"btsettings");
     if (hv > 0.001f)
-        c.Fill(D2D1::RectF(cap.left + 6, cap.top + 6, cap.right - 6, cap.bottom - 6), (h - 12) / 2, Alpha(t.hover, hv));
-    // The battery, drawn like the bar's icon, larger.
-    const float bx = cap.left + 22, bw = 34, bh = 17;
-    D2D1_RECT_F body = D2D1::RectF(bx, cy - bh / 2, bx + bw, cy + bh / 2);
-    c.Stroke(body, 5, Alpha(t.text, 0.5f), 1.4f);
-    c.Fill(D2D1::RectF(body.right + 1.5f, cy - 3.5f, body.right + 4, cy + 3.5f), 1.2f, Alpha(t.text, 0.5f));
-    int pct = std::clamp(status_.batteryPercent, 0, 100);
-    D2D1_RECT_F fill = D2D1::RectF(body.left + 3, body.top + 3, body.left + 3 + (bw - 6) * float(pct) / 100.f, body.bottom - 3);
-    c.Fill(fill, 2.5f, status_.charging ? D2D1::ColorF(0x30D158) : pct <= 20 ? D2D1::ColorF(0xFF453A) : t.text);
-    c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(bx + bw + 16, cap.top, bx + bw + 76, cap.bottom), 15, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    std::wstring state;
-    if (status_.charging)
-        state = pct >= 100 ? L"已充满 · 已接通电源" : L"正在充电";
-    else if (status_.batteryMinutes >= 0)
-        state = L"剩余 " + (status_.batteryMinutes >= 60 ? std::to_wstring(status_.batteryMinutes / 60) + L" 小时 " : L"") +
-                std::to_wstring(status_.batteryMinutes % 60) + L" 分钟";
-    else
-        state = L"使用电池";
-    c.Text(state, D2D1::RectF(bx + bw + 78, cap.top, cap.right - 44, cap.bottom), 12.5f, t.subtext);
-    c.Glyph(L"\uE76C", D2D1::RectF(cap.right - 44, cap.top, cap.right - 16, cap.bottom), 11, t.faint);
-    hits_.push_back({cap, L"battery"});
+        c.Fill(b, (b.bottom - b.top) / 2, Alpha(t.hover, hv));
+    c.Text(L"蓝牙和其他设备设置", D2D1::RectF(b.left + 12, b.top, b.right - 12, b.bottom), 12.5f, t.subtext);
+    hits_.push_back({b, L"btsettings"});
 }
 
 std::wstring ControlCenter::HitAt(POINT pt) const
 {
     float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
-    // Small buttons first (the disconnect button sits on its row).
+    // Small controls first: they sit on larger rows.
     for (const Hit& h : hits_)
-        if (h.id == L"disconnect" && In(h.rect, x, y))
+        if ((h.id == L"disconnect" || h.id == L"mute" || h.id == L"wifi" || h.id == L"bt" || h.id == L"rescan") && In(h.rect, x, y))
             return h.id;
     for (const Hit& h : hits_)
         if (In(h.rect, x, y))
@@ -306,21 +527,50 @@ std::wstring ControlCenter::HitAt(POINT pt) const
     return {};
 }
 
-void ControlCenter::SetVolumeAt(float x)
+void ControlCenter::SetSliderAt(const std::wstring& id, float x)
 {
-    if (track_.right <= track_.left)
+    const D2D1_RECT_F& tr = id == L"bright" ? brightTrack_ : volumeTrack_;
+    if (tr.right <= tr.left)
         return;
-    int v = int(std::lround(std::clamp((x - track_.left) / (track_.right - track_.left), 0.f, 1.f) * 100));
-    SetVolume(v);
-    status_.volume = v;
-    if (v > 0)
-        status_.muted = false;
+    int v = int(std::lround(std::clamp((x - tr.left) / (tr.right - tr.left), 0.f, 1.f) * 100));
+    if (id == L"bright") {
+        brightness_ = v;
+        brightPending_ = v;
+        if (!brightBusy_) {
+            // WMI is slow: one worker at a time sets the latest value.
+            brightBusy_ = true;
+            HWND h = surface_.Hwnd();
+            OnWorker([h, v] {
+                SetBrightness(v);
+                PostMessageW(h, WM_CC_BRIGHT, WPARAM(v), 0);
+            });
+        }
+    } else {
+        SetVolume(v);
+        status_.volume = v;
+        if (v > 0)
+            status_.muted = false;
+    }
     surface_.Invalidate();
 }
 
 void ControlCenter::Activate(const std::wstring& id)
 {
-    if (id == L"rescan") {
+    if (id == L"wifi") {
+        if (radios_.wifiPresent)
+            SetRadioAsync(false, !radios_.wifiOn);
+    } else if (id == L"bt") {
+        if (radios_.btPresent)
+            SetRadioAsync(true, !radios_.btOn);
+    } else if (id == L"wifi-page") {
+        ShowPage(Page::Wifi);
+        Scan(true);
+    } else if (id == L"bt-page") {
+        ShowPage(Page::Bluetooth);
+        ReadRadios(true);
+    } else if (id == L"back") {
+        ShowPage(Page::Main);
+    } else if (id == L"rescan") {
         Scan(true);
         surface_.Invalidate();
     } else if (id == L"mute") {
@@ -329,6 +579,9 @@ void ControlCenter::Activate(const std::wstring& id)
         surface_.Invalidate();
         if (onChanged)
             onChanged();
+    } else if (id == L"cast") {
+        Close();
+        SendWinK();
     } else if (id == L"disconnect") {
         HWND h = surface_.Hwnd();
         std::thread([h] {
@@ -361,11 +614,14 @@ void ControlCenter::Activate(const std::wstring& id)
     } else if (id == L"netlist") {
         Close();
         OpenUri(L"ms-availablenetworks:");
+    } else if (id == L"btsettings" || id.rfind(L"bt:", 0) == 0) {
+        Close();
+        OpenUri(L"ms-settings:bluetooth");
     } else if (id == L"battery") {
         Close();
-        OpenUri(L"ms-settings:batterysaver");
+        OpenUri(status_.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep");
     }
-    Log(L"control: %s", id.rfind(L"net:", 0) == 0 ? L"connect" : id.c_str());
+    Log(L"control: %s", id.rfind(L"net:", 0) == 0 ? L"connect" : id.rfind(L"bt:", 0) == 0 ? L"device" : id.c_str());
 }
 
 void ControlCenter::TestClick(const std::wstring& id) { Activate(id); }
@@ -376,14 +632,16 @@ void ControlCenter::LogState() const
     const float s = surface_.Scale();
     std::wstring spots;
     for (const Hit& h : hits_)
-        if (h.id.rfind(L"net:", 0) != 0 || h.id == L"net:0")
+        if ((h.id.rfind(L"net:", 0) != 0 && h.id.rfind(L"bt:", 0) != 0) || h.id == L"net:0" || h.id == L"bt:0")
             spots += L" " + h.id + L"@" + std::to_wstring(int(float(r.left) + (h.rect.left + h.rect.right) / 2 * s)) + L"," +
                      std::to_wstring(int(float(r.top) + (h.rect.top + h.rect.bottom) / 2 * s));
     Log(L"control: spots%s", spots.c_str());
-    Log(L"control: state visible=%d connected=%d wifi=%d signal=%d networks=%zu scanning=%d volume=%d muted=%d battery=%d percent=%d shapes=%zu "
-        L"rect=%ld,%ld,%ld,%ld",
-        surface_.Visible() ? 1 : 0, status_.connected ? 1 : 0, status_.wifi ? 1 : 0, status_.signal, networks_.size(), scanning_ ? 1 : 0, status_.volume,
-        status_.muted ? 1 : 0, status_.battery ? 1 : 0, status_.batteryPercent, surface_.Shapes(), r.left, r.top, r.right, r.bottom);
+    const wchar_t* page = page_ == Page::Main ? L"main" : page_ == Page::Wifi ? L"wifi" : L"bluetooth";
+    Log(L"control: state visible=%d page=%s connected=%d wifi=%d wifiRadio=%d signal=%d networks=%zu scanning=%d bluetooth=%d btOn=%d devices=%zu "
+        L"brightness=%d volume=%d muted=%d battery=%d percent=%d shapes=%zu rect=%ld,%ld,%ld,%ld",
+        surface_.Visible() ? 1 : 0, page, status_.connected ? 1 : 0, status_.wifi ? 1 : 0, radios_.wifiOn ? 1 : 0, status_.signal, networks_.size(),
+        scanning_ ? 1 : 0, radios_.btPresent ? 1 : 0, radios_.btOn ? 1 : 0, devices_.size(), brightness_, status_.volume, status_.muted ? 1 : 0,
+        status_.battery ? 1 : 0, status_.batteryPercent, surface_.Shapes(), r.left, r.top, r.right, r.bottom);
 }
 
 bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
@@ -397,26 +655,49 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_TIMER:
         if (w == kStatusTimer) {
             SystemStatus s = QuerySystemStatus();
-            if (!dragging_ && !(s == status_)) {
-                bool resize = s.battery != status_.battery;
+            if (dragging_.empty() && !(s == status_)) {
                 status_ = s;
-                if (resize)
-                    Place();
                 surface_.Invalidate();
             }
+            ReadRadios(page_ == Page::Bluetooth);
             return true;
         }
         return false;
+    case WM_CC_RADIOS: {
+        std::unique_ptr<RadioRead> r(reinterpret_cast<RadioRead*>(l));
+        float before = Size().height;
+        radios_ = r->radios;
+        radiosRead_ = true;
+        if (r->devicesRead) {
+            devices_ = std::move(r->devices);
+            devicesRead_ = true;
+        }
+        if (r->brightness != -3 && dragging_ != L"bright" && !brightBusy_)
+            brightness_ = r->brightness;
+        if (Size().height != before && surface_.Visible())
+            Place();
+        surface_.Invalidate();
+        return true;
+    }
+    case WM_CC_BRIGHT:
+        brightBusy_ = false;
+        if (brightPending_ >= 0 && brightPending_ != int(w)) {
+            int v = brightPending_;
+            SetSliderAt(L"bright", brightTrack_.left + (brightTrack_.right - brightTrack_.left) * float(v) / 100.f);
+        } else {
+            brightPending_ = -1;
+        }
+        return true;
     case WM_WIFI_LIST: {
         std::unique_ptr<std::vector<WifiNetwork>> list(reinterpret_cast<std::vector<WifiNetwork>*>(l));
         unsigned gen = unsigned(w);
         if (gen > acceptedGen_) {
             acceptedGen_ = gen;
-            size_t rows = size_t(Rows());
+            float before = Size().height;
             networks_ = std::move(*list);
             scanned_ = true;
             scanning_ = gen < scanGen_;
-            if (size_t(Rows()) != rows && surface_.Visible())
+            if (Size().height != before && surface_.Visible())
                 Place();
             surface_.Invalidate();
         }
@@ -435,8 +716,8 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
         }
-        if (dragging_) {
-            SetVolumeAt(float(pt.x) / surface_.Scale());
+        if (!dragging_.empty()) {
+            SetSliderAt(dragging_, float(pt.x) / surface_.Scale());
             return true;
         }
         std::wstring h = HitAt(pt);
@@ -448,7 +729,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     }
     case WM_MOUSELEAVE:
         tracking_ = false;
-        if (!dragging_) {
+        if (dragging_.empty()) {
             hover_.clear();
             pressed_.clear();
         }
@@ -456,10 +737,10 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     case WM_LBUTTONDOWN:
         pressed_ = HitAt(pt);
-        if (pressed_ == L"slider" && status_.audio) {
-            dragging_ = true;
+        if ((pressed_ == L"slider" && status_.audio) || pressed_ == L"bright") {
+            dragging_ = pressed_;
             SetCapture(surface_.Hwnd());
-            SetVolumeAt(float(pt.x) / surface_.Scale());
+            SetSliderAt(dragging_, float(pt.x) / surface_.Scale());
         } else if (!pressed_.empty()) {
             float s = surface_.Scale();
             surface_.Ripple(float(pt.x) / s, float(pt.y) / s);
@@ -467,11 +748,12 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         return true;
     case WM_LBUTTONUP: {
-        if (dragging_) {
-            dragging_ = false;
+        if (!dragging_.empty()) {
+            bool volume = dragging_ == L"slider";
+            dragging_.clear();
             ReleaseCapture();
             pressed_.clear();
-            if (onChanged)
+            if (volume && onChanged)
                 onChanged();
             surface_.Invalidate();
             return true;
@@ -486,7 +768,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     }
     case WM_MOUSEWHEEL: {
         int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
-        if (notches && status_.audio) {
+        if (notches && status_.audio && page_ == Page::Main) {
             status_.volume = AdjustVolume(2 * notches);
             if (notches > 0)
                 status_.muted = false;
@@ -497,8 +779,11 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return true;
     }
     case WM_KEYDOWN:
-        if (w == VK_ESCAPE) {
-            Close();
+        if (w == VK_ESCAPE || (w == VK_BACK && page_ != Page::Main)) {
+            if (page_ != Page::Main)
+                ShowPage(Page::Main);
+            else
+                Close();
             return true;
         }
         return false;

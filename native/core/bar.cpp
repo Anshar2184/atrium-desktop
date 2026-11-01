@@ -685,8 +685,8 @@ void Bar::Relayout()
 
     // Left to right: [logo] [apps ... (overflow)] | [tray] [status] [clock] [bell].
     // The logo, the overflow entry, the tray and the bell use the same plates
-    // as the apps; the status icon (Wi-Fi with battery or volume) a wider one.
-    const int statusW = std::max(plate, int(std::lround(float(icon) * 1.75f)) + Px(12, s));
+    // as the apps; so does the status ring (battery or volume, Wi-Fi).
+    const int statusW = plate; // the status ring is round
     const int total = int(items_.size());
     int n = total;
     bool more = false;

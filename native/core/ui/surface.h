@@ -83,6 +83,8 @@ public:
     void Stroke(D2D1_RECT_F r, float radius, D2D1_COLOR_F c, float width = 1);
     void Line(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width = 1);
     void Circle(float cx, float cy, float radius, D2D1_COLOR_F c);
+    // A circular arc with round ends, clockwise from a0 to a1 (degrees from the right, y down).
+    void Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLOR_F c, float width);
     // Text in `r`; align: 0 left, 1 centre, 2 right. One line, trimmed with an ellipsis unless wrap.
     void Text(const std::wstring& s, D2D1_RECT_F r, float size, D2D1_COLOR_F c, DWRITE_FONT_WEIGHT w = DWRITE_FONT_WEIGHT_NORMAL, int align = 0,
               bool wrap = false);
