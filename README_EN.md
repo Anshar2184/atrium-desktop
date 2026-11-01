@@ -18,11 +18,16 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
 </div>
 
 > [!NOTE]
-> **v0.5 development build.** A C++ glass taskbar that coexists with the Windows taskbar: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), a clock, Atrium's own notifications, and a settings app with a live preview. The start menu and every notification card are exactly the bar's liquid glass, and the icons swell like the macOS Dock under the pointer. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
+> **v0.6 development build.** A C++ glass taskbar that coexists with the Windows taskbar: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), Atrium's own tray panel, one combined Wi-Fi / battery status icon (it opens a control centre: network, volume, battery), a clock, and Atrium notifications that also show Windows notifications and WeChat messages, plus a settings app with a live preview. Every popup is exactly the bar's liquid glass, and the icons swell like the macOS Dock under the pointer. It never hides or replaces the Windows taskbar; full replacement waits until recovery and tray handling pass on stable Windows 11.
 
 <p align="center">
   <img src="docs/images/v04-magnify.png" alt="v0.4 taskbar: magnification" width="80%"><br>
   <sub>The icon under the pointer grows, its neighbours less and less, and the glass stretches with them; running apps have a small dot (test backdrop)</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/v06-control.png" alt="Atrium control centre" width="60%"><br>
+  <sub>The bar's right side: the tray entry, one status icon for Wi-Fi and battery (the level written inside the battery), the clock, notifications. The status icon opens the control centre: Wi-Fi networks in range (saved ones connect directly), a volume slider, the battery (network names hidden for the picture)</sub>
 </p>
 
 <p align="center">
@@ -104,6 +109,7 @@ All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc
 
 | Area | Result |
 |---|---|
+| v0.6 tray, control centre and notification sources | ✅ Atrium's own tray panel (the system tray's icons, left and right clicks forwarded to the apps themselves), the status icon and control centre (Wi-Fi, volume, battery), Windows notifications shown as cards by default, WeChat messages (its chat list, experimental); start menu pins complete even without some environment variables; dark text over light backgrounds: tray 8, start menu 13, notifications 16 checks and the other regression tests pass |
 | v0.5 start menu and notifications | ✅ the start menu shows the Windows start menu's pins (separate from the bar's), search only, pages; the status capsule shaped like the bar; each notification card its own glass, stacked upwards; popups exactly on the bar's material: start menu 13, notifications 15, motion 7 checks and the other regression tests pass |
 | v0.4 motion, one material, stacking | ✅ magnification, launch bounce, press ripple, popups on the bar's glass: 7 checks; back on top after a topmost window covers it, hidden for full-screen apps, kept for maximized windows, below a revealed Windows taskbar: 5 checks; all v0.3 tests still pass |
 | v0.3 taskbar, start menu and notifications | ✅ coexistence mode; real mouse and keyboard tests: taskbar 11, start menu 11, notifications 14 checks pass; settings end to end 14 and protocol 7 checks pass |
