@@ -25,7 +25,13 @@ try {
     cmake --build native/build/win-x64 --config $Configuration
     if ($LASTEXITCODE) { throw "native build failed" }
 
-    if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+    if (Test-Path $dist) {
+        # A running Atrium (or its settings window) locks files: stop before deleting anything.
+        $full = (Resolve-Path $dist).Path
+        $busy = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($full, [StringComparison]::OrdinalIgnoreCase) })
+        if ($busy) { throw "dist/Atrium is in use by $(($busy | ForEach-Object { "$($_.Name) ($($_.Id))" }) -join ', '); close it first" }
+        Remove-Item -Recurse -Force $dist
+    }
     New-Item -ItemType Directory -Force $dist | Out-Null
     dotnet publish settings/Atrium.Settings/Atrium.Settings.csproj -c $Configuration -o (Join-Path $dist "Settings")
     if ($LASTEXITCODE) { throw "settings publish failed" }
