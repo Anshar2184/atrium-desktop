@@ -718,6 +718,12 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
         }
+        if (dragging_.empty() && pressed_ == L"mute" && status_.audio && (w & MK_LBUTTON) &&
+            std::abs(pt.x - downX_) > int(4 * surface_.Scale())) {
+            // The symbol is part of the slider: a press there that moves drags it.
+            dragging_ = L"slider";
+            pressed_ = dragging_;
+        }
         if (!dragging_.empty()) {
             SetSliderAt(dragging_, float(pt.x) / surface_.Scale());
             return true;
@@ -743,6 +749,10 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             dragging_ = pressed_;
             SetCapture(surface_.Hwnd());
             SetSliderAt(dragging_, float(pt.x) / surface_.Scale());
+        } else if (pressed_ == L"mute") {
+            // Mute on release in place; a drag from here moves the slider.
+            downX_ = pt.x;
+            SetCapture(surface_.Hwnd());
         } else if (!pressed_.empty()) {
             float s = surface_.Scale();
             surface_.Ripple(float(pt.x) / s, float(pt.y) / s);
@@ -760,6 +770,8 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             surface_.Invalidate();
             return true;
         }
+        if (GetCapture() == surface_.Hwnd())
+            ReleaseCapture();
         std::wstring h = HitAt(pt);
         bool same = !h.empty() && h == pressed_;
         pressed_.clear();

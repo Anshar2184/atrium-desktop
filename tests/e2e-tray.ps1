@@ -4,7 +4,7 @@
   and the status icon on the bar, the panel listing a test tray icon (a
   WinForms NotifyIcon in a child process), a left and a right click on it in
   the panel reaching that program as its own tray clicks, the control centre's
-  pieces of glass and its Bluetooth page, the wheel over the status ring and the volume slider, and
+  pieces of glass and its Bluetooth page, the wheel over the status icon and the volume slider (dragged from its symbol too), and
   a notice from that program opening it through its tray icon, and
   the calendar from the clock (a month with lunar dates, turning the page).
 
@@ -102,7 +102,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     Start-Sleep 4
 
     $tray = ItemRect "#tray"; $status = ItemRect "#status"
-    Check "entries-on-bar" (($status[2] - $status[0]) -gt 40 -and ($tray[2] - $tray[0]) -gt 40 -and $tray[2] -le $status[0]) "tray entry $($tray -join ','), status ring $($status -join ',') (right of the tray entry)"
+    Check "entries-on-bar" (($status[2] - $status[0]) -gt 40 -and ($tray[2] - $tray[0]) -gt 40 -and $tray[2] -le $status[0]) "tray entry $($tray -join ','), status icon $($status -join ',') (right of the tray entry)"
 
     $p = Centre $tray; ClickAt $p[0] $p[1]; Start-Sleep 1
     $st = TrayState
@@ -176,6 +176,15 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     ClickAt $slider[0] $slider[1]; Start-Sleep 0.5
     $v = [int](Field (ControlState) "volume")
     Check "slider-sets-volume" ($v -ge 35 -and $v -le 65) "a click in the middle of the slider: volume $volume0 -> $v"
+    # A press on the slider's symbol that moves drags the slider (a press in place mutes).
+    C control-volume 10; C control-state
+    $mute = Spot "control: spots" "mute"; $slider = Spot "control: spots" "slider"
+    [U]::SetCursorPos($mute[0], $mute[1]) | Out-Null; Start-Sleep -Milliseconds 150
+    [U]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80
+    for ($i = 1; $i -le 10; $i++) { [U]::SetCursorPos([int]($mute[0] + ($slider[0] - $mute[0]) * $i / 10), $mute[1]) | Out-Null; Start-Sleep -Milliseconds 30 }
+    [U]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 500
+    $sd = ControlState
+    Check "slider-drags-from-symbol" ([int](Field $sd "volume") -ge 35 -and [int](Field $sd "volume") -le 65 -and (Field $sd "muted") -eq "0") "a drag from the symbol to the middle: volume=$(Field $sd 'volume') muted=$(Field $sd 'muted')"
     C control-volume $volume0
     Key 0x1B
 

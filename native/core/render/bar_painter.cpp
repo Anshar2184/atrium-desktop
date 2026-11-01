@@ -438,92 +438,55 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     }
 }
 
-// The status icon, after the iPhone's ring: a ring open at the top for the
-// battery level written there and at the bottom for four dots of Wi-Fi
-// signal, the level running round it from the bottom left; the connection in
-// the middle. Without a battery the ring and the number are the volume.
+// The status icon: the connection alone, in the bar's ink like every other
+// symbol on it. Wi-Fi is a fan of three arcs over a dot, as many lit as the
+// signal is strong; a plug when wired; the fan dim when offline. The battery
+// and the volume are in the control centre.
 void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
                             bool darkInk)
 {
     (void)darkInk;
     const float h = std::min(r.right - r.left, r.bottom - r.top), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
-    const float R = h * 0.44f, stroke = std::max(1.5f, h * 0.085f);
     auto dim = [&](float a) {
         D2D1_COLOR_F c = ink;
         c.a *= a;
         return c;
     };
+    if (st.connected && !st.wifi) {
+        if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+            brush->SetColor(ink);
+            d2d->DrawText(L"\uE839", 1, f, r, brush);
+        }
+        return;
+    }
     winrt::com_ptr<ID2D1Factory> factory;
     d2d->GetFactory(factory.put());
     winrt::com_ptr<ID2D1StrokeStyle> round;
     factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
-    constexpr float kPi = 3.14159265f, kDeg = kPi / 180.f;
+    constexpr float kDeg = 3.14159265f / 180.f;
     auto arc = [&](float ox, float oy, float rad, float a0, float a1, D2D1_COLOR_F c, float width) {
-        if (a1 - a0 < 0.5f)
-            return;
         winrt::com_ptr<ID2D1PathGeometry> g;
         winrt::com_ptr<ID2D1GeometrySink> sink;
         if (FAILED(factory->CreatePathGeometry(g.put())) || FAILED(g->Open(sink.put())))
             return;
         sink->BeginFigure(D2D1::Point2F(ox + rad * std::cos(a0 * kDeg), oy + rad * std::sin(a0 * kDeg)), D2D1_FIGURE_BEGIN_HOLLOW);
         sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(ox + rad * std::cos(a1 * kDeg), oy + rad * std::sin(a1 * kDeg)), D2D1::SizeF(rad, rad), 0,
-                                      D2D1_SWEEP_DIRECTION_CLOCKWISE, a1 - a0 > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
+                                      D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
         sink->EndFigure(D2D1_FIGURE_END_OPEN);
         sink->Close();
         brush->SetColor(c);
         d2d->DrawGeometry(g.get(), brush, width, round.get());
     };
-
-    // The ring: two arcs (angles clockwise from the right, y down), the gaps at the bottom (90) and the top (270).
-    const float bottomGap = 34, topGap = 30;
-    const float segs[2][2] = {{90 + bottomGap, 270 - topGap}, {270 + topGap, 450 - bottomGap}};
-    const float sweep = (segs[0][1] - segs[0][0]) + (segs[1][1] - segs[1][0]);
-    const bool showBattery = st.battery;
-    const int level = showBattery ? std::clamp(st.batteryPercent, 0, 100) : st.audio ? (st.muted ? 0 : std::clamp(st.volume, 0, 100)) : 0;
-    D2D1_COLOR_F fillColor = !showBattery ? ink : st.charging ? D2D1::ColorF(0x30D158) : level <= 20 ? D2D1::ColorF(0xFF453A) : ink;
-    float left = sweep * float(level) / 100.f;
-    for (const auto& sg : segs) {
-        arc(cx, cy, R, sg[0], sg[1], dim(0.26f), stroke);
-        float span = std::min(left, sg[1] - sg[0]);
-        if (span > 0)
-            arc(cx, cy, R, sg[0], sg[0] + span, fillColor, stroke);
-        left -= span;
-    }
-
-    // The number in the top gap.
-    if (showBattery || st.audio) {
-        std::wstring n = std::to_wstring(level);
-        if (IDWriteTextFormat* f = Format(h * 0.27f, DWRITE_FONT_WEIGHT_BOLD)) {
-            brush->SetColor(ink);
-            d2d->DrawText(n.c_str(), UINT32(n.size()), f, D2D1::RectF(cx - h * 0.4f, cy - R - h * 0.17f, cx + h * 0.4f, cy - R + h * 0.17f), brush);
-        }
-    }
-
-    // The connection in the middle: Wi-Fi arcs, a plug when wired, dim when offline.
-    const float gy = cy + h * 0.10f;
-    if (st.connected && !st.wifi) {
-        if (IDWriteTextFormat* f = Format(h * 0.36f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
-            brush->SetColor(ink);
-            d2d->DrawText(L"\uE839", 1, f, D2D1::RectF(cx - h * 0.3f, cy - h * 0.22f, cx + h * 0.3f, cy + h * 0.24f), brush);
-        }
-    } else {
-        D2D1_COLOR_F wc = st.connected ? ink : dim(0.35f);
-        const float ws = std::max(1.2f, h * 0.06f);
-        brush->SetColor(wc);
-        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, gy), ws * 0.9f, ws * 0.9f), brush);
-        for (int k = 1; k <= 2; ++k)
-            arc(cx, gy, h * (0.05f + 0.085f * float(k)), 225, 315, wc, ws);
-    }
-
-    // Four dots in the bottom gap: the Wi-Fi signal.
-    if (st.wifi || !st.connected) {
-        int lit = st.connected ? WifiBars(st.signal) : 0;
-        float dr = std::max(1.f, h * 0.04f), step = h * 0.13f, dy = cy + R * 0.92f;
-        for (int i = 0; i < 4; ++i) {
-            brush->SetColor(i < lit ? ink : dim(0.3f));
-            d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + (float(i) - 1.5f) * step, dy), dr, dr), brush);
-        }
-    }
+    // The fan's point sits low so that it looks centred: the arcs are wide
+    // at the top and the dot is small at the bottom.
+    const float oy = cy + h * 0.25f, stroke = std::max(1.5f, h * 0.085f);
+    const int lit = st.connected ? std::clamp(WifiBars(st.signal) - 1, 0, 3) : -1; // arcs lit; -1: offline
+    const D2D1_COLOR_F off = dim(lit < 0 ? 0.32f : 0.24f);
+    brush->SetColor(lit < 0 ? off : ink);
+    d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, oy - stroke * 0.3f), stroke * 0.85f, stroke * 0.85f), brush);
+    const float radii[3] = {h * 0.19f, h * 0.335f, h * 0.48f};
+    for (int k = 0; k < 3; ++k)
+        arc(cx, oy, radii[k], 225, 315, k < lit ? ink : off, stroke);
 }
 
 // The start entry: the Windows logo, redrawn as four panes with Windows 11's

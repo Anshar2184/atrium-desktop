@@ -82,6 +82,7 @@ private:
     std::vector<Hit> hits_;
     std::wstring hover_, pressed_, dragging_;
     bool tracking_ = false;
+    int downX_ = 0; // where a press on the volume's symbol began: moving off it drags the slider
     D2D1_RECT_F volumeTrack_{}, brightTrack_{}; // the sliders' tracks, DIP
     RECT anchor_{}, bar_{};
     float radius_ = 30, barH_ = 60;
