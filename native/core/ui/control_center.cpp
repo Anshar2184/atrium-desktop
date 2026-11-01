@@ -68,22 +68,11 @@ D2D1_SIZE_F ControlCenter::Size() const
 
 void ControlCenter::Place()
 {
-    HMONITOR mon = MonitorFromRect(&bar_, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(mon, &mi);
-    UINT dpi = 96, dpiY = 96;
-    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi, &dpiY);
-    float s = float(dpi) / 96.f;
-    D2D1_SIZE_F size = Size();
-    int w = int(std::lround(size.width * s)), h = int(std::lround(size.height * s)), gap = int(std::lround(12 * s));
-    int bottom = bar_.top - gap;
-    int cx = (anchor_.left + anchor_.right) / 2;
-    int left = std::max(int(mi.rcWork.left) + gap, std::min(cx - w / 2, int(mi.rcWork.right) - gap - w));
-    RECT r{left, bottom - h, left + w, bottom};
+    RECT r = PopupRect(bar_, Size(), PopupAlign::Right);
     if (surface_.Visible())
-        surface_.Move(r);
+        surface_.Move(r); // pops out of its entry on the bar
     else
-        surface_.Show(r, true, POINT{cx, bottom});
+        surface_.Show(r, true, POINT{(anchor_.left + anchor_.right) / 2, r.bottom});
 }
 
 void ControlCenter::Open(RECT anchor, RECT bar)

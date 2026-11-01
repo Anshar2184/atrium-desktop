@@ -50,6 +50,7 @@ private:
     float Hover(Canvas& c, const std::wstring& id, bool on);
     D2D1_SIZE_F Size() const; // content, DIP
     int Cols() const;
+    float Margin() const; // DIP: from the panel's edges to what is seen inside
     D2D1_RECT_F CellRect(size_t i) const; // icon i's cell, DIP
 
     Surface surface_;

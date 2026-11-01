@@ -728,12 +728,18 @@ void Bar::Relayout()
     // pointer); above, the magnified and hopping icons.
     const float range = float(pitch) * 2.3f;
     const int stretch = stretchFor(plate, gap);
-    const int insetX = inset + (stretch + 1) / 2 + (stretch ? Px(2, s) : 0);
+    // The window keeps the width of the widest bar the settings allow, and
+    // the bar sits centred in it: when apps come and go only the shape
+    // changes, so its width and the icons can glide instead of the window
+    // jumping to a new size.
+    const int roomW = std::max(barW, maxW);
+    const int side = inset + (stretch + 1) / 2 + (stretch ? Px(2, s) : 0);
+    const int insetX = side + (roomW - barW) / 2;
     const int lift = std::max(int(std::ceil(float(icon) * (mag - 1))), int(std::ceil(float(icon) * 0.55f)));
     const int rise = std::max(0, lift - (barH - icon) / 2 + Px(6, s));
     const int insetTop = std::max(inset, rise);
 
-    const int winW = barW + 2 * insetX, winH = barH + insetTop + inset;
+    const int winW = roomW + 2 * side, winH = barH + insetTop + inset;
     const int x = wa.left + (wa.right - wa.left - winW) / 2;
     const int y = wa.bottom - Px(st.margin, s) - barH - insetTop;
 
@@ -766,6 +772,7 @@ void Bar::Relayout()
     BarScene scene;
     scene.scale = s;
     scene.bar = D2D1::RectF(float(insetX), float(insetTop), float(insetX + barW), float(insetTop + barH));
+    scene.windowW = float(winW);
     scene.plateRadius = float(std::clamp(radius - v, Px(3, s), plate / 2));
     scene.hoverKey = dragging_ ? std::wstring() : scene_.hoverKey;
     scene.pressedKey = scene_.pressedKey;
@@ -1056,7 +1063,7 @@ void Bar::GuardStacking(const wchar_t* why)
         GetClassNameW(fg, fgCls, 64);
         // The pointer counts on the system taskbar outside the bar (the screen's
         // bottom edge reveals it): over the bar it is meant for the bar.
-        RECT ours{window_.left, window_.top, window_.right, bar.bottom};
+        RECT ours{bar.left, window_.top, bar.right, bar.bottom};
         usingTray = (PtInRect(&trayRect, cur) && !PtInRect(&ours, cur)) || fg == tray || wcscmp(fgCls, L"TopLevelWindowForOverflowXamlIsland") == 0 ||
                     wcscmp(fgCls, L"Shell_TrayWnd") == 0;
     }

@@ -15,6 +15,28 @@
 
 namespace atrium {
 
+float PopupScale(RECT bar)
+{
+    HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
+    UINT dpi = 96, dpiY = 96;
+    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi, &dpiY);
+    return float(dpi) / 96.f;
+}
+
+RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align)
+{
+    HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(mon, &mi);
+    const RECT& wa = mi.rcWork;
+    float s = PopupScale(bar);
+    int w = int(std::lround(sizeDip.width * s)), h = int(std::lround(sizeDip.height * s)), gap = int(std::lround(kPopupGapDip * s));
+    int bottom = int(bar.top) - gap;
+    int left = align == PopupAlign::Left ? int(bar.left) : int(bar.right) - w;
+    left = std::max(int(wa.left) + gap, std::min(left, int(wa.right) - gap - w));
+    return RECT{left, std::max(int(wa.top) + gap, bottom - h), left + w, bottom};
+}
+
 namespace {
 
 constexpr wchar_t kClass[] = L"AtriumSurface";

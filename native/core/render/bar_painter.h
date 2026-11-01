@@ -37,7 +37,8 @@ struct SceneItem {
 };
 
 struct BarScene {
-    D2D1_RECT_F bar{};         // the glass shape inside the window
+    D2D1_RECT_F bar{};         // the glass shape inside the window (its width eases to this, D27)
+    float windowW = 0;         // the window's width: a new one means new coordinates (nothing slides)
     float scale = 1;
     std::vector<SceneItem> items;  // apps only (drag and drop works on these)
     std::vector<SceneItem> extras; // Atrium logo (#start), overflow (#more), tray (#tray), status (#status), notifications (#notify)
@@ -107,6 +108,9 @@ private:
         double bounceMs = 0; // the bounce being played
         int bounceEnd = 0;   // hops to play (shortened when the app starts running)
         float hop = 0;       // current bounce height, px
+        float dot = 0;       // 0..1, the running dot
+        bool leaving = false; // the app went away: `ghost` shrinks and fades out where it was
+        SceneItem ghost;
     };
     void DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const SceneItem& it, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
                   D2D1_COLOR_F wash);
@@ -117,7 +121,10 @@ private:
     std::set<uint64_t> usedBitmaps_; // during one DrawContent
     std::map<std::tuple<int, int, std::wstring>, winrt::com_ptr<IDWriteTextFormat>> formats_;
     double lastMs_ = 0;
-    D2D1_RECT_F lastBar_{};
+    float lastWindowW_ = 0, lastTop_ = 0, lastBottom_ = 0;
+    // Displayed bar edges, separator and clock centre: they slide when the bar's width changes.
+    float barL_ = 0, barR_ = 0, sepX_ = -1, clockX_ = 0;
+    std::map<std::wstring, SceneItem> lastApps_; // the apps of the previous frame (for their exit)
     // Magnification state: strength 0..1 (eases in and out), wave centre and
     // its parameters of the current frame.
     float amount_ = 0, centre_ = 0, mag_ = 1, range_ = 1;

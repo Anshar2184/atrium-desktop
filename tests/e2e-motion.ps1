@@ -2,8 +2,8 @@
 .SYNOPSIS
   Motion and material of v0.4: the dock magnification under the pointer (the
   bar stretches, then settles), the launch bounce, the press ripple in the
-  glass, and the popups' glass layer (start menu, notification) with the
-  bar's corner radius.
+  glass, the popups' glass layer (start menu, notification) with the bar's
+  corner radius, and the bar's width gliding when an app closes.
 
 .DESCRIPTION
   Moves the mouse and clicks, so it only runs after the user has been idle for
@@ -124,6 +124,26 @@ try {
     $st = @(NewLog | Where-Object { $_ -match "notify: state" })[-1]
     Check "notification-glass" ([bool]$ready -and $st -match "radius=30") "$(@($ready)[-1]); $st"
     C notify-clear
+
+    # An app that is not pinned closes: the bar's width glides to its new size
+    # (the window keeps its width; the shape eases) instead of jumping.
+    Start-Process $Core -ArgumentList "--exit" -Wait
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"showRunning":true,"showClock":true,"pins":[]}')
+    Start-Process $Core -ArgumentList "--debug-layout"
+    Start-Sleep 2
+    $app = Start-Process "$env:SystemRoot\System32\charmap.exe" -PassThru
+    $script:children += $app
+    Start-Sleep 2.5
+    $before = Frame
+    $mark = @(Get-Content $logFile -Encoding UTF8).Count
+    $app.Kill()
+    for ($i = 0; $i -lt 6; $i++) { Start-Process $Core -ArgumentList "--command", "bar-state"; Start-Sleep -Milliseconds 50 }
+    Start-Sleep 1.5
+    $after = Frame
+    $widths = @(Get-Content $logFile -Encoding UTF8 | Select-Object -Skip $mark | Where-Object { $_ -match "bar: frame shape=(-?\d+)-(-?\d+) base" } |
+        ForEach-Object { [regex]::Match($_, "shape=(-?\d+)-(-?\d+)") } | ForEach-Object { [int]$_.Groups[2].Value - [int]$_.Groups[1].Value })
+    $between = @($widths | Where-Object { $_ -lt $before.Width -and $_ -gt $after.Base })
+    Check "close-glides" ($after.Base -lt $before.Base -and $after.Width -eq $after.Base -and $between.Count -ge 1) "bar $($before.Base) -> $($after.Base) px; widths drawn meanwhile: $($widths -join ',')"
 }
 finally {
     foreach ($p in $children) { if (-not $p.HasExited) { $p.Kill() } }

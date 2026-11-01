@@ -348,15 +348,15 @@ void Notifications::Layout(Mode mode)
     else if (n)
         content = float(n) * card + float(n - 1) * kGap;
     float pill = mode == Mode::Center ? kPill + (n ? kGap : 0) : 0;
-    int gap = int(std::lround(10 * s)), margin = int(std::lround(8 * s));
+    int gap = int(std::lround(kPopupGapDip * s)), margin = int(std::lround(8 * s));
     int bottom = bar.top - gap;
     float maxContent = float(bottom - wa.top - margin) / s - pill;
     v.contentH = content;
     v.viewH = n ? std::min(content, std::max(card, maxContent)) : 0;
     v.scroll = std::clamp(v.scroll, 0.f, std::max(0.f, v.contentH - v.viewH));
     int w = int(std::lround(kW * s)), h = int(std::lround((v.viewH + pill) * s));
-    // Right-aligned with the bell, inside the work area.
-    int right = std::clamp(int(bell.right) + int(std::lround(14 * s)), int(wa.left) + margin + w, int(wa.right) - margin);
+    // Right edge on the bar's right edge (D32), inside the work area.
+    int right = std::clamp(int(bar.right), int(wa.left) + margin + w, int(wa.right) - margin);
     RECT r{right - w, std::max(int(wa.top) + margin, bottom - h), right, bottom};
     if (!v.surface->Visible()) {
         v.cards.clear(); // the cards arrive afresh

@@ -145,22 +145,13 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     catalog_.Refresh(); // new installs and pins since last time; the menu updates when ready
     status_ = QuerySystemStatus();
     LoadAccount();
-    HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(mon, &mi);
-    UINT dpi = 96, dpiY = 96;
-    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi, &dpiY);
-    float s = float(dpi) / 96.f;
-    const RECT& wa = mi.rcWork;
-    int w = int(std::lround(kW * s)), h = int(std::lround((kMainH + kGap + barH_) * s)), gap = int(std::lround(12 * s));
-    int bottom = bar.top - gap;
-    int left = std::max(int(wa.left) + gap, std::min(int(bar.left), int(wa.right) - gap - w));
+    RECT r = PopupRect(bar, D2D1::SizeF(kW, kMainH + kGap + barH_), PopupAlign::Left);
     Restage();
     // Pops out of the logo.
-    POINT anchor{(logo.left + logo.right) / 2, bottom};
+    POINT anchor{(logo.left + logo.right) / 2, r.bottom};
     if (logo.right <= logo.left)
-        anchor.x = left + w / 6;
-    surface_.Show(RECT{left, bottom - h, left + w, bottom}, true, anchor);
+        anchor.x = r.left + (r.right - r.left) / 6;
+    surface_.Show(r, true, anchor);
     // Read the status again right away: Open may run inside a cross-process
     // SendMessage (test commands), where the network list cannot be queried.
     SetTimer(surface_.Hwnd(), kStatusTimer, 50, nullptr);
