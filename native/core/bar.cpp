@@ -1165,6 +1165,9 @@ RECT Bar::EntryRect(const std::wstring& key) const
     for (const auto& it : scene_.items)
         if (it.key == key)
             return rect(it);
+    if (key == kClockKey)
+        return RECT{window_.left + LONG(scene_.clock.left), window_.top + LONG(scene_.clock.top), window_.left + LONG(scene_.clock.right),
+                    window_.top + LONG(scene_.clock.bottom)};
     return {};
 }
 

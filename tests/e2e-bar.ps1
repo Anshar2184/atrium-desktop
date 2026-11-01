@@ -118,8 +118,8 @@ try {
     Click $clock
     Start-Sleep 0.8
     $fg = [U]::GetForegroundWindow()
-    $cls = [U]::Class($fg)
-    Check "clock-opens-calendar" ($fg -ne $a -and $fg -ne $b -and $cls -ne "WindowsForms10.Window.8.app.0.141b42a_r6_ad1") "foreground after clicking the clock: $cls"
+    $calendar = [U]::FindWindow("AtriumSurface", "Atrium Calendar")
+    Check "clock-opens-calendar" ($calendar -ne [IntPtr]::Zero -and $fg -eq $calendar) "foreground after clicking the clock: $([U]::Class($fg)) (Atrium's calendar: $calendar)"
     [U]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [U]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero) # Esc closes the panel
     Start-Sleep 0.5
 

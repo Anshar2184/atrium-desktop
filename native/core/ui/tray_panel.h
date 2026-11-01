@@ -49,6 +49,8 @@ private:
     void Activate(const std::wstring& id, bool right);
     float Hover(Canvas& c, const std::wstring& id, bool on);
     D2D1_SIZE_F Size() const; // content, DIP
+    int Cols() const;
+    D2D1_RECT_F CellRect(size_t i) const; // icon i's cell, DIP
 
     Surface surface_;
     TrayModel& model_;

@@ -39,6 +39,7 @@ add_executable(atrium_core WIN32
     ui/start_menu.cpp
     ui/notifications.cpp
     ui/tray_panel.cpp
+    ui/calendar_panel.cpp
     ui/control_center.cpp
     shell/notification_listener.cpp
     render/bar_painter.cpp

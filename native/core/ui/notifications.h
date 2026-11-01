@@ -42,8 +42,12 @@ public:
     std::function<RECT()> barRect;
     std::function<void(int unread)> onUnread;
     std::function<bool(const Notice&)> onActivate; // runs the notice's action
+    // True while another of Atrium's panels is open: new cards wait for it to
+    // close instead of overlapping it (checked again until then).
+    std::function<bool()> held;
 
     void Post(Notice n);
+    void PanelsChanged(); // a panel opened: the cards on screen step aside
     void ToggleCenter();
     void Clear();
     void SetOptions(double timeoutSeconds, bool hideBody);

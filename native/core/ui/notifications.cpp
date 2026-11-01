@@ -17,7 +17,8 @@ namespace {
 constexpr float kW = 384, kGap = 10, kPeek = 10, kPill = 44;
 constexpr int kMaxNotices = 50;
 constexpr ULONGLONG kMergeMs = 120000;
-constexpr UINT_PTR kPopupTimer = 1, kSweepTimer = 2;
+constexpr UINT_PTR kPopupTimer = 1, kSweepTimer = 2, kHoldTimer = 3;
+constexpr UINT kHoldMs = 250;
 constexpr double kLeaveMs = 220, kRippleMs = 520;
 
 float Smooth(float t)
@@ -165,14 +166,25 @@ void Notifications::Post(Notice n)
     std::erase(popupIds_, n.id);
     popupIds_.insert(popupIds_.begin(), n.id);
     Layout(Mode::Popup);
-    SetTimer(popup_.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
+    if (popup_.surface->Visible())
+        SetTimer(popup_.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
     Changed();
+}
+
+void Notifications::PanelsChanged()
+{
+    if (!popupIds_.empty())
+        Layout(Mode::Popup);
 }
 
 void Notifications::HidePopup(const wchar_t* why)
 {
-    if (!popup_.surface->Visible())
+    if (!popup_.surface->Visible()) {
+        // Cards held back by an open panel are dropped too (they stay in the list).
+        KillTimer(popup_.surface->Hwnd(), kHoldTimer);
+        popupIds_.clear();
         return;
+    }
     KillTimer(popup_.surface->Hwnd(), kPopupTimer);
     popup_.surface->Hide();
     popupIds_.clear();
@@ -304,6 +316,16 @@ void Notifications::Layout(Mode mode)
     auto shown = Shown(mode);
     if (mode == Mode::Popup && shown.empty()) {
         HidePopup(L"empty");
+        return;
+    }
+    if (mode == Mode::Popup && held && held()) {
+        // Another panel is open: the cards wait (their timeout too) until it closes.
+        if (v.surface->Visible()) {
+            KillTimer(v.surface->Hwnd(), kPopupTimer);
+            v.surface->Hide();
+            Log(L"notify: popup held (a panel is open)");
+        }
+        SetTimer(v.surface->Hwnd(), kHoldTimer, kHoldMs, nullptr);
         return;
     }
     RECT bell = bellRect ? bellRect() : RECT{};
@@ -567,6 +589,17 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
     case WM_TIMER:
         if (w == kPopupTimer && mode == Mode::Popup) {
             HidePopup(L"timeout");
+            return true;
+        }
+        if (w == kHoldTimer && mode == Mode::Popup) {
+            if (!held || !held()) {
+                KillTimer(v.surface->Hwnd(), kHoldTimer);
+                if (!popupIds_.empty()) {
+                    Layout(Mode::Popup);
+                    SetTimer(v.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
+                    Log(L"notify: popup shown after the panel closed");
+                }
+            }
             return true;
         }
         if (w == kSweepTimer) {

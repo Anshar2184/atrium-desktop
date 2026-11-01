@@ -4,7 +4,8 @@
   and the status icon on the bar, the panel listing a test tray icon (a
   WinForms NotifyIcon in a child process), a left and a right click on it in
   the panel reaching that program as its own tray clicks, the control centre's
-  pieces of glass, the wheel over the status icon and the volume slider.
+  pieces of glass, the wheel over the status icon and the volume slider, and
+  the calendar from the clock (a month with lunar dates, turning the page).
 
 .DESCRIPTION
   Moves the mouse, so it only runs after the user has been idle for 30 s.
@@ -125,6 +126,19 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
         $st = TrayState
         if ((Field $st "visible") -eq "1") { Key 0x1B }
     }
+
+    # The calendar from the clock: this month, a month card and a capsule; the arrow turns the page.
+    $p = Centre (ItemRect "#clock"); ClickAt $p[0] $p[1]; Start-Sleep 1
+    C calendar-state; $st = Last "calendar: state"
+    $now = Get-Date
+    Check "calendar-opens" ((Field $st "visible") -eq "1" -and (Field $st "month") -eq $now.ToString("yyyy-MM") -and (Field $st "shapes") -eq "2" -and (Field $st "lunar")) $st
+    $next = Spot "calendar: spots" "next"
+    ClickAt $next[0] $next[1]; Start-Sleep 0.6
+    C calendar-state; $st = Last "calendar: state"
+    Check "calendar-next-month" ((Field $st "month") -eq $now.AddMonths(1).ToString("yyyy-MM")) $st
+    Key 0x1B
+    C calendar-state; $st = Last "calendar: state"
+    Check "calendar-esc-closes" ((Field $st "visible") -eq "0") $st
 
     # Control centre: one piece of glass for the network, one for the volume, one for the battery if any.
     $p = Centre (ItemRect "#status"); ClickAt $p[0] $p[1]; Start-Sleep 2

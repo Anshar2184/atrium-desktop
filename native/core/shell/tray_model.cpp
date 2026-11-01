@@ -2,6 +2,7 @@
 
 #include "log.h"
 
+#include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <tlhelp32.h>
@@ -107,14 +108,32 @@ struct Record {
     std::wstring exe;     // full path, lower case
     std::wstring tip;     // tooltip when first seen; often empty
     std::vector<BYTE> png; // icon snapshot
+    bool promoted = false; // shown on the taskbar
+    bool hasUid = false;   // the icon's id within its program (NOTIFYICONDATA.uID)
+    UINT uid = 0;
+    size_t order = SIZE_MAX; // place in Windows' order of the icons (UIOrderList), if listed
 };
 
-std::vector<Record> ReadRecords()
+// Reads the records; `ordered` tells whether Windows' order of them was there.
+std::vector<Record> ReadRecords(bool& ordered)
 {
     std::vector<Record> out;
+    ordered = false;
     HKEY root = nullptr;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\NotifyIconSettings", 0, KEY_READ, &root) != ERROR_SUCCESS)
         return out;
+    // UIOrderList: the records' ids (their key names) as 64-bit numbers, in
+    // the order the taskbar and its overflow window show the icons.
+    std::map<unsigned long long, size_t> order;
+    DWORD bytes = 0;
+    if (RegGetValueW(root, nullptr, L"UIOrderList", RRF_RT_REG_BINARY, nullptr, nullptr, &bytes) == ERROR_SUCCESS && bytes >= 8 && bytes < (1u << 16)) {
+        std::vector<unsigned long long> ids(bytes / 8);
+        DWORD got = DWORD(ids.size() * 8);
+        if (RegGetValueW(root, nullptr, L"UIOrderList", RRF_RT_REG_BINARY, nullptr, ids.data(), &got) == ERROR_SUCCESS)
+            for (size_t i = 0; i < ids.size(); ++i)
+                order.try_emplace(ids[i], i);
+    }
+    ordered = !order.empty();
     for (DWORD i = 0;; ++i) {
         wchar_t name[128];
         DWORD len = 128;
@@ -133,6 +152,16 @@ std::vector<Record> ReadRecords()
             r.png.resize(size);
             RegGetValueW(root, name, L"IconSnapshot", RRF_RT_REG_BINARY, nullptr, r.png.data(), &size);
         }
+        DWORD uid = 0;
+        size = sizeof(uid);
+        if (RegGetValueW(root, name, L"UID", RRF_RT_REG_DWORD, nullptr, &uid, &size) == ERROR_SUCCESS)
+            r.hasUid = true, r.uid = uid;
+        DWORD promoted = 0;
+        size = sizeof(promoted);
+        if (RegGetValueW(root, name, L"IsPromoted", RRF_RT_REG_DWORD, nullptr, &promoted, &size) == ERROR_SUCCESS)
+            r.promoted = promoted != 0;
+        if (auto it = order.find(wcstoull(name, nullptr, 10)); it != order.end())
+            r.order = it->second;
         if (!r.exe.empty())
             out.push_back(std::move(r));
     }
@@ -140,8 +169,13 @@ std::vector<Record> ReadRecords()
     return out;
 }
 
-// Running programs: path (lower case) -> titles of their visible windows.
-std::map<std::wstring, std::vector<std::wstring>> RunningPrograms()
+struct Program {
+    std::vector<std::wstring> titles; // of its visible windows
+    std::vector<HWND> windows;        // all its top-level and message-only windows
+};
+
+// Running programs by path (lower case).
+std::map<std::wstring, Program> RunningPrograms()
 {
     std::map<DWORD, std::wstring> paths;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -158,27 +192,50 @@ std::map<std::wstring, std::vector<std::wstring>> RunningPrograms()
         }
         CloseHandle(snap);
     }
-    std::map<std::wstring, std::vector<std::wstring>> out;
+    std::map<std::wstring, Program> out;
     for (const auto& [pid, path] : paths)
         out[path];
     struct Ctx {
         std::map<DWORD, std::wstring>* paths;
-        std::map<std::wstring, std::vector<std::wstring>>* out;
-    } ctx{&paths, &out};
-    EnumWindows(
-        [](HWND h, LPARAM l) -> BOOL {
-            auto* c = reinterpret_cast<Ctx*>(l);
-            wchar_t title[256];
-            if (!IsWindowVisible(h) || !GetWindowTextW(h, title, 256))
-                return TRUE;
-            DWORD pid = 0;
-            GetWindowThreadProcessId(h, &pid);
-            if (auto it = c->paths->find(pid); it != c->paths->end())
-                (*c->out)[it->second].push_back(title);
+        std::map<std::wstring, Program>* out;
+        bool titles;
+    } ctx{&paths, &out, true};
+    auto each = [](HWND h, LPARAM l) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(l);
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        auto it = c->paths->find(pid);
+        if (it == c->paths->end())
             return TRUE;
-        },
-        reinterpret_cast<LPARAM>(&ctx));
+        Program& p = (*c->out)[it->second];
+        p.windows.push_back(h);
+        wchar_t title[256];
+        if (c->titles && IsWindowVisible(h) && GetWindowTextW(h, title, 256))
+            p.titles.push_back(title);
+        return TRUE;
+    };
+    EnumWindows(each, reinterpret_cast<LPARAM>(&ctx));
+    // Tray icons often belong to message-only windows, which EnumWindows skips.
+    ctx.titles = false;
+    for (HWND h = FindWindowExW(HWND_MESSAGE, nullptr, nullptr, nullptr); h; h = FindWindowExW(HWND_MESSAGE, h, nullptr, nullptr))
+        each(h, reinterpret_cast<LPARAM>(&ctx));
     return out;
+}
+
+// Whether one of a program's windows has the tray icon `uid` now (the shell
+// knows the icon's place; it fails for icons that are not there).
+bool HasIcon(const std::vector<HWND>& windows, UINT uid)
+{
+    size_t tried = 0;
+    for (HWND h : windows) {
+        if (++tried > 400)
+            break;
+        NOTIFYICONIDENTIFIER id{sizeof(id), h, uid, GUID_NULL};
+        RECT r{};
+        if (SUCCEEDED(Shell_NotifyIconGetRect(&id, &r)))
+            return true;
+    }
+    return false;
 }
 
 // How well a tooltip names a program: 0 none .. 100 exactly.
@@ -193,6 +250,12 @@ int Score(const std::wstring& tipKey, const std::wstring& candidate)
         return 80;
     if (tipKey.find(c) != std::wstring::npos || c.find(tipKey) != std::wstring::npos)
         return 60;
+    // "Windows 安全中心 - 建议的操作" and "Windows 安全中心通知图标": a long common start.
+    size_t common = 0;
+    while (common < c.size() && common < tipKey.size() && c[common] == tipKey[common])
+        ++common;
+    if (common >= 4 && common * 5 >= std::min(c.size(), tipKey.size()) * 3)
+        return 40;
     return 0;
 }
 
@@ -353,12 +416,14 @@ void TrayModel::Worker()
             }
 
             // Pictures: match each button to a running program Windows has a
-            // tray record of, best names first, each used once.
-            std::vector<Record> records = ReadRecords();
+            // tray record of.
+            bool ordered = false;
+            std::vector<Record> records = ReadRecords(ordered);
             auto running = RunningPrograms();
             struct Candidate {
                 size_t record;
-                std::vector<std::wstring> names;
+                std::vector<std::wstring> names; // tooltip, description, product, file name, others, then window titles
+                size_t firstTitle;
             };
             std::vector<Candidate> candidates;
             std::map<std::wstring, std::pair<std::wstring, std::wstring>> version; // exe -> description, product
@@ -366,41 +431,97 @@ void TrayModel::Worker()
                 auto run = running.find(records[r].exe);
                 if (run == running.end())
                     continue;
+                if (records[r].hasUid && !HasIcon(run->second.windows, records[r].uid))
+                    continue; // running, but without this icon now
                 auto& v = version[records[r].exe];
                 if (v.first.empty() && v.second.empty())
                     v = {VersionString(records[r].exe, L"FileDescription"), VersionString(records[r].exe, L"ProductName")};
                 std::wstring stem = PathFindFileNameW(records[r].exe.c_str());
                 PathRemoveExtensionW(stem.data());
                 stem.resize(wcslen(stem.c_str()));
-                Candidate c{r, {records[r].tip, v.first, v.second, stem}};
-                c.names.insert(c.names.end(), run->second.begin(), run->second.end());
+                Candidate c{r, {records[r].tip, v.first, v.second, stem}, 0};
+                // Windows' own icon whose description does not name it as its tooltip does.
+                if (Lower(stem) == L"securityhealthsystray")
+                    c.names.insert(c.names.end(), {L"Windows 安全中心", L"Windows Security"});
+                c.firstTitle = c.names.size();
+                c.names.insert(c.names.end(), run->second.titles.begin(), run->second.titles.end());
                 candidates.push_back(std::move(c));
             }
-            struct Pair {
-                int score;
-                size_t button, candidate;
-            };
-            std::vector<Pair> pairs;
-            for (size_t b = 0; b < buttons.size(); ++b) {
+            // How well button b's tooltip names candidate c: 0 .. 105.
+            auto score = [&](size_t b, size_t c) {
                 std::wstring key = Key(Title(buttons[b].tip));
-                for (size_t c = 0; c < candidates.size(); ++c) {
-                    int best = 0;
-                    for (size_t k = 0; k < candidates[c].names.size(); ++k) // the recorded tooltip counts most
-                        best = std::max(best, Score(key, candidates[c].names[k]) + (k == 0 ? 5 : 0));
-                    if (best > 0)
-                        pairs.push_back({best + (records[candidates[c].record].png.empty() ? 0 : 1), b, c});
+                int best = 0;
+                for (size_t k = 0; k < candidates[c].names.size(); ++k) {
+                    int sc = Score(key, candidates[c].names[k]);
+                    // Window titles only when they are the tooltip: a browser's
+                    // page titles would otherwise claim other apps' icons.
+                    if (k >= candidates[c].firstTitle && sc < 100)
+                        sc = 0;
+                    best = std::max(best, sc + (k == 0 && sc ? 5 : 0)); // the recorded tooltip counts most
                 }
-            }
-            std::stable_sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) { return a.score > b.score; });
+                return best;
+            };
             std::vector<int> match(buttons.size(), -1);
-            std::set<std::wstring> usedExe; // one button per program record set
-            std::set<size_t> usedCandidate;
-            for (const Pair& p : pairs)
-                if (match[p.button] < 0 && !usedCandidate.count(p.candidate) && !usedExe.count(records[candidates[p.candidate].record].exe)) {
-                    match[p.button] = int(candidates[p.candidate].record);
-                    usedCandidate.insert(p.candidate);
-                    usedExe.insert(records[candidates[p.candidate].record].exe);
+            if (ordered) {
+                // Windows shows the icons in the order of its records: line the
+                // buttons up with the running programs' records in that order,
+                // as many as possible, the names deciding where they disagree.
+                // This also places icons without a tooltip.
+                for (bool promoted : {true, false}) {
+                    std::vector<size_t> bs, cs;
+                    for (size_t b = 0; b < buttons.size(); ++b)
+                        if (buttons[b].promoted == promoted)
+                            bs.push_back(b);
+                    for (size_t c = 0; c < candidates.size(); ++c)
+                        if (records[candidates[c].record].promoted == promoted && records[candidates[c].record].order != SIZE_MAX)
+                            cs.push_back(c);
+                    std::stable_sort(cs.begin(), cs.end(),
+                                     [&](size_t a, size_t b) { return records[candidates[a].record].order < records[candidates[b].record].order; });
+                    const size_t n = bs.size(), m = cs.size();
+                    std::vector<std::vector<int>> w(n, std::vector<int>(m)), dp(n + 1, std::vector<int>(m + 1, 0));
+                    for (size_t i = 0; i < n; ++i)
+                        for (size_t j = 0; j < m; ++j) {
+                            int sc = score(bs[i], cs[j]);
+                            // In place, the name agreeing; a named button whose name
+                            // fits nothing of the program's counts for less.
+                            w[i][j] = 10 + sc - (sc == 0 && !Title(buttons[bs[i]].tip).empty() ? 6 : 0);
+                        }
+                    for (size_t i = 1; i <= n; ++i)
+                        for (size_t j = 1; j <= m; ++j)
+                            dp[i][j] = std::max({dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1] + w[i - 1][j - 1]});
+                    // Back from the end; on a tie the earlier record wins.
+                    for (size_t i = n, j = m; i > 0 && j > 0;) {
+                        if (dp[i][j] == dp[i][j - 1])
+                            --j;
+                        else if (dp[i][j] == dp[i - 1][j - 1] + w[i - 1][j - 1]) {
+                            match[bs[i - 1]] = int(candidates[cs[j - 1]].record);
+                            --i;
+                            --j;
+                        } else
+                            --i;
+                    }
                 }
+            } else {
+                // No order: by name alone, best names first, each program once.
+                struct Pair {
+                    int score;
+                    size_t button, candidate;
+                };
+                std::vector<Pair> pairs;
+                for (size_t b = 0; b < buttons.size(); ++b)
+                    for (size_t c = 0; c < candidates.size(); ++c)
+                        if (int sc = score(b, c); sc > 0)
+                            pairs.push_back({sc + (records[candidates[c].record].png.empty() ? 0 : 1), b, c});
+                std::stable_sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) { return a.score > b.score; });
+                std::set<std::wstring> usedExe;
+                std::set<size_t> usedCandidate;
+                for (const Pair& p : pairs)
+                    if (match[p.button] < 0 && !usedCandidate.count(p.candidate) && !usedExe.count(records[candidates[p.candidate].record].exe)) {
+                        match[p.button] = int(candidates[p.candidate].record);
+                        usedCandidate.insert(p.candidate);
+                        usedExe.insert(records[candidates[p.candidate].record].exe);
+                    }
+            }
 
             std::vector<TrayIcon> icons;
             int recognised = 0;
@@ -438,7 +559,12 @@ void TrayModel::Worker()
                 available_ = available;
             }
             if (changed) {
-                Log(L"tray: %zu icons (%d recognised)%s", buttons.size(), recognised, available ? L"" : L", the shell's tray was not found");
+                Log(L"tray: %zu icons (%d recognised %s)%s", buttons.size(), recognised, ordered ? L"in Windows' order" : L"by name",
+                    available ? L"" : L", the shell's tray was not found");
+                for (size_t b = 0; b < buttons.size(); ++b) {
+                    std::wstring exe = match[b] >= 0 ? std::wstring(PathFindFileNameW(records[size_t(match[b])].exe.c_str())) : L"-";
+                    Log(L"tray:   %zu '%s' -> %s", b, Title(buttons[b].tip).substr(0, 24).c_str(), exe.c_str());
+                }
                 PostMessageW(notify_, msg_, 0, 0);
             }
         } catch (...) {

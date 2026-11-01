@@ -13,6 +13,7 @@
 #include "shell/system_status.h"
 #include "shell/tray_model.h"
 #include "shell/wechat_source.h"
+#include "ui/calendar_panel.h"
 #include "ui/control_center.h"
 #include "ui/notifications.h"
 #include "ui/start_menu.h"
@@ -67,6 +68,7 @@ struct App {
     std::unique_ptr<TrayModel> tray;
     std::unique_ptr<TrayPanel> trayPanel;
     std::unique_ptr<ControlCenter> control;
+    std::unique_ptr<CalendarPanel> calendar;
 };
 
 App g_app;
@@ -176,11 +178,13 @@ void OpenSystem(const std::wstring& what)
 {
     if (what == L"network" || what == L"volume" || what == L"battery") {
         g_app.control->Open(g_app.bar->EntryRect(L"#status"), g_app.bar->BarRect());
+        g_app.notes->PanelsChanged();
         Log(L"start: system entry %s (control centre)", what.c_str());
         return;
     }
     if (what == L"tray") {
         g_app.trayPanel->Open(g_app.bar->EntryRect(L"#tray"), g_app.bar->BarRect(), g_app.bar->PreviousForeground());
+        g_app.notes->PanelsChanged();
         Log(L"start: system entry tray (tray panel)");
         return;
     }
@@ -199,6 +203,7 @@ void OpenSystem(const std::wstring& what)
 
 void ToggleTray(RECT);
 void ToggleControl(RECT);
+void ToggleCalendar();
 void UpdateStatus();
 
 // Test and automation commands from a second process: Atrium.Core.exe --command <verb> [argument]
@@ -211,9 +216,11 @@ void RunCommand(const std::wstring& line)
     while (!verb.empty() && iswspace(verb.back()))
         verb.pop_back();
     Log(L"command: %s", line.c_str());
-    if (verb == L"start")
+    if (verb == L"start") {
         g_app.start->Visible() ? g_app.start->Close(false)
                                : g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), GetForegroundWindow());
+        g_app.notes->PanelsChanged();
+    }
     else if (verb == L"start-type")
         g_app.start->Type(arg);
     else if (verb == L"start-key" && !arg.empty())
@@ -256,6 +263,12 @@ void RunCommand(const std::wstring& line)
         g_app.control->LogState();
     else if (verb == L"control-click")
         g_app.control->TestClick(arg);
+    else if (verb == L"calendar-open")
+        ToggleCalendar();
+    else if (verb == L"calendar-state")
+        g_app.calendar->LogState();
+    else if (verb == L"calendar-click")
+        g_app.calendar->TestClick(arg);
     else if (verb == L"tray-find")
         g_app.trayPanel->LogFind(arg);
     else if (verb == L"control-volume") { // tests: put the volume back
@@ -298,6 +311,7 @@ void ToggleTray(RECT)
     if (GetTickCount64() - g_app.trayPanel->LastClosed() < 400)
         return;
     g_app.trayPanel->Open(g_app.bar->EntryRect(L"#tray"), g_app.bar->BarRect(), g_app.bar->PreviousForeground());
+    g_app.notes->PanelsChanged();
 }
 
 void ToggleControl(RECT)
@@ -309,6 +323,19 @@ void ToggleControl(RECT)
     if (GetTickCount64() - g_app.control->LastClosed() < 400)
         return;
     g_app.control->Open(g_app.bar->EntryRect(L"#status"), g_app.bar->BarRect());
+    g_app.notes->PanelsChanged();
+}
+
+void ToggleCalendar()
+{
+    if (g_app.calendar->Visible()) {
+        g_app.calendar->Close();
+        return;
+    }
+    if (GetTickCount64() - g_app.calendar->LastClosed() < 400)
+        return;
+    g_app.calendar->Open(g_app.bar->EntryRect(L"#clock"), g_app.bar->BarRect());
+    g_app.notes->PanelsChanged();
 }
 
 void ToggleStart(RECT)
@@ -322,6 +349,7 @@ void ToggleStart(RECT)
     if (GetTickCount64() - g_app.start->LastClosed() < 400)
         return;
     g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), g_app.bar->PreviousForeground());
+    g_app.notes->PanelsChanged();
 }
 
 void ShowMenu(POINT pt)
@@ -394,6 +422,8 @@ void ApplySettings(const Settings& s)
     g_app.trayPanel->SetRadius(radius);
     g_app.control->SetRadius(radius);
     g_app.control->SetBarHeight(float(s.height));
+    g_app.calendar->SetRadius(radius);
+    g_app.calendar->SetBarHeight(float(s.height));
     g_app.start->SetBarHeight(float(s.height)); // its status capsule is shaped like the bar
     g_app.notes->SetRadius(radius);
     g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody);
@@ -555,13 +585,6 @@ void Reorder(const std::wstring& key, int to)
         s.pins = std::move(pins);
     });
     Log(L"bar: %s moved to %d%s", key.c_str(), to, dragged.pinned ? L"" : L" and pinned");
-}
-
-// The clock opens the Windows calendar and notifications (Win+N), like the
-// system clock does (D11: public shortcuts only).
-void OpenCalendar()
-{
-    SendWinShortcut('N');
 }
 
 LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -764,15 +787,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.trayPanel->onSystemTray = OpenTray;
     g_app.control = std::make_unique<ControlCenter>(instance);
     g_app.control->onChanged = UpdateStatus;
+    g_app.calendar = std::make_unique<CalendarPanel>(instance);
     g_app.notes->bellRect = [] { return g_app.bar->EntryRect(L"#notify"); };
     g_app.notes->barRect = [] { return g_app.bar->BarRect(); };
     g_app.notes->onUnread = [](int n) { g_app.bar->SetUnread(n); };
     g_app.notes->onActivate = RunNoticeAction;
+    // New cards wait while one of Atrium's panels is open (they would overlap it).
+    g_app.notes->held = [] {
+        return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible();
+    };
     g_app.bar->iconProvider = [](const std::wstring& key, int px) { return g_app.tasks->Icon(key, px); };
     g_app.bar->onActivate = [](const std::wstring& key) { g_app.tasks->Activate(key); };
     g_app.bar->onLaunch = [](const std::wstring& key) { g_app.tasks->Launch(key); };
     g_app.bar->onItemMenu = ShowItemMenu;
-    g_app.bar->onClockClick = OpenCalendar;
+    g_app.bar->onClockClick = ToggleCalendar;
     g_app.bar->onReorder = Reorder;
     g_app.bar->onOverflow = ShowOverflow;
     g_app.bar->onStartClick = ToggleStart;
@@ -815,6 +843,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.listener.reset();
     g_app.wechat.reset();
     g_app.notes.reset();
+    g_app.calendar.reset();
     g_app.control.reset();
     g_app.trayPanel.reset();
     g_app.tray.reset();

@@ -13,8 +13,8 @@ namespace atrium {
 
 namespace {
 
-constexpr int kCols = 6;
-constexpr float kPad = 14, kCell = 56, kIcon = 32, kLabelH = 44;
+// Small, like the system's own tray: icons at a little more than their usual size.
+constexpr float kPad = 10, kCell = 42, kIcon = 24, kLabelH = 34, kPlateR = 12;
 constexpr double kStageMs = 240, kStaggerMs = 14, kRippleMs = 520;
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
@@ -36,10 +36,25 @@ TrayPanel::TrayPanel(HINSTANCE instance, TrayModel& model) : surface_(instance, 
     private_ = GetEnvironmentVariableW(L"ATRIUM_PRIVACY", privacy, 8) && privacy[0] == L'1';
 }
 
+int TrayPanel::Cols() const
+{
+    size_t n = icons_.size();
+    return n <= 8 ? 4 : n <= 10 ? 5 : 6;
+}
+
 D2D1_SIZE_F TrayPanel::Size() const
 {
-    int rows = std::max(1, int((icons_.size() + kCols - 1) / kCols));
-    return D2D1::SizeF(2 * kPad + kCols * kCell, kPad + float(rows) * kCell + 4 + kLabelH + 6);
+    int cols = Cols(), rows = std::max(1, int((icons_.size() + size_t(cols) - 1) / size_t(cols)));
+    return D2D1::SizeF(2 * kPad + float(cols) * kCell, kPad + float(rows) * kCell + 4 + kLabelH);
+}
+
+D2D1_RECT_F TrayPanel::CellRect(size_t i) const
+{
+    // Rows from the top; a last row that is not full is centred.
+    const size_t cols = size_t(Cols()), n = icons_.size(), row = i / cols;
+    size_t inRow = std::min(cols, n - row * cols);
+    float x = kPad + (float(cols) - float(inRow)) * kCell / 2 + float(i % cols) * kCell, y = kPad + float(row) * kCell;
+    return D2D1::RectF(x, y, x + kCell, y + kCell);
 }
 
 void TrayPanel::Place()
@@ -117,7 +132,7 @@ void TrayPanel::Paint(Canvas& c)
     if (c.panel)
         c.Fill(D2D1::RectF(0, 0, w, h), radius_, t.panel);
 
-    const float gridTop = kPad, labelTop = h - kLabelH - 6;
+    const float gridTop = kPad, labelTop = h - kLabelH;
     if (icons_.empty()) {
         std::wstring msg = !model_.Loaded() ? L"正在读取…" : model_.Available() ? L"没有托盘图标" : L"读取不到系统托盘";
         c.Text(msg, D2D1::RectF(kPad, gridTop, w - kPad, gridTop + kCell), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
@@ -125,21 +140,20 @@ void TrayPanel::Paint(Canvas& c)
     const int iconPx = int(std::lround(kIcon * c.scale));
     for (size_t i = 0; i < icons_.size(); ++i) {
         const TrayIcon& icon = icons_[i];
-        float x = kPad + float(i % kCols) * kCell, y = gridTop + float(i / kCols) * kCell;
-        D2D1_RECT_F cell = D2D1::RectF(x, y, x + kCell, y + kCell);
+        D2D1_RECT_F cell = CellRect(i);
         std::wstring id = L"icon:" + std::to_wstring(i);
         float e = Ease(float((c.now - openedMs_ - kStaggerMs * double(std::min<size_t>(i, 18))) / kStageMs));
         if (e < 1)
             c.Continue();
         c.BeginGroup(e, 1, (cell.left + cell.right) / 2, (cell.top + cell.bottom) / 2, 0, 6 * (1 - e));
         float hv = Hover(c, id, hover_ == id);
-        D2D1_RECT_F plate = D2D1::RectF(cell.left + 3, cell.top + 3, cell.right - 3, cell.bottom - 3);
+        D2D1_RECT_F plate = D2D1::RectF(cell.left + 2, cell.top + 2, cell.right - 2, cell.bottom - 2);
         if (hv > 0.001f)
-            c.Fill(plate, 16, Alpha(t.hover, hv));
+            c.Fill(plate, kPlateR, Alpha(t.hover, hv));
         if (pressed_ == id)
-            c.Fill(plate, 16, t.press);
+            c.Fill(plate, kPlateR, t.press);
         if (rippleId_ == id && c.now - rippleMs_ < kRippleMs) {
-            c.Ripple(plate, 16, rippleX_, rippleY_, float((c.now - rippleMs_) / kRippleMs), t.light ? D2D1::ColorF(1, 1, 1, 0.6f) : D2D1::ColorF(1, 1, 1, 0.22f));
+            c.Ripple(plate, kPlateR, rippleX_, rippleY_, float((c.now - rippleMs_) / kRippleMs), t.light ? D2D1::ColorF(1, 1, 1, 0.6f) : D2D1::ColorF(1, 1, 1, 0.22f));
             c.Continue();
         }
         float cx = (cell.left + cell.right) / 2, cy = (cell.top + cell.bottom) / 2;
@@ -153,7 +167,7 @@ void TrayPanel::Paint(Canvas& c)
             // Not recognised: its initial on a quiet disc.
             std::wstring title = TrayModel::Title(icon.tip);
             c.Fill(ir, kIcon / 2, Alpha(t.hover, 1.4f));
-            c.Text(title.empty() ? L"?" : title.substr(0, 1), ir, 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+            c.Text(title.empty() ? L"?" : title.substr(0, 1), ir, 11.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         }
         c.EndGroup();
         c.EndGroup();
@@ -161,7 +175,7 @@ void TrayPanel::Paint(Canvas& c)
     }
 
     // Below the grid: the name under the pointer, and the system's own tray.
-    c.Line(kPad + 6, labelTop, w - kPad - 6, labelTop, t.divider);
+    c.Line(kPad + 4, labelTop, w - kPad - 4, labelTop, t.divider);
     std::wstring label;
     if (hover_.rfind(L"icon:", 0) == 0) {
         size_t i = size_t(std::stoul(hover_.substr(5)));
@@ -169,14 +183,14 @@ void TrayPanel::Paint(Canvas& c)
             label = private_ ? L"托盘图标" : TrayModel::Title(icons_[i].tip);
     }
     if (label.empty())
-        label = icons_.empty() ? L"托盘" : std::to_wstring(icons_.size()) + L" 个托盘图标 · 右键打开菜单";
+        label = icons_.empty() ? L"托盘" : std::to_wstring(icons_.size()) + L" 个图标";
     std::wstring sys = L"系统托盘";
-    float bw = c.TextWidth(sys, 12) + 28;
-    D2D1_RECT_F b = D2D1::RectF(w - kPad - bw, labelTop + 8, w - kPad, labelTop + kLabelH - 4);
-    c.Text(label, D2D1::RectF(kPad + 8, labelTop + 4, b.left - 10, labelTop + kLabelH), 12.5f, hover_.rfind(L"icon:", 0) == 0 ? t.text : t.subtext);
+    float bw = c.TextWidth(sys, 11.5f) + 22;
+    D2D1_RECT_F b = D2D1::RectF(w - kPad + 2 - bw, labelTop + 5, w - kPad + 2, labelTop + kLabelH - 7);
+    c.Text(label, D2D1::RectF(kPad + 4, labelTop, b.left - 8, labelTop + kLabelH - 2), 12, hover_.rfind(L"icon:", 0) == 0 ? t.text : t.subtext);
     float hv = Hover(c, L"system", hover_ == L"system");
     c.Fill(b, (b.bottom - b.top) / 2, Alpha(pressed_ == L"system" ? t.press : t.hover, 0.45f + 0.55f * hv));
-    c.Text(sys, b, 12, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
+    c.Text(sys, b, 11.5f, t.text, DWRITE_FONT_WEIGHT_NORMAL, 1);
     hits_.push_back({b, L"system"});
 }
 

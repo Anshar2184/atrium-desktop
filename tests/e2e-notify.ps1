@@ -5,7 +5,8 @@
   timeout, hover keeps it, queue and merge, expand the stack (upwards, every
   card its own piece of glass), dismiss one,
   click action, clear, unread badge, full-screen suppression (simulated and
-  with a real full-screen window), hidden text with capture exclusion, and the
+  with a real full-screen window), cards waiting while another Atrium panel
+  is open, hidden text with capture exclusion, and the
   window's place and size at the monitor's DPI.
 
 .DESCRIPTION
@@ -200,6 +201,16 @@ try {
     Check "suppressed-real-fullscreen" ($s.popup -eq "0" -and $s.quiet -ne "5") "real full-screen window: user notification state $($s.quiet), popup=$($s.popup)"
     foreach ($p in $children) { if (-not $p.HasExited -and $p.MainWindowTitle -eq "Atrium Full Screen") { $p.Kill() } }
     Get-Process powershell -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq "Atrium Full Screen" } | Stop-Process -Force
+    C notify-clear
+
+    # Another of Atrium's panels open: a new card waits for it to close instead of overlapping it.
+    C control-open; Start-Sleep 1
+    Post "Mail" "While a panel is open" "Shown after it closes"
+    $s = State
+    $held = $s.popup -eq "0" -and $s.popupCards -eq "1"
+    C control-open; Start-Sleep 1
+    $s = State
+    Check "held-by-panel" ($held -and $s.popup -eq "1") "while the control centre was open the card waited ($held); after it closed: popup=$($s.popup)"
     C notify-clear
 
     # Hidden text: setting on, cards excluded from capture.
