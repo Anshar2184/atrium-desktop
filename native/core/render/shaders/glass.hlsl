@@ -19,12 +19,13 @@ cbuffer GlassParams : register(b0)
     float  Inset;       // shadow room around the shape (sets the shadow's softness)
     float  BlurMix;     // 0 = sharp backdrop, 1 = fully blurred
     float  Fade;        // 0 = the glass as is, 1 = gone (a piece of glass fading out)
-    float  _pad;
+    float  SdfMode;     // 1: the shape is ShapeSdf (a distance field over Shape), not a rounded rectangle
     float4 Shape;       // the glass shape in window px: left, top, right, bottom
     float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
 };
 
 Texture2D Bg : register(t0);
+Texture2D<float> ShapeSdf : register(t1); // signed distance in px (negative inside), one texel per px of Shape
 SamplerState Linear : register(s0);
 
 struct VSOut
@@ -48,6 +49,21 @@ float sdRoundRect(float2 p, float2 b, float r)
     return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
 }
 
+// Signed distance to the glass shape at window px `px` (negative inside).
+float Dist(float2 px)
+{
+    float2 c = px - (Shape.xy + Shape.zw) * 0.5;
+    float2 b = max((Shape.zw - Shape.xy) * 0.5, 1);
+    float r = min(Radius, min(b.x, b.y));
+    float d = sdRoundRect(c, b, r);
+    if (SdfMode > 0.5) {
+        float2 uv = (px - Shape.xy) / max(Shape.zw - Shape.xy, 1);
+        float2 outside = max(max(Shape.xy - px, px - Shape.zw), 0);
+        d = ShapeSdf.SampleLevel(Linear, saturate(uv), 0) + length(outside);
+    }
+    return d;
+}
+
 float3 bg(float2 px, float lod)
 {
     return Bg.SampleLevel(Linear, (px + RoiOrigin) / RoiSize, lod).rgb;
@@ -68,13 +84,10 @@ float3 blurred(float2 px)
 float4 PS(VSOut i) : SV_Target
 {
     float2 px = i.uv * Size;
-    float2 c = px - (Shape.xy + Shape.zw) * 0.5;
-    float2 b = max((Shape.zw - Shape.xy) * 0.5, 1);
-    float r = min(Radius, min(b.x, b.y));
-    float d = sdRoundRect(c, b, r);
+    float d = Dist(px);
 
     // Soft drop shadow outside the shape.
-    float ds = sdRoundRect(c - float2(0, Inset * 0.25), b, r);
+    float ds = Dist(px - float2(0, Inset * 0.25));
     float shadowA = Shadow * exp(-max(ds, 0) / max(Inset * 0.35, 1)) * step(0, d);
 
     float aa = max(fwidth(d), 1e-3);
@@ -85,8 +98,7 @@ float4 PS(VSOut i) : SV_Target
         return float4(0, 0, 0, shadowA);
 
     float e = 1.0;
-    float2 g = float2(sdRoundRect(c + float2(e, 0), b, r) - sdRoundRect(c - float2(e, 0), b, r),
-                      sdRoundRect(c + float2(0, e), b, r) - sdRoundRect(c - float2(0, e), b, r));
+    float2 g = float2(Dist(px + float2(e, 0)) - Dist(px - float2(e, 0)), Dist(px + float2(0, e)) - Dist(px - float2(0, e)));
     float gl = length(g);
     float2 n = gl > 1e-5 ? g / gl : float2(0, 0);
 

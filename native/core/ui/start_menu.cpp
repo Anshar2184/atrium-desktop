@@ -69,7 +69,7 @@ D2D1_RECT_F StartMenu::PowerRect() const
     // Right-aligned with the power button, the last in the capsule.
     D2D1_RECT_F shelf = ShelfRect();
     float right = std::min(shelf.right - (barH_ - ButtonSize()) / 2 + 6, W());
-    float bottom = shelf.top - 8, h = 3 * kPowerRowH + 2 * kPowerPad;
+    float bottom = shelf.top - 8, h = 4 * kPowerRowH + 2 * kPowerPad;
     return D2D1::RectF(right - kPowerW, bottom - h, right, bottom);
 }
 
@@ -575,9 +575,9 @@ void StartMenu::PaintPower(Canvas& c, const Theme& t)
     if (e < 1)
         c.Continue();
     c.BeginGroup(Ease(e * 1.3f), 0.92f + 0.08f * EaseBack(e), card.right - 22, card.bottom);
-    static const wchar_t* const kGlyphs[] = {L"\uE708", L"\uE72C", L"\uE7E8"};
-    static const wchar_t* const kNames[] = {L"睡眠", L"重启", L"关机"};
-    for (int i = 0; i < 3; ++i) {
+    static const wchar_t* const kGlyphs[] = {L"\uE708", L"\uE72C", L"\uE7E8", L"\uE72E"};
+    static const wchar_t* const kNames[] = {L"睡眠", L"重启", L"关机", L"锁定"};
+    for (int i = 0; i < 4; ++i) {
         D2D1_RECT_F row = D2D1::RectF(card.left + 8, card.top + kPowerPad + kPowerRowH * float(i), card.right - 8,
                                       card.top + kPowerPad + kPowerRowH * float(i + 1));
         std::wstring id = L"pw:" + std::to_wstring(i);
@@ -616,9 +616,14 @@ void StartMenu::Launch(const CatalogApp& app)
 
 void StartMenu::RunPower(int index)
 {
-    if (index < 0 || index > 2)
+    if (index < 0 || index > 3)
         return;
     Close(true);
+    if (index == 3) { // Atrium's lock screen, then Windows' own lock
+        if (onSystem)
+            onSystem(L"lock");
+        return;
+    }
     RunPowerAction(index == 0 ? PowerAction::Sleep : index == 1 ? PowerAction::Restart : PowerAction::Shutdown);
 }
 
@@ -817,7 +822,7 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return false;
     case WM_KEYDOWN:
         if (powerOpen_ && (w == VK_UP || w == VK_DOWN)) {
-            powerSel_ = std::clamp(powerSel_ < 0 ? 0 : powerSel_ + (w == VK_DOWN ? 1 : -1), 0, 2);
+            powerSel_ = std::clamp(powerSel_ < 0 ? 0 : powerSel_ + (w == VK_DOWN ? 1 : -1), 0, 3);
             surface_.Invalidate();
             return true;
         }

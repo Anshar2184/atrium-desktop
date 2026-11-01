@@ -522,7 +522,7 @@ void Surface::SetRadius(float dip)
 void Surface::SetShapes(const std::vector<ShapeDip>& shapes)
 {
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
-        return a.radius == b.radius && a.fade == b.fade && a.rect.left == b.rect.left && a.rect.top == b.rect.top && a.rect.right == b.rect.right && a.rect.bottom == b.rect.bottom;
+        return a.radius == b.radius && a.fade == b.fade && a.sdf == b.sdf && a.rect.left == b.rect.left && a.rect.top == b.rect.top && a.rect.right == b.rect.right && a.rect.bottom == b.rect.bottom;
     };
     if (shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
         return;
@@ -543,7 +543,7 @@ void Surface::PublishPanel()
     for (const ShapeDip& s : shapes_) {
         // Whole px, so the glass and the content's washes line up.
         auto px = [&](float v) { return std::round(v * scale_) + p.inset; };
-        p.shapes.push_back({px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade});
+        p.shapes.push_back({px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade, s.sdf});
     }
     p.visible = visible_ || hiding_;
     p.pop = pop_;

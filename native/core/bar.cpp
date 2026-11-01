@@ -117,6 +117,7 @@ std::vector<GlassParams> PanelParams(const Settings& s, float scale, const Glass
         g.shapeB = sh.bottom;
         g.radius = std::min(sh.radius, std::min(sh.right - sh.left, sh.bottom - sh.top) / 2);
         g.fade = sh.fade;
+        g.sdf = sh.sdf ? 1.f : 0.f;
         out.push_back(g);
     }
     return out;
@@ -1336,7 +1337,10 @@ bool Bar::RenderSession()
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         bool dark = false;
         InkGrid grid;         // ink region by region (published for the popup)
+        // Distance-field shapes as textures, by image (the image is kept alive here).
+        std::map<const SdfImage*, std::pair<std::shared_ptr<const SdfImage>, winrt::com_ptr<ID3D11ShaderResourceView>>> sdfs;
         std::vector<GlassParams> params;
+        std::vector<ID3D11ShaderResourceView*> views; // the distance fields last presented
     };
     std::map<HWND, PanelState> panels;
     // Draws the panels; true while one of them animates.
@@ -1426,10 +1430,43 @@ bool Bar::RenderSession()
             }
             if (!r.HasBackdrop())
                 continue; // waits for the first capture frame under it
-            bool same = gp.size() == ps.params.size() && memcmp(gp.data(), ps.params.data(), gp.size() * sizeof(GlassParams)) == 0;
+            // Distance fields: a texture per image, made once.
+            std::vector<ID3D11ShaderResourceView*> sdfViews(gp.size(), nullptr);
+            bool anySdf = false;
+            for (size_t k = 0; k < p.shapes.size() && k < gp.size(); ++k) {
+                const auto& img = p.shapes[k].sdf;
+                if (!img || img->w <= 0 || img->h <= 0 || img->d.size() < size_t(img->w) * size_t(img->h))
+                    continue;
+                auto& slot = ps.sdfs[img.get()];
+                if (!slot.second) {
+                    D3D11_TEXTURE2D_DESC td{};
+                    td.Width = UINT(img->w);
+                    td.Height = UINT(img->h);
+                    td.MipLevels = 1;
+                    td.ArraySize = 1;
+                    td.Format = DXGI_FORMAT_R32_FLOAT;
+                    td.SampleDesc.Count = 1;
+                    td.Usage = D3D11_USAGE_IMMUTABLE;
+                    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                    D3D11_SUBRESOURCE_DATA init{img->d.data(), UINT(img->w * 4), 0};
+                    winrt::com_ptr<ID3D11Texture2D> tex;
+                    if (SUCCEEDED(gpu.device->CreateTexture2D(&td, &init, tex.put())))
+                        gpu.device->CreateShaderResourceView(tex.get(), nullptr, slot.second.put());
+                    slot.first = img;
+                }
+                sdfViews[k] = slot.second.get();
+                anySdf = true;
+            }
+            for (auto it = ps.sdfs.begin(); it != ps.sdfs.end();) { // images no longer shown
+                bool used = std::any_of(p.shapes.begin(), p.shapes.end(), [&](const GlassShape& s) { return s.sdf.get() == it->first; });
+                it = used ? std::next(it) : ps.sdfs.erase(it);
+            }
+            bool same = gp.size() == ps.params.size() && memcmp(gp.data(), ps.params.data(), gp.size() * sizeof(GlassParams)) == 0 &&
+                        sdfViews == ps.views;
             if (!changed && r.HasPresented() && same)
                 continue;
-            if (!r.Present(gp, nullptr)) {
+            ps.views = sdfViews;
+            if (!r.Present(gp, nullptr, anySdf ? &sdfViews : nullptr)) {
                 lost = true;
                 return false;
             }
@@ -1481,9 +1518,23 @@ bool Bar::RenderSession()
         auto frame = capture.TryLatest();
         if (snap.hmonitor != MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY))
             return true; // primary monitor changed: new device and capture
+        if (refreeze_.exchange(false))
+            frozen = nullptr;
         if (!snap.visible) {
             bool lost = false;
-            panelsMoving = renderPanels(snap, frame ? MonitorCapture::TextureOf(frame).get() : nullptr, lost);
+            winrt::com_ptr<ID3D11Texture2D> hidden = frame ? MonitorCapture::TextureOf(frame) : nullptr;
+            if (debugCapturable_ && hidden) { // the popups show in screenshots: they must not sample themselves
+                if (!frozen) {
+                    D3D11_TEXTURE2D_DESC d{};
+                    hidden->GetDesc(&d);
+                    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                    d.MiscFlags = 0;
+                    winrt::check_hresult(gpu.device->CreateTexture2D(&d, nullptr, frozen.put()));
+                    gpu.context->CopyResource(frozen.get(), hidden.get());
+                }
+                hidden = frozen;
+            }
+            panelsMoving = renderPanels(snap, hidden.get(), lost);
             if (frame)
                 frame.Close();
             if (lost)

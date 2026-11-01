@@ -7,15 +7,24 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace atrium {
+
+// A shape given as a signed distance field (px, negative inside), one value
+// per px of the shape's rectangle: the lock screen's clock digits.
+struct SdfImage {
+    int w = 0, h = 0;
+    std::vector<float> d;
+};
 
 // One piece of glass inside a popup window, window px.
 struct GlassShape {
     float left = 0, top = 0, right = 0, bottom = 0;
     float radius = 0;
     float fade = 0; // 0 = as is, 1 = gone
+    std::shared_ptr<const SdfImage> sdf; // the shape inside the rectangle; null: a rounded rectangle
     bool operator==(const GlassShape&) const = default;
 };
 

@@ -25,7 +25,7 @@ struct GlassParams {
     float refract, dispersion, blurLod, tintMix;
     float tintR, tintG, tintB, tintA;
     float highlight, shadow, lightX, lightY;
-    float inset, blurMix, fade, pad1; // fade: 0 = as is, 1 = gone
+    float inset, blurMix, fade, sdf; // fade: 0 = as is, 1 = gone; sdf: 1 = the shape is a distance field (Present's sdfs)
     // The shape in window px; all zero: the window minus `inset` on every side.
     float shapeL, shapeT, shapeR, shapeB;
     // Press ripple: centre (window px), ring radius, strength; strength 0 = none.
@@ -82,7 +82,9 @@ public:
     // presents. Returns false if the device was lost.
     bool Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay);
     // Several shapes, back to front (each with its own shadow), then the overlay.
-    bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay);
+    // sdfs: per shape, the distance field of a shape whose `sdf` is 1 (else null).
+    bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay,
+                 const std::vector<ID3D11ShaderResourceView*>* sdfs = nullptr);
 
     ID2D1DeviceContext2* D2D() const { return d2d_.get(); }
     IDWriteFactory3* DWrite() const { return dwrite_.get(); }

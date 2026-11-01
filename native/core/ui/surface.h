@@ -46,6 +46,7 @@ struct ShapeDip {
     D2D1_RECT_F rect;
     float radius;
     float fade = 0; // 0 = as is, 1 = gone
+    std::shared_ptr<const SdfImage> sdf; // a shape of its own inside rect (distance field at the window's scale)
 };
 
 class Surface;
