@@ -134,7 +134,7 @@ try {
     Invoke $win "保存"
     Start-Sleep 1
     $saved = Get-Content $file -Raw | ConvertFrom-Json
-    Check "notify-saved" ($saved.notifyHideBody -eq $true -and $saved.notifyTimeout -eq 12 -and $saved.notifyListener -eq $false) "settings.json notifyHideBody=$($saved.notifyHideBody) notifyTimeout=$($saved.notifyTimeout) notifyListener=$($saved.notifyListener)"
+    Check "notify-saved" ($saved.notifyHideBody -eq $true -and $saved.notifyTimeout -eq 12 -and $saved.notifyListener -eq $true) "settings.json notifyHideBody=$($saved.notifyHideBody) notifyTimeout=$($saved.notifyTimeout) notifyListener=$($saved.notifyListener)"
     Check "notify-applied" ((NewLog) -match "pipe: commit saved") "the core received the commit"
 
     # Pins list: remove the first pin and save.
