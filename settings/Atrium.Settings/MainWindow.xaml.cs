@@ -335,6 +335,7 @@ public sealed partial class MainWindow : Window
         RunningSwitch.IsOn = _current.ShowRunning;
         HideBodySwitch.IsOn = _current.NotifyHideBody;
         ListenerSwitch.IsOn = _current.NotifyListener;
+        WeChatSwitch.IsOn = _current.NotifyWeChat;
         _autoWidthGlyph?.Update(_current.AutoWidth ? 1 : 0);
         _clockGlyph?.Update(_current.ShowClock ? 1 : 0);
         _runningGlyph?.Update(_current.ShowRunning ? 1 : 0);
@@ -421,6 +422,13 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.NotifyListener = ListenerSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnWeChatToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.NotifyWeChat = WeChatSwitch.IsOn;
         Changed();
     }
 

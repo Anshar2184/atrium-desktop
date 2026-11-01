@@ -30,7 +30,8 @@ internal sealed class BarSettings
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public double NotifyTimeout { get; set; } = 6;    // seconds a popup stays
     public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
-    public bool NotifyListener { get; set; }           // experimental: mirror Windows notifications
+    public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
+    public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
     // Null = the key was absent (never saved); the core then imports the Windows pins.
     public List<PinnedApp>? Pins { get; set; }
 
@@ -61,7 +62,7 @@ internal sealed class BarSettings
     {
         var o = new JsonObject
         {
-            ["version"] = 1,
+            ["version"] = 2,
             ["preset"] = Preset,
             ["transparency"] = Transparency,
             ["cornerRadius"] = CornerRadius,
@@ -84,6 +85,7 @@ internal sealed class BarSettings
             ["notifyTimeout"] = NotifyTimeout,
             ["notifyHideBody"] = NotifyHideBody,
             ["notifyListener"] = NotifyListener,
+            ["notifyWeChat"] = NotifyWeChat,
         };
         if (Pins != null)
         {
@@ -125,7 +127,10 @@ internal sealed class BarSettings
         s.ShowRunning = Flag("showRunning", f.ShowRunning);
         s.NotifyTimeout = Math.Clamp(Num("notifyTimeout", f.NotifyTimeout), 3, 30);
         s.NotifyHideBody = Flag("notifyHideBody", f.NotifyHideBody);
-        s.NotifyListener = Flag("notifyListener", f.NotifyListener);
+        // Version 1 files saved the old default (off): from version 2 it is on (as in the core).
+        bool v1 = o?["version"] is JsonValue ver && ver.TryGetValue(out double vn) && vn < 2;
+        s.NotifyListener = v1 ? f.NotifyListener : Flag("notifyListener", f.NotifyListener);
+        s.NotifyWeChat = Flag("notifyWeChat", f.NotifyWeChat);
         s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
             ? (tcs is "light" or "dark" ? tcs : "auto")
             : f.TextColor;

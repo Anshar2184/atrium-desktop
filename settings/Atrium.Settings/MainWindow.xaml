@@ -494,13 +494,34 @@
                                             </Border>
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                                 <TextBlock Text="显示 Windows 通知" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Text="实验" Style="{StaticResource HintStyle}" />
+                                                <TextBlock Text="QQ、飞书等发出系统通知的应用" Style="{StaticResource HintStyle}" />
                                             </StackPanel>
                                             <ToggleSwitch x:Name="ListenerSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
                                                           AutomationProperties.Name="显示 Windows 通知" VerticalAlignment="Center" Toggled="OnListenerToggled" />
                                         </Grid>
                                         <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="把其他应用的通知也显示为 Atrium 卡片。Windows 自己的通知横幅仍会出现（Atrium 不会关闭你的系统通知），所以同一条通知会看到两次。需要在 Windows 隐私设置中允许访问通知。" />
+                                                   Text="把其他应用的通知显示为 Atrium 卡片。Atrium 不会改动你的系统通知：如果不想同时看到 Windows 自己的横幅，可以在 Windows 设置 › 通知里关闭对应应用的“显示通知横幅”，保留“在通知中心显示”。需要在 Windows 隐私设置中允许访问通知。" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE8BD;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                <TextBlock Text="显示微信消息" Style="{StaticResource CardTitleStyle}" />
+                                                <TextBlock Text="实验" Style="{StaticResource HintStyle}" />
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="WeChatSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
+                                                          AutomationProperties.Name="显示微信消息" VerticalAlignment="Center" Toggled="OnWeChatToggled" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="微信不发出系统通知。Atrium 读取微信窗口里的会话列表（只读，不改动微信），有新的未读消息时显示卡片；免打扰的会话不提醒。微信窗口需要打开过一次。" />
                                     </Grid>
                                 </Border>
                             </local:ResponsiveGrid>
