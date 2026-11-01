@@ -34,6 +34,8 @@ add_executable(atrium_core WIN32
     shell/system_status.cpp
     shell/wifi.cpp
     shell/radios.cpp
+    shell/audio_devices.cpp
+    shell/projection.cpp
     shell/tray_model.cpp
     shell/wechat_source.cpp
     shell/feishu_source.cpp

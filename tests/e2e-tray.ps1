@@ -4,7 +4,8 @@
   and the status icon on the bar, the panel listing a test tray icon (a
   WinForms NotifyIcon in a child process), a left and a right click on it in
   the panel reaching that program as its own tray clicks, the control centre's
-  pieces of glass and its Bluetooth page, the wheel over the status icon and the volume slider (dragged from its symbol too), and
+  pieces of glass and its Bluetooth page, the wheel over the status icon and the volume slider (dragged from its symbol too), the sound's
+  page (output devices, apps) and the cast page (wireless displays, projection modes), and
   a notice from that program opening it through its tray icon, and
   the calendar from the clock (a month with lunar dates, turning the page).
 
@@ -185,6 +186,23 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     [U]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 500
     $sd = ControlState
     Check "slider-drags-from-symbol" ([int](Field $sd "volume") -ge 35 -and [int](Field $sd "volume") -le 65 -and (Field $sd "muted") -eq "0") "a drag from the symbol to the middle: volume=$(Field $sd 'volume') muted=$(Field $sd 'muted')"
+    # The sound's page: the playback devices (the default one marked) and the apps; choosing the
+    # default device again changes nothing. Only read here: the test never switches the user's device.
+    C control-state
+    $sp = Spot "control: spots" "sound-page"
+    ClickAt $sp[0] $sp[1]; Start-Sleep 2.5
+    $ss = ControlState
+    $def = [int](Field $ss "defaultOutput")
+    if ($def -ge 0) { C control-click "out:$def"; Start-Sleep 1 }
+    $ss2 = ControlState
+    Key 0x1B; Start-Sleep 0.6
+    Check "sound-page" ((Field $ss "page") -eq "sound" -and [int](Field $ss "outputs") -ge 1 -and $def -ge 0 -and [int](Field $ss2 "defaultOutput") -eq $def -and (Field (ControlState) "page") -eq "main") "$ss; after choosing it again defaultOutput=$(Field $ss2 'defaultOutput')"
+    # The cast page: the wireless displays (searched for) and Win+P's modes (read, never set here).
+    $cp = Spot "control: spots" "cast"
+    ClickAt $cp[0] $cp[1]; Start-Sleep 3
+    $cs = ControlState
+    Key 0x1B; Start-Sleep 0.6
+    Check "cast-page" ((Field $cs "page") -eq "cast" -and [int](Field $cs "mode") -ge 1 -and [int](Field $cs "shapes") -eq 1) $cs
     C control-volume $volume0
     Key 0x1B
 

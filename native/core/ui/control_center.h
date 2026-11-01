@@ -3,10 +3,14 @@
 // each a round switch and its state); top right the battery and screen
 // casting; below, sliders for the screen's brightness and the sound. The
 // connections open their own page in place: the Wi-Fi networks in range
-// (connecting to saved ones) or the paired Bluetooth devices. Drawn by
+// (connecting to saved ones) or the paired Bluetooth devices; so do the sound
+// (the output device and each app's volume, as on the Windows taskbar) and
+// casting (wireless displays and the projection modes of Win+P). Drawn by
 // Atrium; only the system's dialogs and settings pages are left to Windows.
 #pragma once
 
+#include "shell/audio_devices.h"
+#include "shell/projection.h"
 #include "shell/radios.h"
 #include "shell/system_status.h"
 #include "shell/wifi.h"
@@ -38,7 +42,7 @@ public:
     std::function<void()> onChanged; // volume, mute or the network changed: the bar's icon updates
 
 private:
-    enum class Page { Main, Wifi, Bluetooth };
+    enum class Page { Main, Wifi, Bluetooth, Sound, Cast };
     struct Hit {
         D2D1_RECT_F rect;
         std::wstring id;
@@ -47,6 +51,9 @@ private:
     void PaintMain(Canvas& c, const Theme& t, std::vector<ShapeDip>& shapes);
     void PaintWifi(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintBluetooth(Canvas& c, const Theme& t, D2D1_RECT_F card);
+    void PaintSound(Canvas& c, const Theme& t, D2D1_RECT_F card);
+    void PaintCast(Canvas& c, const Theme& t, D2D1_RECT_F card);
+    void Link(Canvas& c, const Theme& t, const std::wstring& id, const std::wstring& label, float left, float right, float y, int align);
     void PaintSlider(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& id, const std::wstring& title, const std::wstring& glyph,
                      int value, bool dim, const std::wstring& right, D2D1_RECT_F& track);
     float PaintHeader(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& title, bool on, const std::wstring& toggleId);
@@ -56,6 +63,8 @@ private:
     void Activate(const std::wstring& id);
     void Scan(bool rescan);
     void ReadRadios(bool devices);
+    void ReadAudio(bool icons);
+    void ReadMode();
     void SetRadioAsync(bool bluetooth, bool on);
     void Place();
     void ShowPage(Page page);
@@ -91,6 +100,18 @@ private:
     std::map<std::wstring, std::pair<float, double>> hoverAnim_;
     int brightPending_ = -1; // a brightness the worker has yet to set
     bool brightBusy_ = false;
+    // Sound output page.
+    std::vector<AudioOutput> outputs_;
+    std::vector<AudioApp> apps_;
+    bool audioRead_ = false;
+    std::vector<std::wstring> iconTried_;  // apps whose icon was asked for
+    std::vector<D2D1_RECT_F> appTracks_;   // the apps' sliders, DIP
+    // Cast page.
+    DisplayFinder finder_;
+    std::vector<WirelessDisplay> displays_;
+    std::wstring projecting_, connecting_; // display ids
+    ProjectionMode mode_ = ProjectionMode::Unknown;
+    int monitors_ = 1;
 };
 
 } // namespace atrium
