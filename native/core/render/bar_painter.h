@@ -5,6 +5,7 @@
 // scales it, so hit testing on the base layout stays exact (D25).
 #pragma once
 
+#include "../shell/system_status.h"
 #include "../shell/task_model.h"
 
 #include <d2d1_3.h>
@@ -39,7 +40,8 @@ struct BarScene {
     D2D1_RECT_F bar{};         // the glass shape inside the window
     float scale = 1;
     std::vector<SceneItem> items;  // apps only (drag and drop works on these)
-    std::vector<SceneItem> extras; // Atrium logo (#start), overflow (#more), notifications (#notify)
+    std::vector<SceneItem> extras; // Atrium logo (#start), overflow (#more), tray (#tray), status (#status), notifications (#notify)
+    SystemStatus status;           // drawn by the #status entry
     float separatorX = -1;     // < 0: none
     D2D1_RECT_F clock{};       // empty: no clock
     float timePx = 0, datePx = 0;
@@ -90,6 +92,9 @@ private:
     ID2D1Bitmap1* BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& item);
     IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT weight, const wchar_t* family = L"Segoe UI Variable Text");
     void DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
+    // The status icon in `r` (icon height): Wi-Fi strength (or wired / offline)
+    // and the battery with its level, or the volume without a battery.
+    void DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, bool darkInk);
     float MapX(float u) const; // base x -> displayed x under the magnification
 
     struct Motion {

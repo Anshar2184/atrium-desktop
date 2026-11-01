@@ -32,9 +32,14 @@ add_executable(atrium_core WIN32
     shell/task_model.cpp
     shell/app_catalog.cpp
     shell/system_status.cpp
+    shell/wifi.cpp
+    shell/tray_model.cpp
+    shell/wechat_source.cpp
     ui/surface.cpp
     ui/start_menu.cpp
     ui/notifications.cpp
+    ui/tray_panel.cpp
+    ui/control_center.cpp
     shell/notification_listener.cpp
     render/bar_painter.cpp
     render/capture.cpp
@@ -55,7 +60,7 @@ target_include_directories(atrium_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 set(atrium_task_libs windowsapp dwmapi version propsys shlwapi ole32 oleaut32 uuid shell32 user32 gdi32)
 target_link_libraries(atrium_core PRIVATE
     windowsapp d3d11 dxgi dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32
-    dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof)
+    dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof wlanapi windowscodecs)
 
 # Console probe for the task model (not part of the default build):
 #   atrium_task_probe.exe <seconds> <icon-dir> [--selftest]

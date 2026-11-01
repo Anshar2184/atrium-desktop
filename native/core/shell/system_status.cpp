@@ -1,9 +1,12 @@
 #include "shell/system_status.h"
 
 #include "log.h"
+#include "shell/wifi.h"
 
 #include <windows.h>
 #include <endpointvolume.h>
+#include <propsys.h>
+#include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
 #include <netlistmgr.h>
 #include <powrprof.h>
@@ -19,7 +22,7 @@ namespace atrium {
 
 namespace {
 
-winrt::com_ptr<IAudioEndpointVolume> DefaultVolume()
+winrt::com_ptr<IAudioEndpointVolume> DefaultVolume(std::wstring* name = nullptr)
 {
     winrt::com_ptr<IMMDeviceEnumerator> devices;
     winrt::com_ptr<IMMDevice> device;
@@ -28,6 +31,14 @@ winrt::com_ptr<IAudioEndpointVolume> DefaultVolume()
         FAILED(devices->GetDefaultAudioEndpoint(eRender, eConsole, device.put())) ||
         FAILED(device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER, nullptr, volume.put_void())))
         return nullptr;
+    winrt::com_ptr<IPropertyStore> props;
+    if (name && SUCCEEDED(device->OpenPropertyStore(STGM_READ, props.put()))) {
+        PROPVARIANT v;
+        PropVariantInit(&v);
+        if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR && v.pwszVal)
+            *name = v.pwszVal;
+        PropVariantClear(&v);
+    }
     return volume;
 }
 
@@ -42,9 +53,10 @@ SystemStatus QuerySystemStatus()
         s.battery = ps.BatteryFlag != 128 && ps.BatteryFlag != 255 && ps.BatteryLifePercent <= 100;
         s.batteryPercent = s.battery ? ps.BatteryLifePercent : -1;
         s.charging = ps.ACLineStatus == 1;
+        s.batteryMinutes = s.battery && !s.charging && ps.BatteryLifeTime != DWORD(-1) ? int(ps.BatteryLifeTime / 60) : -1;
     }
     try {
-        if (auto v = DefaultVolume()) {
+        if (auto v = DefaultVolume(&s.audioDevice)) {
             float level = 0;
             BOOL mute = FALSE;
             v->GetMasterVolumeLevelScalar(&level);
@@ -87,6 +99,15 @@ SystemStatus QuerySystemStatus()
                     s.network = first;
             }
         }
+        // Wi-Fi: the signal, and its SSID where the WLAN API gives it out
+        // (Windows 11 may withhold it from apps without location access).
+        WifiState w = QueryWifi();
+        if (w.connected && s.connected) {
+            s.wifi = true;
+            s.signal = w.signal;
+            if (!w.ssid.empty() && (s.network.empty() || !s.online))
+                s.network = w.ssid;
+        }
     } catch (...) {
         Log(L"status: query failed");
     }
@@ -105,6 +126,15 @@ int AdjustVolume(int delta)
     if (delta > 0)
         v->SetMute(FALSE, nullptr);
     return int(std::lround(level * 100));
+}
+
+void SetVolume(int percent)
+{
+    if (auto v = DefaultVolume()) {
+        v->SetMasterVolumeLevelScalar(float(std::clamp(percent, 0, 100)) / 100.f, nullptr);
+        if (percent > 0)
+            v->SetMute(FALSE, nullptr);
+    }
 }
 
 bool ToggleMute()

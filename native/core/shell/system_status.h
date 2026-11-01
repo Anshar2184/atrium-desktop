@@ -1,6 +1,6 @@
-// Battery, volume and network state for the start menu's footer, through
-// public APIs only (GetSystemPowerStatus, Core Audio, Network List Manager),
-// and the power actions.
+// Battery, volume and network state for the bar's status icon, the control
+// centre and the start menu, through public APIs only (GetSystemPowerStatus,
+// Core Audio, Network List Manager, WLAN), and the power actions.
 #pragma once
 
 #include <string>
@@ -10,18 +10,24 @@ namespace atrium {
 struct SystemStatus {
     bool battery = false;   // a system battery is present
     int batteryPercent = -1;
-    bool charging = false;
+    bool charging = false;  // on mains power
+    int batteryMinutes = -1; // estimated time left on battery; -1 unknown
     bool audio = false;     // a default playback device exists
     int volume = 0;         // 0..100
     bool muted = false;
+    std::wstring audioDevice; // its name
     bool online = false;    // internet connectivity
     bool connected = false; // any network
     std::wstring network;   // name of the connected network
+    bool wifi = false;      // the connection is Wi-Fi (else wired or other)
+    int signal = 0;         // Wi-Fi signal 0..100
+    bool operator==(const SystemStatus&) const = default;
 };
 
 SystemStatus QuerySystemStatus();
 // Changes the default playback volume by `delta` percent points; returns the new level.
 int AdjustVolume(int delta);
+void SetVolume(int percent); // 0..100; unmutes above 0
 bool ToggleMute();
 
 enum class PowerAction { Sleep, Restart, Shutdown };

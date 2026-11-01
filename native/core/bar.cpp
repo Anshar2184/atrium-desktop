@@ -29,6 +29,8 @@ constexpr wchar_t kInputClass[] = L"AtriumBarInput";
 constexpr wchar_t kClockKey[] = L"#clock";
 constexpr wchar_t kStartKey[] = L"#start";
 constexpr wchar_t kNotifyKey[] = L"#notify";
+constexpr wchar_t kTrayKey[] = L"#tray";
+constexpr wchar_t kStatusKey[] = L"#status";
 constexpr wchar_t kMoreKey[] = L"#more";
 // Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
 bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
@@ -40,6 +42,7 @@ constexpr UINT_PTR kFileHoverTimer = 2;
 constexpr UINT kFileHoverDelayMs = 600;
 constexpr UINT_PTR kGuardTimer = 3;
 constexpr UINT kGuardMs = 1000;
+constexpr UINT kGuardFastMs = 150; // while below a system taskbar the user is using
 
 Bar* g_guard = nullptr; // the bar whose stacking the WinEvent hooks look after
 
@@ -65,6 +68,11 @@ bool IgnoredCover(HWND w)
 }
 
 int Px(double dip, float scale) { return int(std::lround(dip * scale)); }
+
+// Ink over the glass (mean sRGB luminance of what it shows, 0..1): black and
+// white text read equally well near 0.46, so dark ink from 0.50 up and light
+// ink again below 0.42. Light grey windows (0.5..0.65) used to keep white text.
+constexpr float kDarkInkAbove = 0.50f, kLightInkBelow = 0.42f;
 
 GlassParams ParamsFor(const Settings& s, float scale)
 {
@@ -480,6 +488,10 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                 onStartClick(anchor);
             else if (key == kNotifyKey && onNotifyClick)
                 onNotifyClick(anchor);
+            else if (key == kTrayKey && onTrayClick)
+                onTrayClick(anchor);
+            else if (key == kStatusKey && onStatusClick)
+                onStatusClick(anchor);
             else if (key == kMoreKey && onOverflow)
                 onOverflow(hidden_, anchor);
         } else if (launch ? bool(onLaunch) : bool(onActivate)) {
@@ -497,6 +509,14 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             SetRegion(false);
         }
         return 0;
+    case WM_MOUSEWHEEL: { // over the status icon: the volume
+        POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        ScreenToClient(h, &p);
+        int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
+        if (notches && HitTest(p) == kStatusKey && onStatusWheel)
+            onStatusWheel(notches);
+        return 0;
+    }
     case WM_RBUTTONUP: {
         if (dragging_)
             return 0;
@@ -662,8 +682,10 @@ void Bar::Relayout()
         clockW = int(std::ceil(w)) + Px(22, s);
     }
 
-    // Left to right: [logo] [apps ... (overflow)] | [clock] [bell]. The logo,
-    // the overflow entry and the bell use the same plates as the apps.
+    // Left to right: [logo] [apps ... (overflow)] | [tray] [status] [clock] [bell].
+    // The logo, the overflow entry, the tray and the bell use the same plates
+    // as the apps; the status icon (Wi-Fi with battery or volume) a wider one.
+    const int statusW = std::max(plate, int(std::lround(float(icon) * 1.75f)) + Px(12, s));
     const int total = int(items_.size());
     int n = total;
     bool more = false;
@@ -672,7 +694,8 @@ void Bar::Relayout()
         int slots = count + (overflow ? 1 : 0);
         int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
-        w += 2 * sepGap + (clockW ? clockW + g : 0) + p; // separator, clock, bell
+        w += 2 * sepGap + p + g + statusW + g;            // separator, tray, status
+        w += (clockW ? clockW + g : 0) + p;               // clock, bell
         return std::max(w, barH * 2);
     };
     // The magnified bar stretches by up to (mag - 1) * range on top of its width.
@@ -693,7 +716,8 @@ void Bar::Relayout()
     hidden_.clear();
     for (int i = n; i < total; ++i)
         hidden_.push_back(items_[size_t(i)].key);
-    const int barW = st.autoWidth ? std::min(contentWidth(n, plate, gap, more), maxW) : maxW;
+    // Never narrower than what is always there (logo, overflow, tray, status, clock, bell).
+    const int barW = std::max(st.autoWidth ? std::min(contentWidth(n, plate, gap, more), maxW) : maxW, std::min(contentWidth(0, plate, gap, more), screenW));
     const int pad = padFor(plate);
     const int v = (barH - plate) / 2;
     const int pitch = plate + gap;
@@ -774,7 +798,10 @@ void Bar::Relayout()
     const int bellLeft = insetX + barW - pad - plate;
     const int clockRight = bellLeft - (clockW ? gap : 0);
     const int clockLeft = clockRight - clockW;
-    const int rightLeft = clockW ? clockLeft : bellLeft;
+    const int statusRight = (clockW ? clockLeft : bellLeft) - gap;
+    const int statusLeft = statusRight - statusW;
+    const int trayLeft = statusLeft - gap - plate;
+    const int rightLeft = trayLeft;
     const int appsMin = startLeft + plate + 2 * gap;
     const int slots = n + (more ? 1 : 0);
     const int appsW = slots ? slots * plate + (slots - 1) * gap : 0;
@@ -835,16 +862,24 @@ void Bar::Relayout()
     gap_ = gap;
     shown_ = n;
     scene.separatorX = float(rightLeft - sepGap);
+    scene.extras.push_back(entry(kTrayKey, trayLeft, L"\uE70E"));
+    hits_.push_back({kTrayKey, RECT{rightLeft - sepGap, hitTop, trayLeft + plate + gap / 2, hitBottom}});
+    SceneItem status = entry(kStatusKey, statusLeft, L"");
+    status.plate = D2D1::RectF(float(statusLeft), plateTop, float(statusRight), plateTop + float(plate));
+    status.icon = D2D1::RectF(float(statusLeft), iconTop, float(statusRight), iconTop + float(icon));
+    scene.extras.push_back(std::move(status));
+    hits_.push_back({kStatusKey, RECT{trayLeft + plate + gap / 2, hitTop, statusRight + gap / 2, hitBottom}});
+    scene.status = status_;
     if (clockW) {
         scene.clock = D2D1::RectF(float(clockLeft), plateTop, float(clockRight), plateTop + float(plate));
         scene.timePx = timePx;
         scene.datePx = datePx;
-        hits_.push_back({kClockKey, RECT{rightLeft - sepGap, hitTop, clockRight + gap / 2, hitBottom}});
+        hits_.push_back({kClockKey, RECT{statusRight + gap / 2, hitTop, clockRight + gap / 2, hitBottom}});
     }
     SceneItem bell = entry(kNotifyKey, bellLeft, L"\uEA8F");
     bell.badge = unread_;
     scene.extras.push_back(std::move(bell));
-    hits_.push_back({kNotifyKey, RECT{clockW ? clockRight + gap / 2 : rightLeft - sepGap, hitTop, insetX + barW, hitBottom}});
+    hits_.push_back({kNotifyKey, RECT{clockW ? clockRight + gap / 2 : statusRight + gap / 2, hitTop, insetX + barW, hitBottom}});
     if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
     scene_ = std::move(scene);
@@ -988,8 +1023,11 @@ void Bar::Raise()
 }
 
 // Keeps the bar on top: hidden behind a full-screen app, below a revealed
-// system taskbar that overlaps it, and otherwise raised again when another
-// topmost window covers it. A window that keeps pushing itself over the bar
+// system taskbar that overlaps it while the user is using that taskbar (the
+// pointer on it outside the bar, or the keyboard in it), and otherwise raised again when
+// another topmost window covers it. A taskbar held up only by an app's
+// flashing button does not push the bar down (the bar shows the app's
+// attention itself). A window that keeps pushing itself over the bar
 // wins after a few rounds, so two always-on-top windows never fight.
 void Bar::GuardStacking(const wchar_t* why)
 {
@@ -1005,9 +1043,23 @@ void Bar::GuardStacking(const wchar_t* why)
     }
     if (!visible_ || fullscreen_ || dragging_)
         return;
-    RECT bar = BarRect(), r{}, overlap{};
+    RECT bar = BarRect(), r{}, overlap{}, trayRect{};
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
-    bool trayOver = tray && IsWindowVisible(tray) && GetWindowRect(tray, &r) && IntersectRect(&overlap, &r, &bar) && overlap.bottom - overlap.top > 2;
+    bool trayOver = tray && IsWindowVisible(tray) && GetWindowRect(tray, &trayRect) && IntersectRect(&overlap, &trayRect, &bar) &&
+                    overlap.bottom - overlap.top > 2;
+    bool usingTray = false;
+    POINT cur{};
+    wchar_t fgCls[64] = {};
+    if (trayOver) {
+        GetCursorPos(&cur);
+        HWND fg = GetForegroundWindow();
+        GetClassNameW(fg, fgCls, 64);
+        // The pointer counts on the system taskbar outside the bar (the screen's
+        // bottom edge reveals it): over the bar it is meant for the bar.
+        RECT ours{window_.left, window_.top, window_.right, bar.bottom};
+        usingTray = (PtInRect(&trayRect, cur) && !PtInRect(&ours, cur)) || fg == tray || wcscmp(fgCls, L"TopLevelWindowForOverflowXamlIsland") == 0 ||
+                    wcscmp(fgCls, L"Shell_TrayWnd") == 0;
+    }
     bool trayAbove = false;
     HWND cover = nullptr;
     for (HWND w = GetTopWindow(nullptr); w && w != visual_; w = GetWindow(w, GW_HWNDNEXT)) {
@@ -1030,15 +1082,36 @@ void Bar::GuardStacking(const wchar_t* why)
             break;
         }
     }
-    if (trayOver) {
+    if (trayOver && usingTray) {
         // The revealed taskbar stays in front; it slides away again by itself.
         if (!trayAbove) {
             SetWindowPos(visual_, tray, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
             SetWindowPos(input_, visual_, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-            Log(L"bar: below the revealed system taskbar");
+            if (!belowTray_)
+                Log(L"bar: below the revealed system taskbar (pointer %ld,%ld, foreground %s)", cur.x, cur.y, fgCls);
         }
+        if (!belowTray_) // the system taskbar gets the pointer now: watch for it coming back to the bar
+            SetTimer(input_, kGuardTimer, kGuardFastMs, nullptr);
+        belowTray_ = true;
         return;
     }
+    if (trayOver && trayAbove) {
+        // Up without the user (an app's button flashing): the bar stays in front.
+        Raise();
+        if (belowTray_)
+            SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
+        if (belowTray_ || !trayHeldUp_)
+            Log(L"bar: over the system taskbar, which an app holds up");
+        belowTray_ = false;
+        trayHeldUp_ = true;
+        return;
+    }
+    if (belowTray_) {
+        Log(L"bar: the system taskbar went down again");
+        SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
+    }
+    belowTray_ = false;
+    trayHeldUp_ = trayOver;
     if (!cover)
         return;
     ULONGLONG now = GetTickCount64();
@@ -1060,6 +1133,16 @@ void Bar::GuardStacking(const wchar_t* why)
         Log(L"bar: raised over %s (%s)", cls, why ? why : L"check");
         lastCover_ = cover;
     }
+}
+
+void Bar::SetStatus(const SystemStatus& status)
+{
+    if (status == status_)
+        return;
+    status_ = status;
+    scene_.status = status;
+    Publish();
+    UpdateTooltips();
 }
 
 void Bar::SetUnread(int count)
@@ -1097,6 +1180,19 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
         return L"\u5F00\u59CB"; // 开始
     if (key == kNotifyKey)
         return unread_ ? std::to_wstring(unread_) + L" \u6761\u672A\u8BFB\u901A\u77E5" : L"\u901A\u77E5"; // N 条未读通知 / 通知
+    if (key == kTrayKey)
+        return L"\u6258\u76D8"; // 托盘
+    if (key == kStatusKey) {
+        const SystemStatus& st = status_;
+        std::wstring net = !st.connected ? L"\u672A\u8FDE\u63A5\u7F51\u7EDC" // 未连接网络
+                                         : (st.wifi ? L"Wi-Fi " : L"") + st.network + (st.wifi ? L" \u00B7 \u4FE1\u53F7 " + std::to_wstring(st.signal) + L"%" : L"");
+        std::wstring more;
+        if (st.battery)
+            more = L"\n\u7535\u6C60 " + std::to_wstring(st.batteryPercent) + L"%" + (st.charging ? L" \u00B7 \u5DF2\u63A5\u901A\u7535\u6E90" : L""); // 电池 N% · 已接通电源
+        if (st.audio)
+            more += L"\n\u97F3\u91CF " + (st.muted ? std::wstring(L"\u9759\u97F3") : std::to_wstring(st.volume) + L"%"); // 音量 N% / 静音
+        return net + more;
+    }
     if (key == kMoreKey)
         return L"\u53E6\u5916 " + std::to_wstring(hidden_.size()) + L" \u4E2A\u5E94\u7528"; // 另外 N 个应用
     if (key == kClockKey) {
@@ -1272,9 +1368,9 @@ bool Bar::RenderSession()
                     area += a;
                 }
                 float lum = GlassLuma(snap.settings, area > 0 ? sum / area : 0.5f);
-                if (!ps.dark && lum > 0.62f)
+                if (!ps.dark && lum > kDarkInkAbove)
                     ps.dark = true;
-                else if (ps.dark && lum < 0.50f)
+                else if (ps.dark && lum < kLightInkBelow)
                     ps.dark = false;
             }
             const std::wstring& tc = snap.settings.textColor;
@@ -1414,9 +1510,9 @@ bool Bar::RenderSession()
                     return;
                 const float pad = float(GlassRenderer::kPad);
                 float lum = rb->RegionLuma(r.left + pad, r.top + pad, r.right + pad, r.bottom + pad) * (1 - tm) + tintLuma * tm;
-                if (!dark && lum > 0.66f)
+                if (!dark && lum > kDarkInkAbove)
                     dark = true;
-                else if (dark && lum < 0.54f)
+                else if (dark && lum < kLightInkBelow)
                     dark = false;
             };
             decide(darkClock, snap.scene.clock);

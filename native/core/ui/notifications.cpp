@@ -117,8 +117,19 @@ void Notifications::Post(Notice n)
     for (auto it = notices_.begin(); it != notices_.end(); ++it) {
         bool sameExternal = n.externalId && it->externalId == n.externalId && it->source == n.source;
         bool burst = it->appId == n.appId && it->app == n.app && it->title == n.title && n.time - it->time < kMergeMs;
-        if (sameExternal)
-            return;
+        if (sameExternal && it->title == n.title && it->body == n.body)
+            return; // seen already
+        if (sameExternal) { // the sender changed its notification: the card follows, as new
+            Notice updated = *it;
+            updated.title = n.title;
+            updated.body = n.body;
+            updated.time = n.time;
+            updated.unread = true;
+            notices_.erase(it);
+            n = updated;
+            Log(L"notify: %llu updated by its sender", n.id);
+            break;
+        }
         if (burst) {
             Notice merged = *it;
             merged.body = n.body;

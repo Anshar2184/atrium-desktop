@@ -1,5 +1,7 @@
 #include "bar_painter.h"
 
+#include "../shell/wifi.h"
+
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -236,8 +238,10 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
     d2d->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE); // premultiplied target: no ClearType
 
     usedBitmaps_.clear();
-    for (const auto& it : scene.extras) // the bell follows the clock's ink, the others the apps'
-        DrawItem(d2d, scene, it, brush.get(), it.key == L"#notify" ? inkFor(darkText) : ink, it.key == L"#notify" ? washFor(darkText) : wash);
+    for (const auto& it : scene.extras) { // the right group follows the clock's ink, the others the apps'
+        bool right = it.key == L"#notify" || it.key == L"#tray" || it.key == L"#status";
+        DrawItem(d2d, scene, it, brush.get(), right ? inkFor(darkText) : ink, right ? washFor(darkText) : wash);
+    }
     for (const auto& it : scene.items)
         if (it.key != scene.dragKey)
             DrawItem(d2d, scene, it, brush.get(), ink, wash);
@@ -321,6 +325,12 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float k = grow * (magnifying ? 1.f : 1 + 0.06f * hover) * (1 + 0.08f * lift) * (1 - 0.08f * m.press) * (0.85f + 0.15f * m.appear);
     float up = m.hop * 0.55f * size + (magnifying ? 0.f : 1.5f * s * hover) + 2.0f * s * lift;
     d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(bx, bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, -up));
+    if (it.key == L"#status") {
+        bool darkInk = ink.r < 0.5f;
+        DrawStatus(d2d, scene.status, icon, brush, ink, darkInk);
+        d2d->SetTransform(D2D1::Matrix3x2F::Identity());
+        return;
+    }
     if (it.key == L"#start") {
         DrawLogo(d2d, icon, m.appear);
     } else if (!it.glyph.empty()) {
@@ -374,6 +384,89 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         c.a *= (1 - lift) * m.appear;
         brush->SetColor(c);
         d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, y), r, r), brush);
+    }
+}
+
+void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
+                            bool darkInk)
+{
+    const float h = r.bottom - r.top, cy = (r.top + r.bottom) / 2;
+    const float wifiW = h * 0.66f, gap = h * 0.20f, batW = h * 0.92f, nub = h * 0.07f;
+    const bool second = st.battery || st.audio;
+    const float total = wifiW + (second ? gap + (st.battery ? batW + nub : h * 0.62f) : 0);
+    const float x0 = (r.left + r.right) / 2 - total / 2;
+    auto dim = [&](float a) {
+        D2D1_COLOR_F c = ink;
+        c.a *= a;
+        return c;
+    };
+
+    // Network: Wi-Fi arcs lit by strength; a plug glyph when wired.
+    if (st.connected && !st.wifi) {
+        if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+            brush->SetColor(ink);
+            d2d->DrawText(L"\uE839", 1, f, D2D1::RectF(x0, r.top, x0 + wifiW, r.bottom), brush);
+        }
+    } else {
+        winrt::com_ptr<ID2D1Factory> factory;
+        d2d->GetFactory(factory.put());
+        const int lit = st.connected ? WifiBars(st.signal) : 0;
+        const float cx = x0 + wifiW / 2, base = cy + h * 0.27f, stroke = h * 0.085f;
+        brush->SetColor(lit >= 1 ? ink : dim(0.32f));
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, base - stroke * 0.4f), stroke * 0.85f, stroke * 0.85f), brush);
+        winrt::com_ptr<ID2D1StrokeStyle> round;
+        factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
+        for (int k = 1; k <= 3; ++k) {
+            float rad = h * (0.10f + 0.115f * float(k));
+            const float a0 = 3.14159f * 1.25f, a1 = 3.14159f * 1.75f; // a quarter circle, opening upwards
+            winrt::com_ptr<ID2D1PathGeometry> arc;
+            winrt::com_ptr<ID2D1GeometrySink> sink;
+            if (FAILED(factory->CreatePathGeometry(arc.put())) || FAILED(arc->Open(sink.put())))
+                continue;
+            sink->BeginFigure(D2D1::Point2F(cx + rad * std::cos(a0), base + rad * std::sin(a0)), D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(cx + rad * std::cos(a1), base + rad * std::sin(a1)), D2D1::SizeF(rad, rad), 0,
+                                          D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            sink->Close();
+            brush->SetColor(lit > k ? ink : dim(0.32f));
+            d2d->DrawGeometry(arc.get(), brush, stroke, round.get());
+        }
+    }
+    if (!second)
+        return;
+    float x = x0 + wifiW + gap;
+    if (!st.battery) { // a desktop: the volume instead
+        const wchar_t* g = st.muted ? L"\uE74F" : st.volume < 34 ? L"\uE993" : st.volume < 67 ? L"\uE994" : L"\uE995";
+        if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+            brush->SetColor(st.muted ? dim(0.5f) : ink);
+            d2d->DrawText(g, 1, f, D2D1::RectF(x, r.top, x + h * 0.62f, r.bottom), brush);
+        }
+        return;
+    }
+    // Battery: a capsule filled to the level, the level written inside it.
+    const float bh = h * 0.50f, br = bh * 0.34f, line = std::max(1.f, h * 0.045f), pad = h * 0.055f;
+    D2D1_RECT_F body = D2D1::RectF(x, cy - bh / 2, x + batW, cy + bh / 2);
+    brush->SetColor(dim(0.45f));
+    d2d->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(body.left + line / 2, body.top + line / 2, body.right - line / 2, body.bottom - line / 2),
+                                                br, br),
+                              brush, line);
+    d2d->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(body.right + h * 0.02f, cy - bh * 0.18f, body.right + h * 0.02f + nub, cy + bh * 0.18f),
+                                                nub / 2, nub / 2),
+                              brush);
+    const int pct = std::clamp(st.batteryPercent, 0, 100);
+    D2D1_RECT_F inner = D2D1::RectF(body.left + pad, body.top + pad, body.right - pad, body.bottom - pad);
+    D2D1_RECT_F fill = inner;
+    fill.right = inner.left + (inner.right - inner.left) * float(pct) / 100.f;
+    D2D1_COLOR_F level = st.charging ? D2D1::ColorF(0x30D158) : pct <= 20 ? D2D1::ColorF(0xFF453A) : ink;
+    brush->SetColor(level);
+    float ir = std::max(0.f, br - pad);
+    d2d->FillRoundedRectangle(D2D1::RoundedRect(fill, ir, ir), brush);
+    if (IDWriteTextFormat* f = Format(bh * 0.66f, DWRITE_FONT_WEIGHT_BOLD)) {
+        std::wstring n = std::to_wstring(pct);
+        // On the fill the number takes the glass's side of the ink, elsewhere the ink.
+        bool onFill = pct >= 55 || st.charging;
+        brush->SetColor(onFill ? (st.charging || darkInk ? D2D1::ColorF(1, 1, 1, 0.98f) : D2D1::ColorF(0.05f, 0.05f, 0.07f, 0.95f)) : ink);
+        d2d->DrawText(n.c_str(), UINT32(n.size()), f, D2D1::RectF(body.left, body.top - h * 0.02f, body.right, body.bottom - h * 0.02f), brush);
     }
 }
 

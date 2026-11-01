@@ -107,6 +107,7 @@ std::wstring Settings::ToJson() const
     num(L"notifyTimeout", notifyTimeout);
     o.SetNamedValue(L"notifyHideBody", json::JsonValue::CreateBooleanValue(notifyHideBody));
     o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
+    o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
     if (pins) {
         json::JsonArray a;
         for (const auto& p : *pins) {
@@ -161,7 +162,12 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"showRunning", s.showRunning);
     num(L"notifyTimeout", s.notifyTimeout);
     flag(L"notifyHideBody", s.notifyHideBody);
-    flag(L"notifyListener", s.notifyListener);
+    // Version 1 saved the old default (off) along with everything else; from
+    // version 2 the notifications are on unless turned off since.
+    bool v1 = o.HasKey(L"version") && o.GetNamedValue(L"version").ValueType() == json::JsonValueType::Number && o.GetNamedNumber(L"version") < 2;
+    if (!v1)
+        flag(L"notifyListener", s.notifyListener);
+    flag(L"notifyWeChat", s.notifyWeChat);
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
         s.textColor = std::wstring(o.GetNamedString(L"textColor"));
     if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {

@@ -10,8 +10,13 @@
 #include "shell/app_catalog.h"
 #include "shell/task_model.h"
 #include "shell/notification_listener.h"
+#include "shell/system_status.h"
+#include "shell/tray_model.h"
+#include "shell/wechat_source.h"
+#include "ui/control_center.h"
 #include "ui/notifications.h"
 #include "ui/start_menu.h"
+#include "ui/tray_panel.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -36,7 +41,11 @@ constexpr UINT WM_TRAY = WM_APP + 2;
 constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.Core.exe
 constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
 constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
+constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
 constexpr UINT_PTR kTrayTimer = 0x51;
+constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
+constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
+constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
@@ -54,6 +63,10 @@ struct App {
     std::unique_ptr<StartMenu> start;
     std::unique_ptr<Notifications> notes;
     std::unique_ptr<NotificationListener> listener;
+    std::unique_ptr<WeChatSource> wechat;
+    std::unique_ptr<TrayModel> tray;
+    std::unique_ptr<TrayPanel> trayPanel;
+    std::unique_ptr<ControlCenter> control;
 };
 
 App g_app;
@@ -161,6 +174,16 @@ void OpenTrayStep2()
 
 void OpenSystem(const std::wstring& what)
 {
+    if (what == L"network" || what == L"volume" || what == L"battery") {
+        g_app.control->Open(g_app.bar->EntryRect(L"#status"), g_app.bar->BarRect());
+        Log(L"start: system entry %s (control centre)", what.c_str());
+        return;
+    }
+    if (what == L"tray") {
+        g_app.trayPanel->Open(g_app.bar->EntryRect(L"#tray"), g_app.bar->BarRect(), g_app.bar->PreviousForeground());
+        Log(L"start: system entry tray (tray panel)");
+        return;
+    }
     if (what == L"network")
         ShellExecuteW(nullptr, L"open", L"ms-availablenetworks:", nullptr, nullptr, SW_SHOWNORMAL);
     else if (what == L"volume")
@@ -173,6 +196,10 @@ void OpenSystem(const std::wstring& what)
         ShellExecuteW(nullptr, L"open", L"ms-settings:yourinfo", nullptr, nullptr, SW_SHOWNORMAL);
     Log(L"start: system entry %s", what.c_str());
 }
+
+void ToggleTray(RECT);
+void ToggleControl(RECT);
+void UpdateStatus();
 
 // Test and automation commands from a second process: Atrium.Core.exe --command <verb> [argument]
 void RunCommand(const std::wstring& line)
@@ -217,7 +244,25 @@ void RunCommand(const std::wstring& line)
         n.body = f[2];
         n.action = f[3];
         g_app.notes->Post(std::move(n));
-    } else if (verb == L"notify-state")
+    } else if (verb == L"tray-open")
+        ToggleTray(RECT{});
+    else if (verb == L"tray-state")
+        g_app.trayPanel->LogState();
+    else if (verb == L"tray-click" || verb == L"tray-rclick")
+        g_app.trayPanel->TestClick(arg, verb == L"tray-rclick");
+    else if (verb == L"control-open")
+        ToggleControl(RECT{});
+    else if (verb == L"control-state")
+        g_app.control->LogState();
+    else if (verb == L"control-click")
+        g_app.control->TestClick(arg);
+    else if (verb == L"tray-find")
+        g_app.trayPanel->LogFind(arg);
+    else if (verb == L"control-volume") { // tests: put the volume back
+        SetVolume(_wtoi(arg.c_str()));
+        UpdateStatus();
+    }
+    else if (verb == L"notify-state")
         g_app.notes->LogState();
     else if (verb == L"notify-open")
         g_app.notes->ToggleCenter();
@@ -237,6 +282,33 @@ void RunCommand(const std::wstring& line)
         }).join();
         Log(L"listener: probe %s", result.c_str());
     }
+}
+
+void UpdateStatus() { g_app.bar->SetStatus(QuerySystemStatus()); }
+
+// Atrium's tray panel and control centre open above their entries on the
+// bar; a click on the entry while one is open closes it (and must not reopen
+// it: the press that deactivated it is the same click).
+void ToggleTray(RECT)
+{
+    if (g_app.trayPanel->Visible()) {
+        g_app.trayPanel->Close();
+        return;
+    }
+    if (GetTickCount64() - g_app.trayPanel->LastClosed() < 400)
+        return;
+    g_app.trayPanel->Open(g_app.bar->EntryRect(L"#tray"), g_app.bar->BarRect(), g_app.bar->PreviousForeground());
+}
+
+void ToggleControl(RECT)
+{
+    if (g_app.control->Visible()) {
+        g_app.control->Close();
+        return;
+    }
+    if (GetTickCount64() - g_app.control->LastClosed() < 400)
+        return;
+    g_app.control->Open(g_app.bar->EntryRect(L"#status"), g_app.bar->BarRect());
 }
 
 void ToggleStart(RECT)
@@ -304,7 +376,9 @@ bool RunNoticeAction(const Notice& n)
                 g_app.tasks->Show(key);
                 return true;
             }
-        std::wstring path = L"shell:AppsFolder\\" + aumid;
+        // A program path (WeChat): starting it again shows its running instance.
+        bool exe = aumid.size() > 2 && aumid[1] == L':';
+        std::wstring path = exe ? aumid : L"shell:AppsFolder\\" + aumid;
         return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
     }
     return true; // nothing to run: the click just dismisses it
@@ -317,6 +391,9 @@ void ApplySettings(const Settings& s)
     Theme::SetGlass(s.tint, s.transparency);
     float radius = float(std::clamp(s.cornerRadius, 8.0, std::max(8.0, s.height / 2)));
     g_app.start->SetRadius(radius);
+    g_app.trayPanel->SetRadius(radius);
+    g_app.control->SetRadius(radius);
+    g_app.control->SetBarHeight(float(s.height));
     g_app.start->SetBarHeight(float(s.height)); // its status capsule is shaped like the bar
     g_app.notes->SetRadius(radius);
     g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody);
@@ -324,6 +401,10 @@ void ApplySettings(const Settings& s)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
     else if (!s.notifyListener && g_app.listener)
         g_app.listener.reset();
+    if (s.notifyWeChat && !g_app.wechat)
+        g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE);
+    else if (!s.notifyWeChat && g_app.wechat)
+        g_app.wechat.reset();
     g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
     g_app.tasks->SetShowRunning(s.showRunning);
     g_app.bar->Apply(s);
@@ -516,7 +597,9 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     case WM_NOTICE:
         if (auto* n = reinterpret_cast<Notice*>(l)) {
-            if (g_app.notes && g_app.listener)
+            // Only from sources still turned on (a notice may arrive just after).
+            bool on = n->source == L"wechat" ? bool(g_app.wechat) : bool(g_app.listener);
+            if (g_app.notes && on)
                 g_app.notes->Post(*n);
             delete n;
         }
@@ -525,9 +608,58 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (g_app.start)
             g_app.start->Refresh();
         return 0;
+    case WM_TRAY_ICONS:
+        if (w == 1) // a click was forwarded: see where the focus ends up
+            SetTimer(h, kTrayFocusTimer, 600, nullptr);
+        else if (g_app.trayPanel)
+            g_app.trayPanel->Refresh();
+        return 0;
     case WM_TIMER:
         if (w == kTrayTimer) {
             OpenTrayStep2();
+            return 0;
+        }
+        if (w == kStatusTimer) {
+            UpdateStatus();
+            return 0;
+        }
+        if (w == kTrayFocusTimer) {
+            // Explorer gives the focus to its hidden overflow window when a
+            // tray button is invoked. The app usually takes it for its window
+            // or menu; if not, it goes back to where it was before the panel.
+            // Left there, the hidden window holds the system taskbar up and,
+            // as a light-dismiss popup, swallows the next click elsewhere.
+            KillTimer(h, kTrayFocusTimer);
+            HWND fg = GetForegroundWindow();
+            wchar_t cls[64] = {};
+            GetClassNameW(fg, cls, 64);
+            if (wcscmp(cls, L"TopLevelWindowForOverflowXamlIsland") == 0 && !IsWindowVisible(fg)) {
+                HWND back = g_app.trayPanel->Previous();
+                if (!back || !IsWindow(back))
+                    back = FindWindowW(L"Progman", nullptr);
+                // The focus belongs to Explorer's thread: share its input state
+                // for the moment of the switch (the usual way to hand it on).
+                DWORD fgThread = GetWindowThreadProcessId(fg, nullptr), me = GetCurrentThreadId();
+                bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
+                bool ok = SetForegroundWindow(back) != FALSE;
+                DWORD error = ok ? 0 : GetLastError();
+                if (attached)
+                    AttachThreadInput(me, fgThread, FALSE);
+                const wchar_t* how = L"attached";
+                if (!ok) {
+                    // A key press of our own lifts the foreground lock (Alt alone
+                    // does nothing in the hidden window that has the keyboard).
+                    INPUT alt[2] = {};
+                    alt[0].type = alt[1].type = INPUT_KEYBOARD;
+                    alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
+                    alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+                    SendInput(2, alt, sizeof(INPUT));
+                    ok = SetForegroundWindow(back) != FALSE;
+                    how = L"after a key press";
+                }
+                Log(L"tray: the hidden overflow window had the focus; given back %s (%s, error %lu)", how, ok && GetForegroundWindow() == back ? L"ok" : L"failed",
+                    error);
+            }
             return 0;
         }
         break;
@@ -627,6 +759,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
     g_app.start->onSystem = OpenSystem;
     g_app.notes = std::make_unique<Notifications>(instance);
+    g_app.tray = std::make_unique<TrayModel>(g_app.host, WM_TRAY_ICONS);
+    g_app.trayPanel = std::make_unique<TrayPanel>(instance, *g_app.tray);
+    g_app.trayPanel->onSystemTray = OpenTray;
+    g_app.control = std::make_unique<ControlCenter>(instance);
+    g_app.control->onChanged = UpdateStatus;
     g_app.notes->bellRect = [] { return g_app.bar->EntryRect(L"#notify"); };
     g_app.notes->barRect = [] { return g_app.bar->BarRect(); };
     g_app.notes->onUnread = [](int n) { g_app.bar->SetUnread(n); };
@@ -640,6 +777,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.bar->onOverflow = ShowOverflow;
     g_app.bar->onStartClick = ToggleStart;
     g_app.bar->onNotifyClick = [](RECT) { g_app.notes->ToggleCenter(); };
+    g_app.bar->onTrayClick = ToggleTray;
+    g_app.bar->onStatusClick = ToggleControl;
+    g_app.bar->onStatusWheel = [](int notches) {
+        AdjustVolume(2 * notches);
+        UpdateStatus();
+    };
     g_app.bar->onFileDragHover = [](const std::wstring& key) { g_app.tasks->Show(key); };
     g_app.bar->canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
     g_app.bar->onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
@@ -659,6 +802,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         });
     };
     AddTrayIcon();
+    UpdateStatus();
+    SetTimer(g_app.host, kStatusTimer, kStatusMs, nullptr);
+    g_app.tray->Refresh(); // the panel opens with the icons already read
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -667,7 +813,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     }
     g_app.server.reset();
     g_app.listener.reset();
+    g_app.wechat.reset();
     g_app.notes.reset();
+    g_app.control.reset();
+    g_app.trayPanel.reset();
+    g_app.tray.reset();
     g_app.start.reset();
     Surface::SetGlassHost(nullptr);
     g_app.catalog.reset();

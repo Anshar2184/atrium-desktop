@@ -13,7 +13,7 @@
 namespace atrium {
 
 struct Settings {
-    static constexpr int kVersion = 1;
+    static constexpr int kVersion = 2; // 2: Windows notifications on by default (v1 files are migrated)
 
     // Material (presets change only these). Liquid follows macOS Liquid Glass:
     // nearly clear centre, strong lensing over a wide rim, visible dispersion.
@@ -41,7 +41,8 @@ struct Settings {
     // Notifications (Atrium's own cards above the bell).
     double notifyTimeout = 6;        // seconds a popup stays (3..30)
     bool notifyHideBody = false;     // privacy: no message text; cards excluded from screen capture
-    bool notifyListener = false;     // experimental: mirror Windows notifications (UserNotificationListener)
+    bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)
+    bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;
 

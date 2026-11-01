@@ -51,6 +51,8 @@ public:
     bool Visible() const { return visible_; }
     // Unread notifications, shown as a badge on the bell.
     void SetUnread(int count);
+    // Network, battery and volume for the status icon.
+    void SetStatus(const SystemStatus& status);
     // Screen rectangle of an entry ("#start", "#notify", an app key); empty if not shown.
     RECT EntryRect(const std::wstring& key) const;
     // Screen rectangle of the glass shape.
@@ -73,6 +75,9 @@ public:
     // Bar entries; `anchor` is the entry's rectangle on screen (popups open above it).
     std::function<void(RECT anchor)> onStartClick;  // the Atrium logo
     std::function<void(RECT anchor)> onNotifyClick; // the notification bell
+    std::function<void(RECT anchor)> onTrayClick;   // the tray entry (Atrium's tray panel)
+    std::function<void(RECT anchor)> onStatusClick; // the status icon (Wi-Fi, battery: the control centre)
+    std::function<void(int notches)> onStatusWheel; // the wheel over the status icon (volume)
     // The overflow entry: apps that did not fit, in bar order.
     std::function<void(const std::vector<std::wstring>& keys, RECT anchor)> onOverflow;
     // Drag and drop of an app to visible position `toIndex` (0-based, in the
@@ -158,6 +163,9 @@ private:
     int appsLeft_ = 0, pitch_ = 1, plate_ = 0, gap_ = 0, shown_ = 0;
     std::vector<std::wstring> hidden_; // apps behind the overflow entry
     int unread_ = 0;
+    SystemStatus status_;
+    bool belowTray_ = false;   // yielded to the system taskbar the user is using
+    bool trayHeldUp_ = false;  // the system taskbar is up without the user (logged once)
     HWND previousForeground_ = nullptr;
     RECT applied_{};      // last window rect given to SetWindowPos
     int appliedRgn_[6]{}; // bar width, height, radius, insets and extension of the last region

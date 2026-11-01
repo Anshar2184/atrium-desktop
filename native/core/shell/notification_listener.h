@@ -1,7 +1,10 @@
-// Experimental mirror of Windows notifications through
-// UserNotificationListener (off by default, D23). Polls the toast list on a
-// worker thread and posts new ones to the UI thread; it never dismisses or
-// changes anything in Windows, so the system banners still appear.
+// Windows notifications as Atrium cards, through UserNotificationListener
+// (on by default since v0.6, D24). Unpackaged processes cannot subscribe to its
+// change event, so a worker thread reads the toast list every second and posts
+// new toasts, and toasts whose text changed, to the UI thread. The first read
+// only records what is already there. It never dismisses or changes anything
+// in Windows, so the system banners still appear unless the user turns an
+// app's banners off in Windows (keeping it in the notification centre).
 #pragma once
 
 #include "ui/notifications.h"
