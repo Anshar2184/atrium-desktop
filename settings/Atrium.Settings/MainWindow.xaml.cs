@@ -63,6 +63,9 @@ public sealed partial class MainWindow : Window
         new("图标大小", "任务栏图标的边长。系统任务栏的图标是 24 px，小一点会让玻璃栏更轻盈。", 16, 64, 1, "px", "16 px", "64 px",
             v => v < 24 ? "比系统图标更小" : v < 25 ? "与系统任务栏相同" : v <= 36 ? "略大于系统图标" : "大图标",
             Illustrations.IconSize, s => s.IconSize, (s, v) => s.IconSize = v, false),
+        new("悬停放大", "鼠标经过时，指针下的图标放大到这个倍数，两侧的图标像波浪一样依次变大，玻璃栏也随之伸展。100% 即关闭。", 100, 200, 5, "%", "关闭", "200%",
+            v => v < 101 ? "关闭，悬停时只亮起底板" : v < 140 ? "轻轻放大" : v < 180 ? "像 macOS 程序坞" : "夸张的放大",
+            Illustrations.Magnify, s => s.Magnify * 100, (s, v) => s.Magnify = v / 100, false),
     };
 
     private SliderDef[] NotifySliders => new SliderDef[]

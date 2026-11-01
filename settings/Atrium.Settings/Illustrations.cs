@@ -255,6 +255,29 @@ internal static class Illustrations
         });
     }
 
+    // Five icons on a line; the middle one grows the most, its neighbours less: a wave.
+    public static Illustration Magnify()
+    {
+        var c = NewCanvas();
+        c.Children.Add(new Line { Style = Style("GlyphFaintStyle"), X1 = 2, X2 = 46, Y1 = 33, Y2 = 33 });
+        var icons = new Rectangle[5];
+        for (int i = 0; i < 5; i++)
+        {
+            icons[i] = Rect(i == 2 ? "GlyphAccentFillStyle" : "GlyphInkFillStyle", 0, 0, 6, 6, 2, i == 2 ? 1 : 0.55);
+            c.Children.Add(icons[i]);
+        }
+        return Wrap(c, t =>
+        {
+            double k = t; // 0 = off, 1 = twice the size
+            for (int i = 0; i < 5; i++)
+            {
+                double d = Math.Abs(i - 2) / 2.3, wave = d < 1 ? (1 + Math.Cos(Math.PI * d)) / 2 : 0;
+                double s = 6 * (1 + k * wave);
+                Place(icons[i], 4 + i * 9 + 3 - s / 2, 31 - s, s, s, Math.Max(1.5, s * 0.28));
+            }
+        });
+    }
+
     // The droplet of the tint card, filled with the chosen colour.
     public static (FrameworkElement Root, Action<Color> SetColor) Tint()
     {

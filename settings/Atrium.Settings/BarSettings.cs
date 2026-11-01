@@ -23,6 +23,7 @@ internal sealed class BarSettings
     public double Height { get; set; } = 60;
     public double Margin { get; set; } = 10;
     public double IconSize { get; set; } = 30;
+    public double Magnify { get; set; } = 1.7;         // icon scale under the pointer, 1 = off
     public bool AutoWidth { get; set; } = true;
     public bool ShowClock { get; set; } = true;
     public bool ShowRunning { get; set; } = true;
@@ -75,6 +76,7 @@ internal sealed class BarSettings
             ["height"] = Height,
             ["margin"] = Margin,
             ["iconSize"] = IconSize,
+            ["magnify"] = Magnify,
             ["showClock"] = ShowClock,
             ["autoWidth"] = AutoWidth,
             ["showRunning"] = ShowRunning,
@@ -112,6 +114,7 @@ internal sealed class BarSettings
         s.Height = Math.Clamp(Num("height", f.Height), 32, 160);
         s.Margin = Math.Clamp(Num("margin", f.Margin), 0, 400);
         s.IconSize = Math.Clamp(Num("iconSize", f.IconSize), 16, 64);
+        s.Magnify = Math.Clamp(Num("magnify", f.Magnify), 1, 2);
         s.Tint = f.Tint;
         if (o?["tint"] is JsonValue t && t.TryGetValue(out string? ts) && ts is { Length: 7 } && ts[0] == '#' &&
             uint.TryParse(ts.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var tint))

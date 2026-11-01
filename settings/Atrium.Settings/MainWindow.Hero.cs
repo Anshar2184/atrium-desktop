@@ -207,19 +207,24 @@ public sealed partial class MainWindow
             _mockDots[i].Visibility = shown && MockApps[i].Running ? Visibility.Visible : Visibility.Collapsed;
             if (!shown) continue;
             double cx = L.PlateX[i] + L.P / 2, cy = L.PlateY + L.P / 2;
-            icon.Width = icon.Height = L.Icon;
-            icon.CornerRadius = new CornerRadius(L.Icon * 0.26);
-            Canvas.SetLeft(icon, cx - L.Icon / 2);
-            Canvas.SetTop(icon, cy - L.Icon / 2);
-            _mockGlyphs[i].FontSize = Math.Max(6, L.Icon * 0.5);
+            // As if the pointer rested on the second app: with magnification on,
+            // it and its neighbours grow from their bottom edge like a wave.
+            double dist = Math.Abs(i - 1) / 2.3, wave = dist < 1 ? (1 + Math.Cos(Math.PI * dist)) / 2 : 0;
+            double size = L.Icon * (1 + (_current.Magnify - 1) * wave);
+            icon.Width = icon.Height = size;
+            icon.CornerRadius = new CornerRadius(size * 0.26);
+            Canvas.SetLeft(icon, cx - size / 2);
+            Canvas.SetTop(icon, cy + L.Icon / 2 - size);
+            _mockGlyphs[i].FontSize = Math.Max(6, size * 0.5);
             double d = Math.Max(2.5, L.S * 5);
             _mockDots[i].Width = _mockDots[i].Height = d;
             Canvas.SetLeft(_mockDots[i], cx - d / 2);
             Canvas.SetTop(_mockDots[i], L.PlateY + L.P - d * 1.9);
         }
-        // One plate, as if the pointer rested on the second app.
-        _plate.Visibility = L.N > 1 ? Visibility.Visible : Visibility.Collapsed;
-        if (L.N > 1)
+        // Without magnification the hovered app shows its plate instead.
+        bool plate = L.N > 1 && _current.Magnify <= 1.001;
+        _plate.Visibility = plate ? Visibility.Visible : Visibility.Collapsed;
+        if (plate)
         {
             _plate.Width = _plate.Height = L.P;
             _plate.CornerRadius = new CornerRadius(L.PlateR);
