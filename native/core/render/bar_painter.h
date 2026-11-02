@@ -93,8 +93,10 @@ private:
     ID2D1Bitmap1* BitmapFor(ID2D1DeviceContext2* d2d, const SceneItem& item);
     IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT weight, const wchar_t* family = L"Segoe UI Variable Text");
     void DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
-    // The status icon in `r` (icon height): Wi-Fi strength (or wired / offline)
-    // and the battery with its level, or the volume without a battery.
+    // The status icon in `r` (icon height): a ring open at the bottom with the
+    // battery's level (the volume without a battery) round the Wi-Fi fan (or
+    // wired / offline); while the volume changes the ring shows it and a
+    // speaker takes the fan's place (StatusMotion).
     void DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, bool darkInk);
     float MapX(float u) const; // base x -> displayed x under the magnification
 
@@ -128,6 +130,16 @@ private:
     // Magnification state: strength 0..1 (eases in and out), wave centre and
     // its parameters of the current frame.
     float amount_ = 0, centre_ = 0, mag_ = 1, range_ = 1;
+    // The status ring: its fill springs to the battery or the volume; `volume`
+    // (0..1) fades the speaker in for a while after the volume changed.
+    struct StatusMotion {
+        bool seen = false;
+        int volume = 0;
+        bool muted = false;
+        double volumeUntilMs = 0;
+        float volumeMix = 0;
+        float fill = 0, speed = 0;
+    } statusMotion_;
     BarFrame frame_;
     winrt::com_ptr<ID2D1Bitmap1> layer_;
     std::wstring layerKey_;

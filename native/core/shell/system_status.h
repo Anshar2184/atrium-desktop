@@ -3,6 +3,8 @@
 // Core Audio, Network List Manager, WLAN), and the power actions.
 #pragma once
 
+#include <windows.h>
+
 #include <string>
 
 namespace atrium {
@@ -29,6 +31,10 @@ SystemStatus QuerySystemStatus();
 int AdjustVolume(int delta);
 void SetVolume(int percent); // 0..100; unmutes above 0
 bool ToggleMute();
+// Posts `msg` to `hwnd` whenever the default playback device's volume or mute
+// changes (volume keys, other programs). Call again after the default device
+// changed: it follows the current one. Call on an STA/MTA thread with COM.
+void WatchVolume(HWND hwnd, UINT msg);
 
 enum class PowerAction { Sleep, Restart, Shutdown };
 // ATRIUM_POWER_DRYRUN=1 only logs the action (tests).

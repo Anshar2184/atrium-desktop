@@ -46,6 +46,7 @@ constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.Core.ex
 constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
 constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
 constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
+constexpr UINT WM_VOLUME = WM_APP + 7;        // the default playback device's volume changed
 constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
@@ -217,6 +218,7 @@ void ToggleTray(RECT);
 void ToggleControl(RECT);
 void ToggleCalendar();
 void UpdateStatus();
+void FakeStatus(const std::wstring& arg);
 
 // Test and automation commands from a second process: Atrium.Core.exe --command <verb> [argument]
 void RunCommand(const std::wstring& line)
@@ -293,6 +295,10 @@ void RunCommand(const std::wstring& line)
         g_app.calendar->TestClick(arg);
     else if (verb == L"tray-find")
         g_app.trayPanel->LogFind(arg);
+    else if (verb == L"status-fake") { // screenshots: "battery=15,charging=0,volume=40,muted=0,signal=80" or "off"
+        FakeStatus(arg);
+        UpdateStatus();
+    }
     else if (verb == L"control-volume") { // tests: put the volume back
         SetVolume(_wtoi(arg.c_str()));
         UpdateStatus();
@@ -319,7 +325,55 @@ void RunCommand(const std::wstring& line)
     }
 }
 
-void UpdateStatus() { g_app.bar->SetStatus(QuerySystemStatus()); }
+// Test override of the status shown on the bar (`status-fake`): key=value
+// pairs replace what the system reports; "off" ends it.
+std::vector<std::pair<std::wstring, int>> g_fakeStatus;
+
+void FakeStatus(const std::wstring& arg)
+{
+    g_fakeStatus.clear();
+    if (arg == L"off")
+        return;
+    size_t at = 0;
+    while (at < arg.size()) {
+        size_t end = arg.find(L',', at);
+        std::wstring pair = arg.substr(at, end == std::wstring::npos ? std::wstring::npos : end - at);
+        size_t eq = pair.find(L'=');
+        if (eq != std::wstring::npos)
+            g_fakeStatus.emplace_back(pair.substr(0, eq), _wtoi(pair.c_str() + eq + 1));
+        at = end == std::wstring::npos ? arg.size() : end + 1;
+    }
+}
+
+void UpdateStatus()
+{
+    SystemStatus st = QuerySystemStatus();
+    for (const auto& [key, value] : g_fakeStatus) {
+        if (key == L"battery") {
+            st.battery = value >= 0;
+            st.batteryPercent = value;
+        } else if (key == L"charging") {
+            st.charging = value != 0;
+        } else if (key == L"volume") {
+            st.audio = value >= 0;
+            st.volume = std::max(value, 0);
+        } else if (key == L"muted") {
+            st.muted = value != 0;
+        } else if (key == L"signal") {
+            st.connected = st.wifi = value >= 0;
+            st.signal = std::max(value, 0);
+        }
+    }
+    // Volume notifications follow the default playback device.
+    static std::wstring watched;
+    static bool watching = false;
+    if (!watching || st.audioDevice != watched) {
+        WatchVolume(g_app.host, WM_VOLUME);
+        watched = st.audioDevice;
+        watching = true;
+    }
+    g_app.bar->SetStatus(st);
+}
 
 // Atrium's tray panel and control centre open above their entries on the
 // bar; a click on the entry while one is open closes it (and must not reopen
@@ -725,6 +779,9 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_CATALOG:
         if (g_app.start)
             g_app.start->Refresh();
+        return 0;
+    case WM_VOLUME:
+        UpdateStatus();
         return 0;
     case WM_TRAY_ICONS:
         if (w == 1) // a click was forwarded: see where the focus ends up

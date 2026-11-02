@@ -1,7 +1,5 @@
 #include "bar_painter.h"
 
-#include "../shell/wifi.h"
-
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -217,6 +215,41 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     lastApps_.clear();
     for (const auto& it : scene.items)
         lastApps_[it.key] = it;
+
+    // Status ring: a changed volume shows on the ring for a while; the fill
+    // follows on a spring with a slight overshoot (no linear sweep).
+    {
+        constexpr double kVolumeShowMs = 1500;
+        const SystemStatus& st = scene.status;
+        StatusMotion& s = statusMotion_;
+        if (s.seen && st.audio && (st.volume != s.volume || st.muted != s.muted))
+            s.volumeUntilMs = nowMs + kVolumeShowMs;
+        s.volume = st.volume;
+        s.muted = st.muted;
+        bool showVolume = st.audio && nowMs < s.volumeUntilMs;
+        moving |= showVolume;
+        float mix = Approach(s.volumeMix, showVolume ? 1.f : 0.f, dt, 12);
+        moving |= mix != s.volumeMix;
+        s.volumeMix = mix;
+        float volume = st.muted ? 0.f : float(st.volume) / 100.f;
+        float target = (showVolume || !st.battery) ? volume : float(std::clamp(st.batteryPercent, 0, 100)) / 100.f;
+        if (!s.seen) {
+            s.fill = target;
+            s.seen = true;
+        }
+        constexpr float kStiffness = 170, kDamping = 20; // about 0.4 s, under 5 % overshoot
+        for (double left = dt; left > 0; left -= 8) {
+            float h = float(std::min(left, 8.0)) / 1000.f;
+            s.speed += (kStiffness * (target - s.fill) - kDamping * s.speed) * h;
+            s.fill += s.speed * h;
+        }
+        if (std::fabs(target - s.fill) < 0.002f && std::fabs(s.speed) < 0.01f) {
+            s.fill = target;
+            s.speed = 0;
+        } else {
+            moving = true;
+        }
+    }
 
     // What the glass shows this frame: the stretched shape and the ripple.
     frame_.magnified = amount_;
@@ -445,48 +478,131 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
 void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
                             bool darkInk)
 {
-    (void)darkInk;
     const float h = std::min(r.right - r.left, r.bottom - r.top), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+    const StatusMotion& sm = statusMotion_;
     auto dim = [&](float a) {
         D2D1_COLOR_F c = ink;
         c.a *= a;
         return c;
     };
-    if (st.connected && !st.wifi) {
-        if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
-            brush->SetColor(ink);
-            d2d->DrawText(L"\uE839", 1, f, r, brush);
-        }
-        return;
-    }
+    auto fade = [](D2D1_COLOR_F c, float a) {
+        c.a *= a;
+        return c;
+    };
     winrt::com_ptr<ID2D1Factory> factory;
     d2d->GetFactory(factory.put());
     winrt::com_ptr<ID2D1StrokeStyle> round;
     factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
     constexpr float kDeg = 3.14159265f / 180.f;
-    auto arc = [&](float ox, float oy, float rad, float a0, float a1, D2D1_COLOR_F c, float width) {
+    // An arc from `a0` clockwise over `sweep` degrees (0° = right, 90° = down).
+    auto arc = [&](float ox, float oy, float rad, float a0, float sweep, D2D1_COLOR_F c, float width) {
+        if (sweep <= 0.01f || c.a <= 0.003f)
+            return;
         winrt::com_ptr<ID2D1PathGeometry> g;
         winrt::com_ptr<ID2D1GeometrySink> sink;
         if (FAILED(factory->CreatePathGeometry(g.put())) || FAILED(g->Open(sink.put())))
             return;
+        float a1 = a0 + sweep;
         sink->BeginFigure(D2D1::Point2F(ox + rad * std::cos(a0 * kDeg), oy + rad * std::sin(a0 * kDeg)), D2D1_FIGURE_BEGIN_HOLLOW);
         sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(ox + rad * std::cos(a1 * kDeg), oy + rad * std::sin(a1 * kDeg)), D2D1::SizeF(rad, rad), 0,
-                                      D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+                                      D2D1_SWEEP_DIRECTION_CLOCKWISE, sweep > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
         sink->EndFigure(D2D1_FIGURE_END_OPEN);
         sink->Close();
         brush->SetColor(c);
         d2d->DrawGeometry(g.get(), brush, width, round.get());
     };
-    // The fan's point sits low so that it looks centred: the arcs are wide
-    // at the top and the dot is small at the bottom.
-    const float oy = cy + h * 0.25f, stroke = std::max(1.5f, h * 0.085f);
-    const int lit = st.connected ? std::clamp(WifiBars(st.signal) - 1, 0, 3) : -1; // arcs lit; -1: offline
-    const D2D1_COLOR_F off = dim(lit < 0 ? 0.32f : 0.24f);
-    brush->SetColor(lit < 0 ? off : ink);
-    d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, oy - stroke * 0.3f), stroke * 0.85f, stroke * 0.85f), brush);
-    const float radii[3] = {h * 0.19f, h * 0.335f, h * 0.48f};
-    for (int k = 0; k < 3; ++k)
-        arc(cx, oy, radii[k], 225, 315, k < lit ? ink : off, stroke);
+    // The connection: the Wi-Fi fan (a dot and three arcs, lit by the signal),
+    // the wired glyph, or a faint fan when offline. `size` is the fan's height.
+    auto connection = [&](float size, float alpha) {
+        if (alpha <= 0.003f)
+            return;
+        if (st.connected && !st.wifi) {
+            if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+                brush->SetColor(fade(ink, alpha));
+                d2d->DrawText(L"\uE839", 1, f, D2D1::RectF(cx - size, cy - size / 2, cx + size, cy + size / 2), brush);
+            }
+            return;
+        }
+        // The iPhone's fan: a wedge and two bands, all three lit at full
+        // signal. `size` sets the radius; the shape is centred on its box.
+        const float R = size * 0.62f, t = R * 0.2f, oy = cy + R * 0.5f;
+        const int lit = !st.connected ? -1 : st.signal >= 60 ? 3 : st.signal >= 30 ? 2 : 1; // -1: offline
+        const D2D1_COLOR_F on = fade(ink, alpha), off = dim((lit < 0 ? 0.32f : 0.24f) * alpha);
+        constexpr float kFrom = 226, kSpan = 88;
+        // The wedge, its outline stroked with round joins to soften its corners.
+        winrt::com_ptr<ID2D1PathGeometry> g;
+        winrt::com_ptr<ID2D1GeometrySink> sink;
+        if (SUCCEEDED(factory->CreatePathGeometry(g.put())) && SUCCEEDED(g->Open(sink.put()))) {
+            const float r0 = R * 0.34f - t * 0.15f, top = oy - t * 0.25f;
+            sink->BeginFigure(D2D1::Point2F(cx, top), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(D2D1::Point2F(cx + r0 * std::cos(kFrom * kDeg), top + r0 * std::sin(kFrom * kDeg)));
+            sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(cx + r0 * std::cos((kFrom + kSpan) * kDeg), top + r0 * std::sin((kFrom + kSpan) * kDeg)),
+                                          D2D1::SizeF(r0, r0), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            sink->Close();
+            winrt::com_ptr<ID2D1StrokeStyle> joins;
+            factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
+                                                                   D2D1_LINE_JOIN_ROUND),
+                                       nullptr, 0, joins.put());
+            brush->SetColor(lit >= 1 ? on : off);
+            d2d->FillGeometry(g.get(), brush);
+            d2d->DrawGeometry(g.get(), brush, t * 0.3f, joins.get());
+        }
+        arc(cx, oy, R * 0.56f, kFrom, kSpan, lit >= 2 ? on : off, t);
+        arc(cx, oy, R * 0.88f, kFrom, kSpan, lit >= 3 ? on : off, t);
+    };
+
+    const bool ring = st.battery || st.audio;
+    if (!ring) { // nothing to measure: the fan alone, full size
+        connection(h, 1);
+        return;
+    }
+    // The ring: open at the bottom like the iPhone's, filled clockwise from
+    // the gap's left end. Ink like every mark on the bar; only a low battery
+    // (not charging) is red.
+    constexpr float kGap = 64, kStart = 90 + kGap / 2, kSweep = 360 - kGap;
+    const float rad = h * 0.44f, stroke = std::max(1.5f, h * 0.07f);
+    const float mix = st.battery ? sm.volumeMix : 1.f; // 1: the ring shows the volume
+    const bool low = st.battery && !st.charging && st.batteryPercent >= 0 && st.batteryPercent <= 20;
+    D2D1_COLOR_F level = ink;
+    if (low) {
+        D2D1_COLOR_F red = D2D1::ColorF(darkInk ? 0xE0352B : 0xFF453A);
+        float k = 1 - sm.volumeMix;
+        level = D2D1::ColorF(red.r + (ink.r - red.r) * (1 - k), red.g + (ink.g - red.g) * (1 - k), red.b + (ink.b - red.b) * (1 - k), ink.a);
+    }
+    const bool silent = st.muted && mix > 0.5f;
+    arc(cx, cy, rad, kStart, kSweep, dim(silent ? 0.16f : 0.24f), stroke);
+    arc(cx, cy, rad, kStart, kSweep * std::clamp(sm.fill, 0.f, 1.f), level, stroke);
+
+    // In the gap: a bolt while charging (fades out while the volume shows).
+    float bolt = st.battery && st.charging ? 1 - sm.volumeMix : 0;
+    if (bolt > 0.003f) {
+        winrt::com_ptr<ID2D1PathGeometry> g;
+        winrt::com_ptr<ID2D1GeometrySink> sink;
+        if (SUCCEEDED(factory->CreatePathGeometry(g.put())) && SUCCEEDED(g->Open(sink.put()))) {
+            const float bh = h * 0.26f, bw = h * 0.17f, by = cy + rad;
+            const D2D1_POINT_2F pts[] = {{0.18f, -0.5f}, {-0.4f, 0.08f}, {-0.02f, 0.08f}, {-0.18f, 0.5f}, {0.4f, -0.08f}, {0.02f, -0.08f}};
+            auto at = [&](D2D1_POINT_2F p) { return D2D1::Point2F(cx + p.x * bw, by + p.y * bh); };
+            sink->BeginFigure(at(pts[0]), D2D1_FIGURE_BEGIN_FILLED);
+            for (int i = 1; i < 6; ++i)
+                sink->AddLine(at(pts[i]));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            sink->Close();
+            brush->SetColor(fade(ink, bolt));
+            d2d->FillGeometry(g.get(), brush);
+        }
+    }
+
+    // Inside: the connection, or the speaker while the volume shows.
+    const float speaker = st.battery ? sm.volumeMix : 0.f;
+    connection(h * 0.56f, 1 - speaker);
+    if (speaker > 0.003f) {
+        const wchar_t* glyph = st.muted || st.volume == 0 ? L"\uE74F" : st.volume < 34 ? L"\uE993" : st.volume < 67 ? L"\uE994" : L"\uE995";
+        if (IDWriteTextFormat* f = Format(h * 0.40f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+            brush->SetColor(fade(ink, speaker));
+            d2d->DrawText(glyph, 1, f, D2D1::RectF(cx - h / 2, cy - h / 2, cx + h / 2, cy + h / 2), brush);
+        }
+    }
 }
 
 // The start entry: the Windows logo, redrawn as four panes with Windows 11's
