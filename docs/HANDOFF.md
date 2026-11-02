@@ -1,110 +1,114 @@
-# 交接文档（2026-11-01，v0.7 之后）
+# 交接文档（2026-11-02，v0.9.1 之后）
 
-给接手的新对话：先读本文，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D34）和 [VERIFICATION](VERIFICATION.md) 第 17–23 节。保留已有实现，不推倒重做。
+给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D36）和 [VERIFICATION](VERIFICATION.md) 第 20–28 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
 
-## 1. 项目现状
+## 0. 一句话现状
 
-- 仓库：`wynter-yaxley/atrium-desktop`（MIT），本机路径 `D:\Projects\atrium-desktop`（WSL 下 `/mnt/d/Projects/atrium-desktop`），分支 `main`（最新提交以 `git log` 为准）。
-- 版本 0.8.0（`native/CMakeLists.txt`、`native/core/core.rc`、`settings/Atrium.Settings/Atrium.Settings.csproj` 三处同步）。
-- 形态：与系统任务栏**共存**的玻璃任务栏（不隐藏、不替换系统任务栏；接管与 Guard 恢复代码存在但默认关闭，D16）。
-- 已完成：
-  - v0.3：任务栏结构 [Windows 徽标][固定+运行应用][时钟][通知铃铛]，溢出入口，拖动排序，文件拖放；自绘开始菜单；Atrium 自己的通知；WinUI 3 设置中心。
-  - v0.4：层级守护（D25）、弹窗与任务栏统一玻璃材质和圆角（D26）、程序坞式悬停放大 / 启动弹跳 / 按压波纹 / 弹窗动画（D27）、开始菜单重做、`magnify` 设置项与滑块。
-  - v0.6：自绘托盘面板（D28，UI 自动化读取系统托盘按钮并转发点击）、状态图标与控制中心（D30：Wi-Fi、音量、电池）、Windows 通知默认显示为卡片并同步更新（D24）、微信会话列表来源（D29，实验）、开始菜单固定项展开修复、浅色背景墨色阈值、栏对系统任务栏的让位规则（D25）。
-  - v0.9.1：截图兼容（D36）：DDA 背景 + 仅 DDA 排除，截图和 WGC / GDI 录屏能拍到 Atrium；双显卡写入节能图形偏好。
-  - v0.9：macOS 式桌面小组件（D35）：时钟 / 世界时钟 / 日历 / 电池，全彩与单色两种状态，网格拖动，右键菜单，`widgets.json`；农历计算抽成 `shell/lunar`。
-  - v0.8：通知动效重做（关闭在原处淡出、堆叠上滚轮翻动、堆叠原地展开成列表、弹窗帧跟随合成器）；弹窗按区域取墨（D26）；托盘转发点击按程序找按钮（修复飞书卡片打开 Docker）；iPhone 式状态环（v0.8.1 改为单色 Wi-Fi 图标）与 macOS 式控制中心（蓝牙、亮度、投屏，D30；v0.8.2 加声音输出页与自绘投屏页）；macOS 式锁屏封面，液态玻璃时钟（距离场形状），交给 Windows 锁屏（D34）。
-  - v0.7.2：点通知卡片时若发送者在托盘里，转发它的托盘点击（QQ 打开未读会话，不再打开登录页）；飞书来源（D33，读取飞书自己的消息弹窗，`notifyFeishu`）。
-  - v0.7.1：关闭 / 打开应用时栏宽与图标平滑过渡（D27，栏窗口固定为最大宽度）；所有弹窗按统一规则对齐栏的左右边（D32，`PopupRect`）；托盘面板按可见边距重新排版、图标 20 DIP（D28）。
-  - v0.7：托盘面板缩小、图标按 Windows 的 `UIOrderList` 顺序与记录对齐（D28，修复图标错位）；时钟打开自绘日历（D31，月历 + 农历）；其他面板开着时通知卡片等待，不再重叠（D24）。
-  - v0.5：弹窗玻璃与栏参数完全相同、一个弹窗多块玻璃、墨色按背景切换（D26）；开始菜单改为启动器：面板（搜索 + **Windows 开始菜单的固定项**，7×3 分页）+ 与栏同形的胶囊状态条 + 电源玻璃卡片，取消全部应用（D23）；通知每张卡片一块玻璃、向上堆叠、向上展开（D24）。
-- 用户正在日常使用 `dist\Atrium\Atrium.Core.exe`（v0.7）。
+与系统任务栏共存的 C++ 液态玻璃任务栏，带自绘开始菜单、通知、托盘面板、控制中心、日历、锁屏封面、macOS 式桌面小组件；截图与录屏已能拍到 Atrium（v0.9.1）。最新提交 `2d93795`，版本 **0.9.1**，用户正在日常使用打包版 `dist\Atrium\Atrium.Core.exe`（0.9.1）。
 
-## 2. 代码地图（native/core）
+## 1. 用户与协作方式（重要）
+
+- 回复用户一律用**中文**；用户会直接在 Windows 上看效果并反馈视觉/交互细节，要求“与 macOS 对齐”、动画要连贯不闪。
+- 用户说“先讨论 / 不要修改”时只讨论方案、给推荐，不动代码。
+- 用户已授权：自主提交、推送到 `origin main`；可以调用 Codex（见 §6）。
+- 删除、覆盖用户文件，改系统设置，安装软件（如虚拟机），真实锁屏，拨动 Wi-Fi/蓝牙开关，切换投影模式/输出设备之类会影响用户的操作——先问（或像 v0.8.2 那样“切过去立刻切回”并告知）。
+- 已知偏好：
+  - 任务栏上不要高饱和的绿色、不要拥挤的复合图标（v0.8 的 iPhone 圆环被否决，现为单色 Wi-Fi 扇形）。
+  - 想要的是“原生锁屏”，不是盖在桌面上的封面（v0.8 的封面被评价为“脱裤子放屁”）；锁屏技术预研报告已交，**用户尚未决定是否做独立 PoC**（见 §8）。
+- **教训（2026-11-02）**：中途强制结束测试运行器，导致用户 `settings.json` 被测试内容覆盖且无法找回（固定应用与外观设置丢失，已恢复为 `{}` + 重新导入 3 个 Windows 固定项，已向用户道歉）。**永远不要中途结束 e2e 测试或 run-tests.ps1**；它们在 `finally` 里还原用户文件。
+
+## 2. 已完成功能（按版本）
+
+- v0.3–v0.5：栏结构 [Windows 徽标][固定+运行应用][托盘][状态][时钟][通知]，溢出、拖动排序、文件拖放；开始菜单（搜索 + Windows 开始菜单固定项 7×3 分页 + 胶囊状态条 + 电源卡片，D23）；Atrium 通知（每卡一块玻璃，D24）；WinUI 3 设置中心（D18）；层级守护（D25）；统一材质与圆角（D26）；程序坞放大/弹跳/波纹（D27）。
+- v0.6–v0.7.2：自绘托盘面板（D28，UIA 读系统托盘并转发点击）；Windows 通知默认镜像为卡片（D24）；微信（D29，实验）与飞书（D33）来源；时钟打开自绘日历（D31，农历）；弹窗统一对齐规则（D32，`PopupRect`）；点通知卡片转发发送者的托盘点击（QQ 打开已登录会话）。
+- v0.8：通知动效重做（原地淡出、堆叠滚轮翻看、原地展开）；弹窗按区域取墨（D26）；macOS 式控制中心（D30：Wi-Fi、蓝牙、电池、投屏、亮度、声音）；锁屏封面 + 液态玻璃时钟（D34，交给 Windows 锁屏）。
+- v0.8.1：状态图标改为单色 Wi-Fi 扇形（只表示连接，电量/音量只在控制中心）；音量滑块可从喇叭图标处拖动。
+- v0.8.2：控制中心“声音输出”页（播放设备列表，`IPolicyConfig` 切默认设备；音量合成器）；自绘投屏页（`ProjectionManager` 搜无线显示器、`StartProjectingAsync` 投影，失败交 Win+K；Win+P 四种投影模式 `SetDisplayConfig`）。
+- v0.8.3：控制中心换页不闪：窗口固定为最高页高度、玻璃贴底并渐变高度；主页几块玻璃与页面卡片之间用着色器的“融合形状”过渡（最多 6 个各角圆角不同的圆角矩形平滑并集，再渐变到整块卡片）；窗口区域静止时从玻璃顶部开始。
+- v0.9：**macOS 式桌面小组件**（D35，`ui/desktop_widgets.*`）：时钟（小：表盘；中：世界时钟北京/东京/伦敦/纽约，夜间深色表盘）、日历（小/中，农历）、电池；桌面在前台全彩、应用在前台单色玻璃；网格拖动吸附；右键改尺寸/移除/添加；栏右键菜单可添加；布局 `%LOCALAPPDATA%\Atrium\widgets.json`，开关设置 `widgets`；农历抽成 `shell/lunar.*`。
+- v0.9.1：**截图兼容**（D36）：玻璃背景改用 DXGI 桌面复制（DDA），Atrium 窗口只对 DDA 排除（`WCA_EXCLUDED_FROM_DDA`），系统截图与 WGC/GDI 录屏能拍到 Atrium；DDA 不可用时先恢复全排除再回 WGC；双显卡笔记本自动写入按应用图形偏好“节能”（下次启动生效）；“隐藏通知正文”时卡片仍排除于捕获。修了 DDA 取帧线程占锁导致的渲染卡顿。
+
+## 3. 代码地图（native/core）
 
 | 文件 | 内容 |
 | --- | --- |
-| `bar.cpp/.h` | 玻璃栏：布局（`Relayout`）、输入窗口与命中测试、拖动、层级守护（`GuardStacking`、`ForegroundIsFullscreen`）、渲染线程（`RenderSession`，同时绘制弹窗玻璃层 `renderPanels`）、`LogState` 测试钩子 |
-| `render/bar_painter.*` | 栏内容绘制与动画：放大映射 `MapX`（升余弦密度积分）、弹跳、波纹、小圆点、Windows 徽标 `DrawLogo` |
-| `render/glass_renderer.*` | 玻璃着色器管线；`PopVisual` DComp 弹出动画；参数 `GlassParams`（128 字节，含形状矩形与波纹） |
-| `render/shaders/glass.hlsl` | 玻璃着色器（与 `GlassParams` 一一对应，改一处必须改另一处） |
-| `render/glass_panel.*` | 弹窗玻璃层的描述（`GlassPanel`）、`GlassHost` 接口、`PanelToneFor` |
-| `ui/surface.*` | 弹窗基础：上层 D2D 内容（WARP）+ 下层玻璃（栏的渲染线程）；阴影边距、动画帧、波纹、`Theme` |
-| `ui/start_menu.*` | 开始菜单（面板、状态胶囊、电源卡片三块玻璃，`Surface::SetShapes`） |
-| `ui/notifications.*` | 通知弹出与列表（每张卡片一块玻璃，向上堆叠） |
-| `ui/tray_panel.*`、`shell/tray_model.*` | 托盘面板；托盘模型（工作线程 UI 自动化读取 `NotifyItemIcon`，Invoke / ShowContextMenu 转发，`NotifyIconSettings` 取图：`UIOrderList` 顺序对齐 + `Shell_NotifyIconGetRect` 判断图标是否存在；每次列表变化在日志里逐个记下按钮对应的程序） |
-| `ui/lock_screen.*` | 锁屏封面（墙纸窗口 + 玻璃时钟距离场 + 低级键盘钩子，交给 `LockWorkStation`） |
-| `shell/radios.*` | Wi-Fi / 蓝牙无线电、已配对蓝牙设备、屏幕亮度（WinRT、WMI，阻塞调用，只在工作线程） |
-| `ui/calendar_panel.*` | 日历（月历玻璃 + 时间胶囊，农历用 Windows 的 ICU） |
-| `ui/control_center.*`、`shell/wifi.*` | 控制中心（网络卡片、音量与电池胶囊）；WLAN API |
-| `shell/feishu_source.*` | 飞书来源（找飞书的消息弹窗，只读 UI 自动化，每 0.4 s） |
-| `shell/wechat_source.*` | 微信会话列表来源（只读 UI 自动化，每 2 s） |
-| `main.cpp` | 进程入口、托盘、菜单、`--command` 测试命令（`RunCommand`） |
-| `shell/*` | 任务模型、应用目录（含 Windows 开始菜单固定项：`AppCatalog::StartPins`，`Export-StartLayout`）、系统状态、通知监听（默认开，每秒轮询） |
-| `clock.h` | 两线程共用的动画时钟 `ClockMs()` |
+| `main.cpp` | 进程入口、`g_app`、托盘与栏右键菜单（含“添加桌面小组件”）、`ApplySettings`、`--command` 测试命令 |
+| `bar.cpp/.h` | 栏：布局、输入、层级守护、渲染线程 `RenderSession`（背景来源选择 DDA/WGC、`ShowOwnWindowsToCapture`、弹窗玻璃 `renderPanels`） |
+| `render/capture.*` | `BackdropSource` 接口；`MonitorCapture`（WGC）、`DuplicationCapture`（DDA，取帧线程 `AcquireNextFrame(0)` + 5 ms 轮询，交出帧不整屏复制）；`SetCaptureExclusion`；`PreferPowerSavingGpu` |
+| `render/gpu.*` | 选扫描输出的 GPU；同一 GPU 被列两次时选列出该屏输出的那一项 |
+| `render/glass_renderer.*`、`shaders/glass.hlsl` | 玻璃着色器；`GlassParams` **336 字节**（含 6 个融合部件 `parts`、`partRadii`、`melt`、`partMix`），与 HLSL cbuffer 一一对应 |
+| `render/glass_panel.*` | `GlassPanel` / `GlassShape`（含 `parts`）/ `GlassHost`、墨色网格 `InkGrid` |
+| `render/bar_painter.*` | 栏内容绘制与动画；状态图标 `DrawStatus`（单色 Wi-Fi） |
+| `ui/surface.*` | 弹窗基础（D2D 内容 + 栏渲染线程画的玻璃）；`ShapeDip`（可带 `parts` 融合）；`SetDesktopLayer`（小组件：不置顶）；`SetCaptureVisible` / `SetPrivate`；`Canvas::Capsule/Arc/Image/...` |
+| `ui/desktop_widgets.*` | 桌面小组件（布局、层级状态机 `Restack`、拖动、菜单、绘制） |
+| `ui/control_center.*` | 控制中心（Main/Wifi/Bluetooth/Sound/Cast 五页，换页融合动画） |
+| `ui/start_menu.*`、`ui/notifications.*`、`ui/tray_panel.*`、`ui/calendar_panel.*`、`ui/lock_screen.*` | 开始菜单、通知、托盘面板、日历、锁屏封面 |
+| `shell/audio_devices.*` | 播放设备、`IPolicyConfig` 设默认、按程序的音量会话 |
+| `shell/projection.*` | 无线显示器 `DisplayFinder`、`ProjectTo`、投影模式 |
+| `shell/lunar.*` | `ChineseCalendar`（ICU 农历、节日）、`DaysIn`、`Weekday` |
+| `shell/radios.*`、`shell/wifi.*`、`shell/system_status.*` | 无线电/蓝牙/亮度；WLAN；电池、音量、网络 |
+| `shell/tray_model.*`、`shell/task_model.*`、`shell/app_catalog.*` | 托盘、任务、应用目录 |
+| `shell/notification_listener.*`、`shell/wechat_source.*`、`shell/feishu_source.*` | 通知来源 |
+| `settings.*` | 设置读写（`ReadTextFile` / `WriteTextFile` 原子写） |
 
-设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)，C++ `settings.h` 与 C# `BarSettings.cs` 必须同步。
+设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)；C++ `settings.h` 与 C# `BarSettings.cs` 必须同步（C# 写回时会丢掉它不认识的键，所以小组件布局单独存 `widgets.json`）。
 
-## 3. 构建、打包、测试、推送
+## 4. 构建、打包、推送
 
-所有操作在用户电脑（devbox “pc”，项目目录 `/mnt/d/Projects`）上执行。
+所有操作在用户电脑（devbox “pc”，`/mnt/d/Projects`）上执行。
 
 ```bash
-# 原生（Core）
+# Core
 cd /mnt/d/Projects/atrium-desktop/native
 /mnt/d/Microsoft/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe --build build/win-x64 --config Release --target atrium_core
 
-# 设置中心
-cd ../settings/Atrium.Settings && ~/.local/bin/dn build -c Release
+# 打包（先 --exit 用户的 Atrium；设置中心窗口开着时会拒绝打包）
+PS=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+$PS -NoProfile -Command "Start-Process 'D:\Projects\atrium-desktop\dist\Atrium\Atrium.Core.exe' -ArgumentList '--exit' -Wait"
+$PS -NoProfile -ExecutionPolicy Bypass -Command "\$env:PATH = 'D:\Microsoft\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;' + \$env:LOCALAPPDATA + '\atrium-tools\dotnet;' + \$env:PATH; \$env:DOTNET_ROOT = \$env:LOCALAPPDATA + '\atrium-tools\dotnet'; & 'D:\Projects\atrium-desktop\tools\build.ps1' -Zip"
+# 确认输出里有 "wrote ...zip"，再用 Start-Process 重新启动用户的 Atrium
 
-# 打包（dist/Atrium + dist/Atrium-<版本>-win-x64.zip）
-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "\$env:PATH = 'D:\Microsoft\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;' + \$env:LOCALAPPDATA + '\atrium-tools\dotnet;' + \$env:PATH; \$env:DOTNET_ROOT = \$env:LOCALAPPDATA + '\atrium-tools\dotnet'; & 'D:\Projects\atrium-desktop\tools\build.ps1' -Zip"
-
-# 推送（WSL 直连会超时：用 Windows git + 本地代理 + gh 凭据）
+# 推送（WSL 直连超时：Windows git + 本地代理 + gh 凭据）
 G="/mnt/c/Program Files/Git/cmd/git.exe"; GH='C:/Users/Lenovo/AppData/Local/atrium-tools/gh/bin/gh.exe'
 "$G" -c http.proxy=http://127.0.0.1:10808 -c credential.helper= -c "credential.helper=!'$GH' auth git-credential" push origin main
-
-# CI 状态
-HTTPS_PROXY=http://127.0.0.1:10808 /mnt/c/Users/Lenovo/AppData/Local/atrium-tools/gh/bin/gh.exe run list -L 1 --json headSha,status,conclusion
 ```
 
-测试（`tests/`，用 **Windows PowerShell 5** 的完整路径运行；WSL 里的 `powershell.exe` 实际是 PowerShell 7，WinForms 的 `Add-Type` 会失败）：
+版本号三处同步：`native/CMakeLists.txt`、`native/core/core.rc`（4 处）、`settings/Atrium.Settings/Atrium.Settings.csproj`。每轮：改代码 → 截图核对 → 开发版测试 → 文档（DECISIONS / VERIFICATION / README / 本文）→ 升版本 → 打包 → 打包版回归 → 提交推送 → 中文汇报。
+
+## 5. 测试
+
+用 **Windows PowerShell 5** 完整路径运行（WSL 里的 `powershell.exe` 不行）。推荐用本地运行器（后台执行，逐个等用户空闲 >35 s，开跑前退出、结束后重启用户的 Atrium，并把用户的 `settings.json` / `widgets.json` 另存到 `%LOCALAPPDATA%\atrium-tools\user-backup\`、每个测试后还原）：
 
 ```bash
-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/e2e-stacking.ps1 [-Core <exe>]
+T='C:\Users\Lenovo\AppData\Local\atrium-tools'
+nohup $PS -NoProfile -ExecutionPolicy Bypass -File "$T\\run-tests.ps1" -Core 'D:\Projects\atrium-desktop\dist\Atrium\Atrium.Core.exe' \
+  -Tests 'e2e-settings,e2e-widgets,e2e-tray,e2e-start,e2e-notify,e2e-bar,e2e-motion,e2e-stacking,e2e-lock' \
+  -Log "$T\\test-xxx.log" -Package >/dev/null 2>&1 &
+# 轮询日志直到 "runner: done"；开发版测试把 -Core 换成 native\build\win-x64\Release\Atrium.Core.exe 并去掉 -Package
 ```
 
 | 脚本 | 项数 | 内容 |
 | --- | --- | --- |
-| `e2e-stacking.ps1` | 5 | 置顶遮挡后恢复、全屏隐藏/恢复、最大化保留、让位于升起的系统任务栏 |
-| `e2e-motion.ps1` | 8 | 放大、回落、弹跳、波纹、开始菜单与通知的玻璃层和圆角 |
-| `e2e-bar.ps1` | 11 | 点击、最小化、轮换、时钟、拖动排序、文件拖放、溢出 |
-| `e2e-start.ps1` | 13 | 开始菜单（真实鼠标键盘，电源为演练模式）：尺寸、胶囊与栏同形、Windows 固定项、翻页、搜索、固定到程序坞 |
-| `e2e-notify.ps1` | 18 | 通知队列、合并、超时、展开、向上堆叠、关闭、动作、全屏抑制、面板开着时卡片等待、隐藏正文、真实 Windows 通知出卡 |
-| `e2e-lock.ps1` | 5 | 锁屏封面（演练模式）：显示与玻璃时钟、栏让开、按键不进前台窗口且交给锁屏、栏回来、点击同样交接 |
-| `e2e-tray.ps1` | 13 | 托盘入口与状态图标、托盘面板、左右键转发到测试托盘图标、日历（打开、翻月、Esc）、控制中心、音量滑块与滚轮 |
-| `e2e-settings.ps1` | 14 | 设置中心（UI 自动化）；`-Package` 测打包版 |
-| `pipe-protocol.ps1` | 7 | 设置管道协议（无鼠标） |
+| `e2e-settings.ps1` | 14 | 设置中心（UIA）；`-Package` 测打包版 |
+| `e2e-widgets.ps1` | 9 | 小组件：读布局、层级、网格、真实鼠标拖动吸附并保存、改尺寸、添加、移除、关闭 |
+| `e2e-tray.ps1` | 16 | 托盘面板与转发、日历、控制中心（蓝牙页、声音页、投屏页、音量滑块与滚轮、从喇叭拖动） |
+| `e2e-start.ps1` | 13 | 开始菜单 |
+| `e2e-notify.ps1` | 18 | 通知 |
+| `e2e-bar.ps1` | 11 | 栏的点击、拖动、拖放、溢出 |
+| `e2e-motion.ps1` | 8 | 动效与弹窗玻璃（`launch-bounce` 偶发取样过晚，见 VERIFICATION 28.5） |
+| `e2e-stacking.ps1` | 5 | 层级守护 |
+| `e2e-lock.ps1` | 5 | 锁屏封面（`ATRIUM_LOCK_DRYRUN=1`，**必须**） |
+| `pipe-protocol.ps1` | 7 | 设置管道 |
 
-- v0.6 结果见 VERIFICATION §19。测试的设置文件都显式写 `"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false`，避免真实消息干扰（`e2e-notify` 的 `windows-toast` 除外）。
-- 除 `pipe-protocol` 外都移动真实鼠标，脚本开头检查用户空闲 ≥30 s，否则输出 `SKIP` 并退出（**SKIP 不算通过**）。用户经常在用电脑：可以写一个循环，每次先等空闲 >35 s 再跑一个脚本，后台执行并轮询日志。
-- 测试钩子：`Atrium.Core.exe --command <verb> [arg]`，verb 有 `bar-state`、`start`、`start-state`、`start-type`、`start-key`、`start-click <id>`（如 `power`、`page:1`）、`notify app|title|body|action`、`notify-state`、`notify-open`、`notify-click <id>`（如 `stack`）、`notify-clear`、`notify-quiet n`、`notify-probe`、`tray-open`、`tray-state`、`tray-find <文字>`、`tray-click` / `tray-rclick <序号或文字>`、`control-open`、`control-state`、`control-click <id>`、`control-volume <0-100>`、`calendar-open`、`calendar-state`、`calendar-click <id>`（`prev`、`next`、`today`、`day:<0-41>`）、`lock-open`、`lock-state`、`lock-dismiss [lock]`（不带 `lock` 时只收起封面，不锁定）；`control-click` 新增 `wifi`、`bt`（开关无线电，测试不要用）、`wifi-page`、`bt-page`、`back`、`cast`。环境变量 `ATRIUM_LOCK_DRYRUN=1` 让锁屏只记录交接不真锁定（**测试锁屏必须设置**），`ATRIUM_LOCK_WALLPAPER=<图片>` 替换墙纸（截图）。环境变量 `ATRIUM_START_LAYOUT=<json>` 让开始菜单读这个文件而不是导出用户的固定项（截图用）。日志在 `%LOCALAPPDATA%\Atrium\logs\core.log`；`--debug-layout` 记录各项的屏幕矩形，`--debug-capturable` 让栏和弹窗能被截图（背景冻结在第一帧）。
-- 本地辅助脚本（不在仓库）：`%LOCALAPPDATA%\atrium-tools\`，其中 `v07-shot.ps1`（托盘、日历、面板开着时的通知截图，`-SettingsFile demo-v07.json`）、`v05-shot.ps1`（README 截图，带测试背景，设 `ATRIUM_PRIVACY=1` 和 `ATRIUM_START_LAYOUT=demo-start-layout.json`，即 Windows 自带应用）、`run-tests.ps1`（后台依次跑测试：每个脚本前等用户空闲 >35 s，开始前退出、结束后重启用户的 Atrium；`-Tests 'e2e-start,e2e-notify'`）、`mem3.ps1`（内存）、`idle.ps1`（空闲秒数）、`demo-pins.json`、`acb\acb-call.mjs`（见下）。
+- 测试设置文件都写 `"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false`（小组件测试除外）。
+- 移动真实鼠标的脚本在用户不空闲时输出 `SKIP` 并退出（SKIP 不算通过）。
+- 测试命令：`Atrium.Core.exe --command <verb> [arg]`。常用：`bar-state`；`start*`；`notify*`；`tray-*`；`calendar-*`；`lock-open|lock-state|lock-dismiss`；`control-open|control-state|control-volume <n>|control-click <id>`（id：`wifi-page`、`bt-page`、`sound-page`、`cast`、`back`、`out:<i>`、`amute:<i>`、`disp:<i>`、`mode:<i>`、`mute`；**`wifi`/`bt` 会真拨无线电、`mode:*` 会改投影模式、`disp:*` 会投屏，测试不要用**）；`widgets-state`、`widgets-do <add:kind:size|remove:i|size:i:size|restack|vivid:0/1>`。
+- 环境变量：`ATRIUM_LOCK_DRYRUN=1`、`ATRIUM_LOCK_WALLPAPER=<图>`、`ATRIUM_START_LAYOUT=<json>`、`ATRIUM_PRIVACY=1`（截图隐藏个人信息）、`ATRIUM_WIDGETS_TEST=1`（小组件置顶、全彩/单色由 `vivid` 命令控制，截图用）、`ATRIUM_WIDGETS_LIGHT=0/1`、`ATRIUM_CAPTURE=wgc`（强制旧的 WGC 背景，对比用）。
+- `--debug-capturable`：窗口始终可被截图；用 DDA 时背景实时，退回 WGC 时背景冻结在第一帧。`--debug-layout`：记录各项屏幕矩形。
+- 日志：`%LOCALAPPDATA%\Atrium\logs\core.log`。渲染每分钟一行 `render: last minute ... work p50/p95/max`，改渲染/捕获后要看它有无退化（DDA 修复后基准：p50 0.6 ms、p95 12 ms）。
+- 本地辅助脚本（`%LOCALAPPDATA%\atrium-tools\`，不在仓库）：`run-tests.ps1`、`idle.ps1`；截图 `cc-shot.ps1`/`cc2-shot.ps1`（控制中心各页）、`cc-anim.ps1`（换页连拍 12 帧）、`widgets-shot.ps1`（小组件全彩/单色）、`widgets-desk.ps1`（真实桌面 Win+D 层级）、`capture-shot.ps1`（非调试模式 GDI 截屏，验证截图兼容与背景实时）、`v07-shot.ps1` 等；性能 `blink.ps1` + `perf-compare.sh`；对比 `mot-compare.sh`；`switch-check.ps1`（切换输出设备并切回）；设置样例 `demo-v07.json` 等。截图拷到 `devshots/tmp/`（已被 .gitignore 忽略）再用 `remote_read_file` 看。
 
-## 4. 必须遵守的约束
-
-- 一切开发、构建、Git 都在用户电脑上用 devbox 工具执行；回复用户用中文。
-- Atrium 单实例：测试前要正常退出用户正在运行的 `dist\Atrium\Atrium.Core.exe`（`--exit`），测试后重新启动它（WSL 里用 `powershell.exe -Command Start-Process ...`；`cmd.exe /c start` 会挂住）。用户的设置中心窗口开着时，`e2e-settings` 会因单实例转交而失败，`tools/build.ps1` 也会拒绝打包（v0.5 起；之前会把 `dist\Atrium` 删到一半），需等其关闭。
-- **不要中途结束正在运行的测试**：e2e 脚本把用户的 `settings.json` / `widgets.json` 备份在自己的内存里，在 `finally` 里还原；强制结束会丢失用户设置（2026-11-02 发生过一次，用户的固定应用和外观设置丢失，只能恢复为默认值并重新导入 Windows 固定项）。`run-tests.ps1` 现在开跑前把两份文件另存到 `%LOCALAPPDATA%\atrium-tools\user-backup\`，每个测试后和结束时还原；若仍需中止，先从那里恢复。
-- 测试会备份并还原 `%LOCALAPPDATA%\Atrium\settings.json`（用户当前**没有**这个文件，只有 `logs`，测试后保持如此）、光标与前台窗口；结束后确认没有残留测试进程。
-- 不要提交含个人内容的截图（账户名、头像、Wi-Fi 名、个人文件）；截图用测试背景和 `ATRIUM_PRIVACY=1`。
-- 删除、覆盖、改系统设置前先确认；用户已授权自主提交与推送。按阶段提交，每个提交可单独构建。
-- 不注入 Explorer / DWM，不改用户的系统通知设置；系统入口只用公开快捷键（D11）。
-- 本机环境：Windows 11 26300 预览版，3200×2000、200% 缩放，系统任务栏自动隐藏，Intel Arc 核显 + RTX 4060。
-
-## 5. 调用 Codex（agent-control-bridge）
-
-用户电脑上有 agent-control-bridge（`D:\Download App\Agent Control Bridge`，MCP stdio 服务），可以使用 ChatGPT 桌面应用里的 Codex 对话。本会话没有挂载它，用本地脚本调用：
+## 6. 调用 Codex（agent-control-bridge）
 
 ```bash
 cd /mnt/c/Users/Lenovo/AppData/Local/atrium-tools/acb
@@ -114,42 +118,43 @@ N="/mnt/d/Download App/Agent Control Bridge/runtime/node.exe"
 "$N" acb-call.mjs acb_codex_read '{"threadId":"...","turns":1}'
 ```
 
-atrium-desktop 的对话是「制定 Atrium Desktop 技术架构」（`01a19124-4b29-7172-a13a-3f5b0122f0c1`，cwd 为本仓库）。v0.5 用它出开始菜单视觉方案和做只读代码审查；让它“不要修改文件、不要构建或运行 Atrium”，避免与本会话的改动和测试冲突。长任务用 `wait:false` 再轮询。
+atrium-desktop 的对话 `01a19124-4b29-7172-a13a-3f5b0122f0c1`（cwd 为本仓库）。只让它做只读审查/方案，并说明“不要修改文件、不要构建或运行 Atrium”。
 
-## 6. 容易踩的坑
+## 7. 必须遵守的约束与坑
 
-- 源码里不要直接写 Segoe Fluent Icons 的私有区字符，统一写成 `L"\uE721"` 这类转义（编辑器里看不见，用脚本替换时会被当成空串）。
-- 测试脚本是 UTF-8 BOM + CRLF；PowerShell 双引号字符串里的引号要用反引号转义；子进程测试窗口要先 `SetProcessDPIAware`，否则 200% 下坐标被放大一倍。
-- 在跨进程 `SendMessage`（`--command`）里不能发出 COM 调用（网络列表等会失败），需要的话用定时器异步做。
-- 弹窗窗口 = 内容区 + 12 DIP 阴影边距；`Surface::Rect()` 是内容区，鼠标消息已换成内容坐标；测试日志里的坐标都是屏幕像素。
-- 内容层不要用 D2D 图层做透明度（WARP 会缓存，内存涨几十 MB），用 `Canvas::BeginGroup`（透明度乘进画刷）。
-- 渲染线程的帧日志要写在“无变化跳过”之前，否则空闲时等不到。
+- 一切开发、构建、Git 都在用户电脑上用 devbox 工具执行。
+- Atrium 单实例：测试/打包前 `--exit` 用户的 Atrium，之后用 `powershell.exe -Command Start-Process ...` 重启（`cmd.exe /c start` 会挂住）。
+- **不要中途结束测试**（见 §1）。截图/实验前先等用户空闲 ≥30 s（`idle.ps1`），会遮住屏幕十几秒。
+- 不提交含个人内容的截图；不提交仓库根目录用户的 `iPhoneDuo-原图-圆环状态栏.png`。
+- 不注入 Explorer/DWM/LogonUI，不改系统通知设置，不添加根证书、不改信任策略；锁屏全替换只能在虚拟机验证（GPT 报告与用户要求）。
+- 源码里 Segoe Fluent Icons 私有区字符一律写 `L"\uE721"` 转义（用 Python 改文件时注意别把它们吞掉）。
+- 测试脚本 UTF-8 BOM + CRLF；用 Python 读写时用 `newline=''` 保留 CRLF。
+- `GlassParams` 与 `glass.hlsl` 的 cbuffer 必须同步（`static_assert` 336 字节）。
+- DDA：取帧线程绝不能在 `AcquireNextFrame` 里等待（设备多线程保护，会卡住渲染线程）；`Acquire()` 只释放上一次交出的帧。
+- 双显卡：DXGI 只在进程所在 GPU 下列出屏幕；Atrium 首次运行写入 `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`（本机 dist 与开发版 exe 都已写入）。
+- 弹窗窗口 = 内容 + 阴影边距；`Surface::Rect()` 是内容区；控制中心窗口固定为最高页高度，命中坐标要减 `cardTop_`。
+- 跨进程 `SendMessage`（`--command`）里不能发 COM 调用。
+- 在 `Surface` 自己的消息处理中不能销毁该 Surface（小组件移除用 `PostMessage` 延后）。
+- 本机：Windows 11 家庭中文版 26H2（26300），3200×2000 @200%，系统任务栏自动隐藏，Intel Arc（输出）+ RTX 4060；两台播放设备（Realtek、NICEHCK，默认 NICEHCK）；附近有一台无线显示器；单屏。
+- 用户当前设置：`settings.json` 为 `{}`（事故后恢复的默认值，3 个固定项导入在内存中、下次保存时写入），`widgets.json` 不存在（默认 4 个小组件）。
 
-## 7. 剩余限制与可做的下一步
+## 8. 待办与未验证（按优先级建议）
 
-已知限制（详见 VERIFICATION §17、§18）：
-- 全屏判定只看前台窗口；多显示器整体未做。
-- 悬停名称仍是系统提示框，可改成玻璃标签（在栏的放大区域上方绘制）。
-- 开始菜单只读 Windows 的固定项，不能在 Atrium 里增删；固定项文件夹平铺列出；一个弹窗只有一种墨色。
-- 托盘：不能转发双击；按消息坐标放菜单的应用，菜单会出现在屏幕左下。微信来源实机出卡待验证（需要真实入站消息），且微信主窗口关到托盘（隐藏）时读不到会话列表，只在打开或最小化时可用；飞书的系统通知待真实样本。
-- 测试中出现过一次 GPU 设备被移除（`0x887A0005`）后渲染线程停帧、Core 退出变慢；`run-tests.ps1` 的下一个脚本若在旧 Core 退出前启动，新 Core 会因单实例直接退出。
-- 本机用户的 QQ 设置为“任务栏头像闪动”，会让自动隐藏的系统任务栏长时间升起：截图与测试时栏不再因此让位（D25），但系统任务栏仍可见。
-- 弹窗阴影边距在窗口内，点在边距上会关闭菜单但不会穿透到下层窗口。
-- 用户对“系统任务栏升起时谁在上面”的偏好未明确，目前让系统任务栏在上（D25）。
+1. **用户可能要的下一步**（等用户指示）：
+   - 锁屏：预研报告 `D:\Projects\atrium-validation\2026-11-02-lockscreen-research\REPORT.md`（结论“部分可行”，推荐用户会话内 uiAccess 展示层叠在 LockApp 之上，需受信任代码签名 + Program Files；不建议 SYSTEM 安全桌面方案）。需用户同意安装 VMware/VirtualBox 后在虚拟机做 PoC。现有 v0.8 锁屏封面仍在开始菜单“锁定”里——用户不喜欢，可考虑改为直接 `LockWorkStation`（需先和用户确认）。
+   - 小组件：天气（需网络与位置，先问用户）、更多 mac 组件、多显示器、拖动时的放置预览、“编辑小组件”画廊。
+2. 未实机验证：控制中心投屏真正连接无线显示器、投影模式切换、Wi-Fi/蓝牙开关拨动（都会影响用户，需用户亲测）；OBS / ShareX / Windows 截图工具逐个实测（只验证了 GDI、WGC 两种底层方式）。
+3. 已知限制：使用 DDA 的录屏软件拍不到 Atrium；小组件只在栏所在显示器；全屏判定只看前台窗口；多显示器整体未做；托盘不能转发双击；`e2e-motion` 的 `launch-bounce` 偶发取样过晚。
+4. 通知：微信来源状态显示（未运行 / 列表不可读 / 已建立基线）尚未做（GPT round2 §5.2）；通用 Toast → QQ/飞书入站点击 → 微信 UIA 出卡的顺序见下。
+5. 更早的未完成项：键盘与屏幕阅读器、窗口缩略图预览、HDR/高刷、Explorer 重启与睡眠唤醒、长时间稳定性、稳定版 Windows 11 验证、真正接管系统任务栏（D16，默认关闭）。
 
-更早留下的未完成项：键盘操作与屏幕阅读器支持、窗口缩略图预览、多显示器、HDR / 高刷新率、Explorer 重启与睡眠唤醒、长时间稳定性、稳定版 Windows 11 验证；第三方托盘桥接（D12）与真正接管系统任务栏仍待证；镜像 Windows 通知为实验功能、默认关闭（D24）。
+### 通知接入背景（仍有效）
 
-## 8. 通知接入交接更新（2026-11-01）
+先读仓库外本机报告：`D:\Projects\atrium-validation\2026-11-01\`（QQ/微信适配验证、通知/托盘/捕获可行性）与 `2026-11-01-round2\REPORT.md`。通用 Windows Toast 为主、特殊应用适配为辅；事件流“系统 Toast / 专用适配器 → `Notice` → 现有卡片”；复用 `notification_listener.*`、`Notice`、`WM_NOTICE`；`WM_NOTICE` 不应被误绑到系统监听开关。GitHub 参考：[Seelen UI 通知模块](https://github.com/eythaann/Seelen-UI/tree/master/src/background/modules/notifications)、[微软监听示例](https://github.com/WindowsNotifications/NotificationListenerActionCenterApp)、[wechat-toast](https://github.com/EthanAIDev/wechat-toast)。
 
-通知开发先读本机独立验证目录中的 [适配验证与集成报告](../../atrium-validation/2026-11-01/QQ-WECHAT-ADAPTER-VALIDATION.md)，以及 [通知、托盘和捕获可行性报告](../../atrium-validation/2026-11-01/FEASIBILITY-REPORT.md)。这些是仓库外的本机报告，Git clone 不会附带；完整路径为 `D:\Projects\atrium-validation\2026-11-01`，换机器交接时需一并提供。
+### 仓库外资料（换机器交接需一并提供）
 
-- **通用 Windows Toast 为主，特殊应用适配为辅。** 获得授权且 Listener 可读的标准 Toast 共用来源、文本与状态同步，不按每个软件重写采集器；原始按钮、快捷回复、定位会话另行验收。
-- **QQ**：独立探针已捕捉到新增系统 Toast，但与具体测试聊天的对应、覆盖率和点击尚未通过。先补通用通道。
-- **飞书**：优先用真实入站消息验证同一 Windows 通道；尚未取得有效样本，不预先开发专用适配器，也不标记已兼容。读不到先判断通知设置和来源类型。
-- **微信**：未读到系统 Toast；只读 UIA 已捕捉五次后台未读增长，均为免打扰会话。当前各应用只读到 10 个会话行，关闭到托盘、非免打扰真实出卡和稳定身份待补，不宣称全量接管。
-- 默认事件流为“系统 Toast / 专用适配器 → 统一 `Notice` 模型 → 现有 Atrium 卡片”。Windows 通知中心留档是可选单向镜像；自己的镜像必须防止重复/回环。`SuppressPopup` 只控制自己生成的 Toast，不能阻止其他应用的自绘弹窗。
-- GitHub 参考：[Seelen UI 通知模块](https://github.com/eythaann/Seelen-UI/tree/master/src/background/modules/notifications)、[微软监听示例](https://github.com/WindowsNotifications/NotificationListenerActionCenterApp)、[wechat-toast](https://github.com/EthanAIDev/wechat-toast)。后者仍有后台稳定性和精确跳转限制；各项目的机制、许可和证据见独立报告，不直接搬入大型依赖。
-
-下一批顺序：通用 Toast 同步 → QQ/飞书入站与基本点击 → 微信 UIA 出卡 → 已证实的覆盖缺口。复用 `notification_listener.*`、`Notice`、`WM_NOTICE` 和现有卡片；注意 `WM_NOTICE` 当前受 `g_app.listener` 条件限制，UIA 不应被误绑到系统监听开关。只读探针结果不等于产品集成已完成。
-
-新对话开始时先 `git log -5`、`git status` 确认状态，按用户已授权的上述方向继续；遇到确实缺失的输入再询问。
+- `D:\Projects\atrium-validation\2026-11-01\`、`2026-11-01-round2\`（GPT 的验证报告与探针源码）
+- `D:\Projects\atrium-validation\2026-11-02-lockscreen-research\REPORT.md`（锁屏预研）
+- `D:\Projects\atrium-validation\2026-11-02-capture\`（截图兼容的探针结果）
+- `%LOCALAPPDATA%\atrium-tools\`（本地脚本、测试日志、截图、Codex 桥接）
