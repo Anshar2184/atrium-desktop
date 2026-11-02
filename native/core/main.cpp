@@ -1,6 +1,6 @@
 // Atrium.Core: the resident process. Owns the glass bar, its popups, the desktop
-// widgets, the tray icon and the settings pipe. Coexistence mode only:
-// Explorer's taskbar is never hidden (docs/DECISIONS.md D16).
+// widgets, the tray icon and the settings pipe. Explorer's taskbar stays
+// unless the user hides it (setting hideTaskbar, shell/system_chrome.h; D37).
 
 #include "bar.h"
 #include "log.h"
@@ -10,6 +10,7 @@
 #include "shell/app_catalog.h"
 #include "shell/task_model.h"
 #include "shell/notification_listener.h"
+#include "shell/system_chrome.h"
 #include "shell/system_status.h"
 #include "shell/tray_model.h"
 #include "shell/feishu_source.h"
@@ -46,6 +47,7 @@ constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
 constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
 constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
 constexpr UINT WM_VOLUME = WM_APP + 7;        // the default playback device's volume changed
+constexpr UINT WM_CHROME_STATE = WM_APP + 8;  // test command chrome-state
 constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
@@ -75,6 +77,7 @@ struct App {
     std::unique_ptr<ControlCenter> control;
     std::unique_ptr<CalendarPanel> calendar;
     std::unique_ptr<DesktopWidgets> widgets;
+    std::unique_ptr<SystemChrome> chrome;
     bool widgetsOn = false;
 };
 
@@ -308,6 +311,8 @@ void RunCommand(const std::wstring& line)
         g_app.notes->TestClick(arg);
     else if (verb == L"notify-clear")
         g_app.notes->Clear();
+    else if (verb == L"chrome-state")
+        PostMessageW(g_app.host, WM_CHROME_STATE, 0, 0); // COM calls out: not inside this sent message
     else if (verb == L"notify-quiet")
         g_app.notes->SetQuietOverride(_wtoi(arg.c_str()));
     else if (verb == L"notify-probe") {
@@ -580,6 +585,10 @@ void ApplySettings(const Settings& s)
     g_app.widgets->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
     g_app.widgets->SetEnabled(s.widgets);
     g_app.widgetsOn = s.widgets;
+    if (g_app.chrome) {
+        g_app.chrome->SetTaskbarHidden(s.hideTaskbar);
+        g_app.chrome->SetBannersHidden(s.hideBanners);
+    }
 }
 
 void ShowItemMenu(const std::wstring& key, POINT pt)
@@ -735,6 +744,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     if (m == g_app.taskbarCreated && m != 0) {
         AddTrayIcon(); // Explorer restarted
+        if (g_app.chrome)
+            g_app.chrome->Enforce(); // its new taskbar
         return 0;
     }
     switch (m) {
@@ -776,6 +787,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_VOLUME:
         UpdateStatus();
         return 0;
+    case WM_CHROME_STATE:
+        if (g_app.chrome)
+            g_app.chrome->LogState();
+        return 0;
     case WM_TRAY_ICONS:
         if (w == 1) // a click was forwarded: see where the focus ends up
             SetTimer(h, kTrayFocusTimer, 600, nullptr);
@@ -789,6 +804,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         if (w == kStatusTimer) {
             UpdateStatus();
+            if (g_app.chrome)
+                g_app.chrome->Enforce();
             return 0;
         }
         if (w == kTrayFocusTimer) {
@@ -836,6 +853,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_DISPLAYCHANGE:
     case WM_DPICHANGED:
+        if (g_app.chrome)
+            g_app.chrome->Enforce(); // a new display's taskbar
         g_app.bar->Relayout();
         return 0;
     case WM_SETTINGCHANGE:
@@ -843,8 +862,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             g_app.bar->Relayout(); // e.g. the system taskbar changed size or auto-hide
         return 0;
     case WM_ENDSESSION:
-        if (w)
+        if (w) {
             Log(L"core: session ending");
+            g_app.chrome.reset(); // Do Not Disturb outlives the session
+        }
         return 0;
     case WM_DESTROY:
         RemoveTrayIcon();
@@ -895,6 +916,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     g_app.instance = instance;
     Log(L"core: starting");
+    // A crash must not leave the user without a taskbar.
+    SetUnhandledExceptionFilter([](EXCEPTION_POINTERS*) -> LONG {
+        SystemChrome::EmergencyRestore();
+        return EXCEPTION_CONTINUE_SEARCH;
+    });
+    g_app.chrome = std::make_unique<SystemChrome>();
 
     WNDCLASSEXW wc{sizeof(wc)};
     wc.hInstance = instance;
@@ -947,6 +974,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.notes->barRect = [] { return g_app.bar->BarRect(); };
     g_app.notes->onUnread = [](int n) { g_app.bar->SetUnread(n); };
     g_app.notes->onActivate = RunNoticeAction;
+    g_app.notes->quietIsOurs = [] { return g_app.chrome && g_app.chrome->QuietIsOurs(); };
     // New cards wait while one of Atrium's panels is open (they would overlap it).
     g_app.notes->held = [] {
         return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible();
@@ -1013,6 +1041,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.catalog.reset();
     g_app.tasks.reset();
     g_app.bar.reset();
+    g_app.chrome.reset();
     Log(L"core: exited");
     ReleaseMutex(mutex);
     CloseHandle(mutex);

@@ -112,6 +112,8 @@ int Notifications::QuietState() const
     QUERY_USER_NOTIFICATION_STATE state = QUNS_ACCEPTS_NOTIFICATIONS;
     if (FAILED(SHQueryUserNotificationState(&state)))
         return QUNS_ACCEPTS_NOTIFICATIONS;
+    if (state == QUNS_QUIET_TIME && quietIsOurs && quietIsOurs())
+        return QUNS_ACCEPTS_NOTIFICATIONS;
     return int(state);
 }
 

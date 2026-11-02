@@ -97,6 +97,8 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
     o.SetNamedValue(L"notifyFeishu", json::JsonValue::CreateBooleanValue(notifyFeishu));
     o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
+    o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
+    o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
     if (pins) {
         json::JsonArray a;
         for (const auto& p : *pins) {
@@ -159,6 +161,8 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"notifyWeChat", s.notifyWeChat);
     flag(L"notifyFeishu", s.notifyFeishu);
     flag(L"widgets", s.widgets);
+    flag(L"hideTaskbar", s.hideTaskbar);
+    flag(L"hideBanners", s.hideBanners);
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
         s.textColor = std::wstring(o.GetNamedString(L"textColor"));
     if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {

@@ -31,6 +31,7 @@ add_executable(atrium_core WIN32
     settings_server.cpp
     shell/task_model.cpp
     shell/app_catalog.cpp
+    shell/system_chrome.cpp
     shell/system_status.cpp
     shell/wifi.cpp
     shell/radios.cpp

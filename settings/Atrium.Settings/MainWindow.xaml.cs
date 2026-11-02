@@ -338,6 +338,8 @@ public sealed partial class MainWindow : Window
         WeChatSwitch.IsOn = _current.NotifyWeChat;
         FeishuSwitch.IsOn = _current.NotifyFeishu;
         WidgetsSwitch.IsOn = _current.Widgets;
+        HideTaskbarSwitch.IsOn = _current.HideTaskbar;
+        HideBannersSwitch.IsOn = _current.HideBanners;
         _autoWidthGlyph?.Update(_current.AutoWidth ? 1 : 0);
         _clockGlyph?.Update(_current.ShowClock ? 1 : 0);
         _runningGlyph?.Update(_current.ShowRunning ? 1 : 0);
@@ -438,6 +440,20 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.Widgets = WidgetsSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnHideTaskbarToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.HideTaskbar = HideTaskbarSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnHideBannersToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.HideBanners = HideBannersSwitch.IsOn;
         Changed();
     }
 

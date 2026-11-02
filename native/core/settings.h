@@ -45,6 +45,9 @@ struct Settings {
     bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
     bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
     bool widgets = true;             // desktop widgets (their layout is widgets.json)
+    // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
+    bool hideTaskbar = false;        // the system taskbar is hidden while Atrium runs
+    bool hideBanners = false;        // Do Not Disturb: no system banners, the notifications still become cards
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;
 

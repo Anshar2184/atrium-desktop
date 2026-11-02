@@ -45,6 +45,9 @@ public:
     // True while another of Atrium's panels is open: new cards wait for it to
     // close instead of overlapping it (checked again until then).
     std::function<bool()> held;
+    // True while Do Not Disturb is on only to hide the system's banners
+    // (Atrium's setting): the cards still pop up then.
+    std::function<bool()> quietIsOurs;
 
     void Post(Notice n);
     void PanelsChanged(); // a panel opened: the cards on screen step aside

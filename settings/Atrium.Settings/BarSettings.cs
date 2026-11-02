@@ -34,6 +34,8 @@ internal sealed class BarSettings
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
     public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
     public bool Widgets { get; set; } = true;          // desktop widgets (their layout is the core's widgets.json)
+    public bool HideTaskbar { get; set; }              // the system taskbar is hidden while Atrium runs
+    public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
     // Null = the key was absent (never saved); the core then imports the Windows pins.
     public List<PinnedApp>? Pins { get; set; }
 
@@ -90,6 +92,8 @@ internal sealed class BarSettings
             ["notifyWeChat"] = NotifyWeChat,
             ["notifyFeishu"] = NotifyFeishu,
             ["widgets"] = Widgets,
+            ["hideTaskbar"] = HideTaskbar,
+            ["hideBanners"] = HideBanners,
         };
         if (Pins != null)
         {
@@ -137,6 +141,8 @@ internal sealed class BarSettings
         s.NotifyWeChat = Flag("notifyWeChat", f.NotifyWeChat);
         s.NotifyFeishu = Flag("notifyFeishu", f.NotifyFeishu);
         s.Widgets = Flag("widgets", f.Widgets);
+        s.HideTaskbar = Flag("hideTaskbar", f.HideTaskbar);
+        s.HideBanners = Flag("hideBanners", f.HideBanners);
         s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
             ? (tcs is "light" or "dark" ? tcs : "auto")
             : f.TextColor;

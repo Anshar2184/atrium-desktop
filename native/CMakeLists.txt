@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(atrium_native VERSION 0.9.2 LANGUAGES CXX RC)
+project(atrium_native VERSION 0.9.3 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

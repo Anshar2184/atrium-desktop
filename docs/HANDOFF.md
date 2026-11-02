@@ -1,10 +1,10 @@
-# 交接文档（2026-11-02，v0.9.2）
+# 交接文档（2026-11-02，v0.9.3）
 
-给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D36，D25 / D30 / D35 在 v0.9.2 修订）和 [VERIFICATION](VERIFICATION.md) 第 20–28 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
+给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D37，D25 / D30 / D35 在 v0.9.2 修订，D37 为 v0.9.3 新增）和 [VERIFICATION](VERIFICATION.md) 第 20–28 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
 
 ## 0. 一句话现状
 
-与系统任务栏共存的 C++ 液态玻璃任务栏，带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.2**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
+C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.3**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
 
 ## 1. 用户与协作方式（重要）
 
@@ -33,10 +33,13 @@
 
 - v0.9.2：状态图标改为圆环（D30：电量环、开口处充电闪电、低电量红；中间 iPhone 式三格 Wi-Fi，`render/wifi_glyph` 与控制中心、开始菜单共用；音量变化经 `IAudioEndpointVolumeCallback` 即时触发，圆环弹簧过渡到音量并显示喇叭 1.5 秒）；**自动隐藏**（D25：前台最大化 / 全屏时栏向下滑出，底边唤出、离开 0.5 秒收回，弹窗开着时保持）；小组件始终透明玻璃、层级即时调整、拖动不重绘、玻璃移动后立即重取背景；控制中心启动时预读亮度（首次打开不再晚一拍）；新小组件（D35：数字时钟、系统监视、备忘录、提醒事项、照片，大尺寸 2×2，日历大号农历月历）；清理：移除 `poc/`、`native/guard`（从未被调用）、锁屏封面与着色器距离场通道、任务模型探针、早期设计文档。
 
+- v0.9.3：**只留 Atrium 栏**（D37，`shell/system_chrome.*`）：设置“隐藏系统任务栏”（`hideTaskbar`，隐藏 `Shell_TrayWnd`，Explorer 再显示时立即再隐藏）与“隐藏系统通知横幅”（`hideBanners`，经 QuietHoursSettings 打开“请勿打扰·仅闹钟”，通知仍成为卡片）；默认关；关闭或退出时恢复，强制结束后由下次启动按 `system.json` 撤销。
+
 ## 3. 代码地图（native/core）
 
 | 文件 | 内容 |
 | --- | --- |
+| `shell/system_chrome.*` | 隐藏系统任务栏 / 系统通知横幅及其恢复（D37）；测试命令 `chrome-state` |
 | `main.cpp` | 进程入口、`g_app`、托盘与栏右键菜单（含“添加桌面小组件”，取自 `WidgetChoices()`）、`ApplySettings`、`UpdateStatus`（音量回调 `WM_VOLUME`、`status-fake`）、`--command` 测试命令 |
 | `bar.cpp/.h` | 栏：布局、输入、层级守护、自动隐藏（`UpdateCover` / `UpdateAutoHide` / `WatchPointer`）、渲染线程 `RenderSession`（背景来源选择 DDA/WGC、`ShowOwnWindowsToCapture`、弹窗玻璃 `renderPanels`，面板移动后 1 秒内保留最新帧 `keepFrame`） |
 | `render/capture.*` | `BackdropSource` 接口；`MonitorCapture`（WGC）、`DuplicationCapture`（DDA，取帧线程 `AcquireNextFrame(0)` + 5 ms 轮询，交出帧不整屏复制）；`SetCaptureExclusion`；`PreferPowerSavingGpu` |
@@ -92,7 +95,7 @@ G="/mnt/c/Program Files/Git/cmd/git.exe"; GH='C:/Users/Lenovo/AppData/Local/atri
 ```bash
 T='C:\Users\Lenovo\AppData\Local\atrium-tools'
 nohup $PS -NoProfile -ExecutionPolicy Bypass -File "$T\\run-tests.ps1" -Core 'D:\Projects\atrium-desktop\native\build\win-x64\Release\Atrium.Core.exe' \
-  -Tests 'pipe-protocol,e2e-settings,e2e-widgets,e2e-tray,e2e-start,e2e-notify,e2e-bar,e2e-motion,e2e-stacking' \
+  -Tests 'e2e-chrome,pipe-protocol,e2e-settings,e2e-widgets,e2e-tray,e2e-start,e2e-notify,e2e-bar,e2e-motion,e2e-stacking' \
   -Log "$T\\test-xxx.log" >/dev/null 2>&1 &
 # 轮询日志直到 "runner: done"；测打包版把 -Core 换成 dist\Atrium\Atrium.Core.exe 并加 -Package
 ```
@@ -108,6 +111,7 @@ nohup $PS -NoProfile -ExecutionPolicy Bypass -File "$T\\run-tests.ps1" -Core 'D:
 | `e2e-motion.ps1` | 8 | 动效与弹窗玻璃（`launch-bounce` 偶发取样过晚，见 VERIFICATION 28.5） |
 | `e2e-stacking.ps1` | 9 | 层级守护、自动隐藏（全屏与最大化收起、底边唤出、停在栏上保持、离开收回、窗口关闭后恢复）、让位于升起的系统任务栏 |
 | `pipe-protocol.ps1` | 7 | 设置管道 |
+| `e2e-chrome.ps1` | 7 | 隐藏系统任务栏（及被 Explorer 显示后再隐藏）、请勿打扰去横幅且 Windows 通知仍成卡片、关闭后恢复、强制结束后下次启动撤销；不动鼠标；请勿打扰已开着时 SKIP |
 
 - 测试设置文件都写 `"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false`（小组件测试除外）。
 - 移动真实鼠标的脚本在用户不空闲时输出 `SKIP` 并退出（SKIP 不算通过）。
@@ -135,7 +139,7 @@ atrium-desktop 的对话 `01a19124-4b29-7172-a13a-3f5b0122f0c1`（cwd 为本仓�
 - Atrium 单实例：测试/打包前 `--exit` 用户的 Atrium，之后用 `powershell.exe -Command Start-Process ...` 重启（`cmd.exe /c start` 会挂住）。
 - **不要中途结束测试**（见 §1）。截图/实验前先等用户空闲 ≥30 s（`idle.ps1`），会遮住屏幕十几秒。
 - 不提交含个人内容的截图；不提交仓库根目录用户的 `iPhoneDuo-原图-圆环状态栏.png`。
-- 不注入 Explorer/DWM/LogonUI，不改系统通知设置，不添加根证书、不改信任策略；锁屏全替换只能在虚拟机验证（GPT 报告与用户要求）。
+- 不注入 Explorer/DWM/LogonUI；除用户打开的 D37 两个设置外不改系统任务栏与通知设置，不添加根证书、不改信任策略；锁屏全替换只能在虚拟机验证（GPT 报告与用户要求）。
 - 源码里 Segoe Fluent Icons 私有区字符一律写 `L"\uE721"` 转义（用 Python 改文件时注意别把它们吞掉）。
 - 测试脚本 UTF-8 BOM + CRLF；用 Python 读写时用 `newline=''` 保留 CRLF。
 - `GlassParams` 与 `glass.hlsl` 的 cbuffer 必须同步（`static_assert` 336 字节）。
@@ -153,7 +157,7 @@ atrium-desktop 的对话 `01a19124-4b29-7172-a13a-3f5b0122f0c1`（cwd 为本仓�
    - 小组件：天气（需网络与位置，先问用户）、多显示器、拖动时的放置预览、“编辑小组件”画廊；备忘录的中文输入法已接好（组合窗跟随光标），但只用 Unicode 按键自动测过，需用户实测输入法。
    - 锁屏：现阶段不做（预研报告见下方“仓库外资料”）。
 2. 未实机验证：控制中心投屏真正连接无线显示器、投影模式切换、Wi-Fi/蓝牙开关拨动（都会影响用户，需用户亲测）；OBS / ShareX / Windows 截图工具逐个实测（只验证了 GDI、WGC 两种底层方式）。
-3. 已知限制：使用 DDA 的录屏软件拍不到 Atrium；小组件只在栏所在显示器；全屏 / 最大化判定只看前台窗口（自动隐藏时鼠标到底边也会唤出自动隐藏的系统任务栏，栏在它上面）；世界时钟首次绘制约 190 ms（首次枚举时区）；多显示器整体未做；托盘不能转发双击；`e2e-motion` 的 `launch-bounce` 偶发取样过晚。
+3. 已知限制：使用 DDA 的录屏软件拍不到 Atrium；小组件只在栏所在显示器；全屏 / 最大化判定只看前台窗口（自动隐藏时鼠标到底边也会唤出自动隐藏的系统任务栏，栏在它上面；开启“隐藏系统任务栏”后不再出现）；QuietHoursSettings 是未公开接口，Windows 更新后可能失效（失效时只记日志、横幅照常）；世界时钟首次绘制约 190 ms（首次枚举时区）；多显示器整体未做；托盘不能转发双击；`e2e-motion` 的 `launch-bounce` 偶发取样过晚。
 4. 通知：微信来源状态显示（未运行 / 列表不可读 / 已建立基线）尚未做（GPT round2 §5.2）；通用 Toast → QQ/飞书入站点击 → 微信 UIA 出卡的顺序见下。
 5. 更早的未完成项：键盘与屏幕阅读器、窗口缩略图预览、HDR/高刷、Explorer 重启与睡眠唤醒、长时间稳定性、稳定版 Windows 11 验证；真正接管系统任务栏（D09/D10/D16）搁置，原型与 Guard 已移出仓库。
 

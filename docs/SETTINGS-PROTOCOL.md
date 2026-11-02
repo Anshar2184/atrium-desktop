@@ -34,6 +34,8 @@
 | `notifyWeChat` | bool | | true | 实验：读取微信窗口的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片 |
 | `notifyFeishu` | bool | | true | 读取飞书自己的消息弹窗里的文字（UI 自动化，只读），同时显示为 Atrium 卡片 |
 | `widgets` | bool | | true | 桌面小组件；布局由 Core 存于 `widgets.json`（D35） |
+| `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37） |
+| `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |
 | `pins` | array | | 见下 | 固定的应用，按顺序显示 |
 
 `pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空"}`。识别同一应用时 `aumid` 优先，其次是 `path` 指向的程序。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。

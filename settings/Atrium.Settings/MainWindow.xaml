@@ -500,7 +500,7 @@
                                                           AutomationProperties.Name="显示 Windows 通知" VerticalAlignment="Center" Toggled="OnListenerToggled" />
                                         </Grid>
                                         <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="把其他应用的通知显示为 Atrium 卡片。Atrium 不会改动你的系统通知：如果不想同时看到 Windows 自己的横幅，可以在 Windows 设置 › 通知里关闭对应应用的“显示通知横幅”，保留“在通知中心显示”。需要在 Windows 隐私设置中允许访问通知。" />
+                                                   Text="把其他应用的通知显示为 Atrium 卡片。不想同时看到 Windows 自己的横幅时，打开下方“桌面”中的“隐藏系统通知横幅”。需要在 Windows 隐私设置中允许访问通知。" />
                                     </Grid>
                                 </Border>
                                 <Border Style="{StaticResource CardSurfaceStyle}">
@@ -567,6 +567,42 @@
                                         </Grid>
                                         <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
                                                    Text="时钟、世界时钟、日历和电池，放在桌面左上角，位于所有窗口之下；桌面在前台时显示全彩，打开应用时变为单色玻璃。拖动可移动，右键可改变大小、移除或添加。" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE7C4;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1" Text="隐藏系统任务栏" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
+                                            <ToggleSwitch x:Name="HideTaskbarSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
+                                                          AutomationProperties.Name="隐藏系统任务栏" VerticalAlignment="Center" Toggled="OnHideTaskbarToggled" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="只留下 Atrium 栏：Atrium 运行时隐藏 Windows 任务栏（并设为自动隐藏，不占屏幕底部）。关闭开关或退出 Atrium 时恢复；Atrium 意外退出时，下次启动或重启 Windows 资源管理器即可恢复。Win 键、Win+N 等系统快捷键照常可用。" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE708;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1" Text="隐藏系统通知横幅" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
+                                            <ToggleSwitch x:Name="HideBannersSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
+                                                          AutomationProperties.Name="隐藏系统通知横幅" VerticalAlignment="Center" Toggled="OnHideBannersToggled" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="打开 Windows 的“请勿打扰”（仅闹钟），系统不再弹出横幅；通知仍进入通知中心，Atrium 照常显示为卡片。关闭开关或退出 Atrium 时关闭“请勿打扰”；如果你在 Windows 里自己关掉了它，Atrium 不会再打开。你事先已开启的“请勿打扰”不受影响。" />
                                     </Grid>
                                 </Border>
                             </local:ResponsiveGrid>
