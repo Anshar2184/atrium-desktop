@@ -63,8 +63,6 @@ std::wstring Ssid(const DOT11_SSID& s)
 
 } // namespace
 
-int WifiBars(int signal) { return signal >= 75 ? 4 : signal >= 50 ? 3 : signal >= 25 ? 2 : 1; }
-
 WifiState QueryWifi()
 {
     WifiState s;

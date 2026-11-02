@@ -287,8 +287,7 @@ bool GlassRenderer::Present(const GlassParams& params, const std::function<void(
     return Present(std::vector<GlassParams>{params}, overlay);
 }
 
-bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay,
-                            const std::vector<ID3D11ShaderResourceView*>* sdfs)
+bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay)
 {
     auto* ctx = gpu_.context.get();
     winrt::com_ptr<ID3D11Texture2D> back;
@@ -314,10 +313,6 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ctx->PSSetSamplers(0, 1, &s);
     for (size_t k = 0; k < shapes.size(); ++k) {
         GlassParams p = shapes[k];
-        ID3D11ShaderResourceView* sdf = sdfs && k < sdfs->size() ? (*sdfs)[k] : nullptr;
-        if (!sdf)
-            p.sdf = 0;
-        ctx->PSSetShaderResources(1, 1, &sdf);
         p.sizeX = float(w_);
         p.sizeY = float(h_);
         p.roiOriginX = p.roiOriginY = float(kPad);

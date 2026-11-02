@@ -92,14 +92,14 @@ Atrium redesigns the layer you look at every day: a floating glass taskbar with 
 
 - **One material engine**: rounded and capsule shapes, edge refraction, subtle dispersion, GPU blur, soft highlights. Liquid and frosted looks are presets of one pipeline.
 - **Native and light**: C++20, Win32, Direct3D 11, DirectComposition, DirectWrite. No browser runtime, no service, no admin rights.
-- **Safe to live with**: an independent native guard restores the Windows taskbar if Atrium crashes or hangs; no injection into Explorer or DWM, no system files touched.
+- **Safe to live with**: it lives beside the Windows taskbar and never hides or replaces it; no injection into Explorer or DWM, no system files touched.
 
 ## Quick start
 
 1. Download the `Atrium-win-x64` artifact from the latest successful run in [Actions](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml), or build it as described below.
 2. Unzip and run `Atrium.Core.exe`. The glass taskbar appears at the bottom of the screen; on first run it imports your current Windows taskbar pins.
 3. Left-click an app to open it, bring it to the front or minimize it; middle-click or Shift+click for a new window; right-click to pin, unpin, open the file location or close. Drag icons to reorder; drop a file on an app to open it there.
-4. Click the Windows logo on the left for the Atrium start menu (type to search apps), the bell on the right for notifications, the clock for Atrium's calendar (a month with Chinese lunar dates). Icons grow under the pointer (“悬停放大”, magnification, on the 形状 (Shape) page of Settings adjusts or turns it off); the bar hides while a full-screen video or game is in front.
+4. Click the Windows logo on the left for the Atrium start menu (type to search apps), the bell on the right for notifications, the clock for Atrium's calendar (a month with Chinese lunar dates). Icons grow under the pointer (“悬停放大”, magnification, on the 形状 (Shape) page of Settings adjusts or turns it off); the bar slides off the screen while a maximized or full-screen app is in front and comes back when the pointer reaches the bottom edge.
 5. Double-click the tray icon (or right-click it → the first menu item) to open the settings: material, size, pinned apps, notifications and more.
 6. Right-click the tray icon → the last menu item to quit. Nothing is written to the registry and no service is installed; settings live in `%LOCALAPPDATA%\Atrium`.
 
@@ -117,10 +117,10 @@ All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc
 | Live glass | ✅ backdrop from DXGI Desktop Duplication (Atrium's windows excluded from it alone), WGC when unavailable; D3D11; iGPU frame work p95 2.4 ms, content lag p95 1 frame |
 | Self-capture echo | ✅ exact comparison with the last presented backdrop; slow gradients, 1 px cursors and low-contrast scrolling text are never lost |
 | Click-through | ✅ click-through visual window + region-shaped input window; shadows and transparent corners pass clicks through |
-| Taskbar takeover and recovery | ✅ takeover protocol v2 + native guard, with a real AppBar: 15 fault scenarios (kill, hang, startup stall, both processes dying, lock timeout, restore not taking effect…) all restore the user's original settings (single monitor; a real Explorer restart is untested) |
+| Taskbar takeover and recovery | ⏸ the takeover protocol and the guard's fault recovery were verified with prototypes in v0.1; Atrium only coexists with the taskbar now, and the prototypes left the repository (see git history) |
 | Native entry points | ✅ Start, Search, Quick Settings and Notification Center work while the Explorer taskbar is hidden |
 | Third-party tray icons | ⚠️ forwarding bridge verified on normal and failure paths; Explorer restarts and real-app compatibility not yet tested |
-| Desktop widgets | ✅ v0.9: clock, world clock, calendar (with Chinese lunar dates), batteries, after macOS (full colour while the desktop is in front, monochrome glass while an app is), drag to a snapping grid, right-click to resize, remove or add; above the desktop and under every window, on top with Win+D (single monitor) |
+| Desktop widgets | ✅ v0.9.2: clock, world clock, digital clock, calendar (and a large month with Chinese lunar dates), batteries, system monitor, notes, reminders, photos; always clear glass; small, medium and large; drag to a snapping grid, right-click to resize, remove or add; just above the desktop and under every window, on top after Win+D (single monitor) |
 | Screenshots and recordings | ✅ v0.9.1: the system screenshot and tools using WGC or GDI capture the bar, popups and widgets (D36); recorders using DXGI Desktop Duplication still do not; on hybrid laptops after one restart of Atrium |
 | Notifications | ✅ Atrium's own cards (queue, merge, timeout, unread, full-screen suppression, hidden text); ⚠️ mirroring Windows notifications is experimental and off by default: an unpackaged process can read and poll them, but the system banners still appear as well |
 
@@ -129,42 +129,39 @@ All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc
 ## Repository layout
 
 ```text
-native/core    Atrium.Core: glass bar, tray icon, settings pipe (C++20, D3D11, DirectComposition)
-native/guard   native taskbar recovery guard Atrium.Guard (C++20, static CRT)
+native/core    Atrium.Core: glass bar, start menu, notifications, control centre, desktop widgets, settings pipe (C++20, D3D11, DirectComposition)
 settings/      settings app Atrium.Settings (C# / WinUI 3)
 tools/         build.ps1 packaging script, icon generator
 tests/         end-to-end and protocol test scripts
-docs/          architecture, current decisions, verification report, settings protocol, risks, roadmap (Chinese)
-poc/Probe      verification probes: capture, glass renderer, input, taskbar, tray, widgets, recovery
-poc/TrayProbe  ManagedShell comparison probe
-poc/results    raw probe results (JSON)
+docs/          current decisions, verification log, settings protocol, hand-over notes (Chinese)
 ```
+
+The early design documents and the verification probes (`poc/`, `native/guard`) left the repository in v0.9.2; see the git history.
 
 ## Build
 
 Requires Windows 10 19041+ (Windows 11 recommended), the .NET 10 SDK and Visual Studio or Build Tools with the C++ workload and a Windows SDK (CMake 3.25+).
 
 ```powershell
-# native core, guard and settings app into the portable folder dist/Atrium (-Zip also zips it)
+# native core and settings app into the portable folder dist/Atrium (-Zip also zips it)
 ./tools/build.ps1
 
 # tests (briefly start Atrium and drive the settings window; the settings file is restored)
 ./tests/e2e-settings.ps1 -Package
 ./tests/pipe-protocol.ps1
-./tests/e2e-bar.ps1          # these three move the mouse, click or type; they run only after 30 s without user input
+./tests/e2e-bar.ps1          # these move the mouse, click or type; they run only after 30 s without user input
 ./tests/e2e-start.ps1
 ./tests/e2e-notify.ps1
 
-# verification probes
-dotnet build poc/Atrium.Poc.sln -c Release
+./tests/e2e-tray.ps1
+./tests/e2e-widgets.ps1
+./tests/e2e-motion.ps1
+./tests/e2e-stacking.ps1
 ```
-
-> [!WARNING]
-> Some probes hide the taskbar, inject keys and clicks, or temporarily change the taskbar auto-hide or desktop-icon settings. They wait until you are idle and restore everything afterwards; read [poc/README.md](poc/README.md) before running them.
 
 ## Contributing
 
-Design review and probe results from other hardware are the most useful contributions right now, especially stable Windows 11, multiple monitors and HDR. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Design review and test results from other hardware are the most useful contributions right now, especially stable Windows 11, multiple monitors and HDR. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

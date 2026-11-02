@@ -36,19 +36,6 @@ Settings Settings::Frosted()
     return s;
 }
 
-void Settings::ApplyMaterial(const Settings& p)
-{
-    preset = p.preset;
-    transparency = p.transparency;
-    blur = p.blur;
-    refraction = p.refraction;
-    edge = p.edge;
-    dispersion = p.dispersion;
-    highlight = p.highlight;
-    shadow = p.shadow;
-    tint = p.tint;
-}
-
 void Settings::Clamp()
 {
     auto c = [](double& v, double lo, double hi, double fallback) {

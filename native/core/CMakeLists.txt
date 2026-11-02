@@ -45,7 +45,6 @@ add_executable(atrium_core WIN32
     ui/notifications.cpp
     ui/tray_panel.cpp
     ui/calendar_panel.cpp
-    ui/lock_screen.cpp
     ui/control_center.cpp
     ui/desktop_widgets.cpp
     ui/widget_faces.cpp
@@ -59,26 +58,13 @@ add_executable(atrium_core WIN32
     core.rc
     core.manifest
     ${shader_headers})
-# Next to Atrium.Guard.exe: build/win-x64/<Config>/
+# build/win-x64/<Config>/Atrium.Core.exe
 set_target_properties(atrium_core PROPERTIES OUTPUT_NAME "Atrium.Core" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 target_include_directories(atrium_core PRIVATE ${shader_out})
 # C++/WinRT headers come with the Windows SDK.
 target_compile_options(atrium_core PRIVATE /bigobj)
 target_compile_definitions(atrium_core PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_include_directories(atrium_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-# shell/task_model.cpp: DWM cloaking, AUMID property store, file version info, shell item images.
-set(atrium_task_libs windowsapp dwmapi version propsys shlwapi ole32 oleaut32 uuid shell32 user32 gdi32)
 target_link_libraries(atrium_core PRIVATE
     windowsapp d3d11 dxgi dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32
     dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof wlanapi windowscodecs)
-
-# Console probe for the task model (not part of the default build):
-#   atrium_task_probe.exe <seconds> <icon-dir> [--selftest]
-add_executable(atrium_task_probe EXCLUDE_FROM_ALL
-    shell/task_model_probe.cpp
-    shell/task_model.cpp
-    log.cpp)
-set_target_properties(atrium_task_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-target_include_directories(atrium_task_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(atrium_task_probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_link_libraries(atrium_task_probe PRIVATE ${atrium_task_libs} windowscodecs)

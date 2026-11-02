@@ -18,14 +18,14 @@
 
 namespace atrium {
 
-// Mirrors cbuffer GlassParams in shaders/glass.hlsl (128 bytes). Lengths in px.
+// Mirrors cbuffer GlassParams in shaders/glass.hlsl (336 bytes). Lengths in px.
 struct GlassParams {
     float sizeX, sizeY, roiOriginX, roiOriginY;
     float roiSizeX, roiSizeY, radius, edge;
     float refract, dispersion, blurLod, tintMix;
     float tintR, tintG, tintB, tintA;
     float highlight, shadow, lightX, lightY;
-    float inset, blurMix, fade, sdf; // fade: 0 = as is, 1 = gone; sdf: 1 = the shape is a distance field (Present's sdfs)
+    float inset, blurMix, fade, pad0; // fade: 0 = as is, 1 = gone
     // The shape in window px; all zero: the window minus `inset` on every side.
     float shapeL, shapeT, shapeR, shapeB;
     // Press ripple: centre (window px), ring radius, strength; strength 0 = none.
@@ -33,7 +33,7 @@ struct GlassParams {
     // Melting parts (GlassShape::parts), window px; partCount 0: the shape above.
     float parts[6][4];
     float partRadii[6][4];
-    float partCount, melt, partMix, pad0; // partMix: 0 the parts, 1 the rectangle above (Shape, Radius)
+    float partCount, melt, partMix, pad1; // partMix: 0 the parts, 1 the rectangle above (Shape, Radius)
 };
 static_assert(sizeof(GlassParams) == 336);
 constexpr int kMaxGlassParts = 6;
@@ -87,9 +87,7 @@ public:
     // presents. Returns false if the device was lost.
     bool Present(const GlassParams& params, const std::function<void(ID2D1DeviceContext2*)>& overlay);
     // Several shapes, back to front (each with its own shadow), then the overlay.
-    // sdfs: per shape, the distance field of a shape whose `sdf` is 1 (else null).
-    bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay,
-                 const std::vector<ID3D11ShaderResourceView*>* sdfs = nullptr);
+    bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay);
 
     ID2D1DeviceContext2* D2D() const { return d2d_.get(); }
     IDWriteFactory3* DWrite() const { return dwrite_.get(); }

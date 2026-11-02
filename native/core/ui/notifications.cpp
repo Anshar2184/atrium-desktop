@@ -100,16 +100,6 @@ void Notifications::SetRadius(float dip)
     center_.surface->SetRadius(dip);
 }
 
-std::vector<Notice> Notifications::Recent(size_t n) const
-{
-    std::vector<Notice> out;
-    for (bool unread : {true, false})
-        for (const auto& x : notices_)
-            if (x.unread == unread && out.size() < n && !leaving_.count(x.id))
-                out.push_back(x);
-    return out;
-}
-
 int Notifications::Unread() const
 {
     return int(std::count_if(notices_.begin(), notices_.end(), [](const Notice& n) { return n.unread; }));

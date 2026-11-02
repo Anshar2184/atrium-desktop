@@ -6,11 +6,11 @@
 
 - Windows build:
 - Hardware (monitors, GPUs):
-- Probes run / results:
+- Tests run (tests/*.ps1):
 
 ## Checklist
 
-- [ ] `./tools/build.ps1` and `dotnet build poc/Atrium.Poc.sln -c Release` pass
+- [ ] `./tools/build.ps1` passes
 - [ ] Core or settings changes: `./tests/e2e-settings.ps1 -Package` and `./tests/pipe-protocol.ps1` pass
 - [ ] No injection into Explorer/DWM, no system files touched, no security features disabled
 - [ ] No personal content in screenshots or results

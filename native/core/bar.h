@@ -50,9 +50,6 @@ public:
     void SetItems(std::vector<TaskItem> items);
     void Relayout();
     void SetVisible(bool visible);
-    // --debug-capturable: take the frozen backdrop again from the next frame
-    // (the lock screen's wallpaper has just appeared).
-    void Refreeze() { refreeze_ = true; }
     bool Visible() const { return visible_; }
     // Unread notifications, shown as a badge on the bell.
     void SetUnread(int count);
@@ -148,7 +145,6 @@ private:
 
     bool debugCapturable_ = false;
     void ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread
-    std::atomic<bool> refreeze_{false};
     bool debugLayout_ = false;
     HWND visual_ = nullptr;
     HWND input_ = nullptr;

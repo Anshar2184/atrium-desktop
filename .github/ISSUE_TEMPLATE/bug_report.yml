@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in a probe or document is wrong or does not work
+description: Something in Atrium does not work as it should
 labels: [bug]
 body:
   - type: textarea
@@ -20,9 +20,9 @@ body:
     id: hardware
     attributes:
       label: Displays and GPUs
-      description: Number of monitors, resolution, scaling, HDR, GPUs. The `env` probe output is ideal.
+      description: Number of monitors, resolution, scaling, HDR, GPUs.
   - type: textarea
     id: results
     attributes:
-      label: Probe results
-      description: Attach or paste the relevant `poc/results/*.json`. Do not include screenshots with personal content.
+      label: Log
+      description: The relevant lines of `%LOCALAPPDATA%\Atrium\logs\core.log`. Do not include screenshots with personal content.

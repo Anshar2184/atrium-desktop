@@ -32,7 +32,5 @@ std::vector<WifiNetwork> ListWifi(bool rescan);
 bool ConnectWifi(const WifiNetwork& network);
 bool DisconnectWifi();
 
-// Signal 0..100 as 1..4 bars.
-int WifiBars(int signal);
 
 } // namespace atrium

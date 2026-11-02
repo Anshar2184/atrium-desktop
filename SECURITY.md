@@ -10,6 +10,4 @@ Please use GitHub's **private vulnerability reporting** (Security → Report a v
 
 - Screen content leaving the GPU or being written to disk without the user's action.
 - Ways for another process to drive Atrium's named pipes or tray bridge.
-- Situations where the Windows taskbar cannot be restored.
-
-The probes in `poc/` are test tools; issues in them are still welcome as regular bug reports.
+- Situations where the Windows taskbar is left hidden or unusable.

@@ -53,8 +53,6 @@ struct Settings {
 
     // Clamps every value into its valid range (input from disk or the pipe).
     void Clamp();
-    // Copies the material of `preset`, keeping layout and content.
-    void ApplyMaterial(const Settings& preset);
 
     std::wstring ToJson() const;
     // Missing keys keep the values of `base`; malformed JSON returns false.

@@ -623,7 +623,7 @@ void StartMenu::RunPower(int index)
     if (index < 0 || index > 3)
         return;
     Close(true);
-    if (index == 3) { // Atrium's lock screen, then Windows' own lock
+    if (index == 3) { // Windows' own lock
         if (onSystem)
             onSystem(L"lock");
         return;

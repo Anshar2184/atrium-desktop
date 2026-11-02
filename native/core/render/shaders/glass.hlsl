@@ -19,7 +19,7 @@ cbuffer GlassParams : register(b0)
     float  Inset;       // shadow room around the shape (sets the shadow's softness)
     float  BlurMix;     // 0 = sharp backdrop, 1 = fully blurred
     float  Fade;        // 0 = the glass as is, 1 = gone (a piece of glass fading out)
-    float  SdfMode;     // 1: the shape is ShapeSdf (a distance field over Shape), not a rounded rectangle
+    float  Pad0;
     float4 Shape;       // the glass shape in window px: left, top, right, bottom
     float4 Ripple;      // press ripple: centre x, y (window px), ring radius, strength (0 = none)
     float4 PartRect[6]; // melting parts (PartCount > 0): rectangles in window px, left, top, right, bottom
@@ -27,11 +27,10 @@ cbuffer GlassParams : register(b0)
     float  PartCount;
     float  Melt;        // width of the smooth union in px
     float  PartMix;     // 0: the parts, 1: the rounded rectangle Shape (the parts' union has seams inside where they meet)
-    float  PartPad;
+    float  Pad1;
 };
 
 Texture2D Bg : register(t0);
-Texture2D<float> ShapeSdf : register(t1); // signed distance in px (negative inside), one texel per px of Shape
 SamplerState Linear : register(s0);
 
 struct VSOut
@@ -89,11 +88,6 @@ float Dist(float2 px)
             }
         }
         d = lerp(d, card, PartMix);
-    }
-    if (SdfMode > 0.5) {
-        float2 uv = (px - Shape.xy) / max(Shape.zw - Shape.xy, 1);
-        float2 outside = max(max(Shape.xy - px, px - Shape.zw), 0);
-        d = ShapeSdf.SampleLevel(Linear, saturate(uv), 0) + length(outside);
     }
     return d;
 }

@@ -55,7 +55,6 @@ public:
     // Corner radius (DIP), the bar's; the cards are concentric with it.
     void SetRadius(float dip);
     int Unread() const;
-    std::vector<Notice> Recent(size_t n) const; // the newest, unread first (the lock screen)
     // Tests: pretend SHQueryUserNotificationState returned `state` (0: use the real one).
     void SetQuietOverride(int state) { quietOverride_ = state; }
     void LogState() const;

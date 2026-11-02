@@ -1,6 +1,6 @@
-// Atrium.Core: the resident process. Owns the glass bar, the tray icon and the
-// settings pipe. Coexistence mode only: Explorer's taskbar is never hidden here
-// (takeover stays behind the recovery gates, docs/DECISIONS.md D09/D10).
+// Atrium.Core: the resident process. Owns the glass bar, its popups, the desktop
+// widgets, the tray icon and the settings pipe. Coexistence mode only:
+// Explorer's taskbar is never hidden (docs/DECISIONS.md D16).
 
 #include "bar.h"
 #include "log.h"
@@ -17,7 +17,6 @@
 #include "ui/calendar_panel.h"
 #include "ui/control_center.h"
 #include "ui/desktop_widgets.h"
-#include "ui/lock_screen.h"
 #include "ui/notifications.h"
 #include "ui/start_menu.h"
 #include "ui/tray_panel.h"
@@ -75,7 +74,6 @@ struct App {
     std::unique_ptr<TrayPanel> trayPanel;
     std::unique_ptr<ControlCenter> control;
     std::unique_ptr<CalendarPanel> calendar;
-    std::unique_ptr<LockScreen> lock;
     std::unique_ptr<DesktopWidgets> widgets;
     bool widgetsOn = false;
 };
@@ -192,7 +190,7 @@ void OpenSystem(const std::wstring& what)
         return;
     }
     if (what == L"lock") {
-        g_app.lock->Open(g_app.notes->Recent(3));
+        LockWorkStation();
         return;
     }
     if (what == L"tray") {
@@ -277,12 +275,6 @@ void RunCommand(const std::wstring& line)
         g_app.control->LogState();
     else if (verb == L"control-click")
         g_app.control->TestClick(arg);
-    else if (verb == L"lock-open")
-        OpenSystem(L"lock");
-    else if (verb == L"lock-state")
-        g_app.lock->LogState();
-    else if (verb == L"lock-dismiss")
-        g_app.lock->Dismiss(arg == L"lock");
     else if (verb == L"calendar-open")
         ToggleCalendar();
     else if (verb == L"widgets-state")
@@ -936,22 +928,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.control = std::make_unique<ControlCenter>(instance);
     g_app.control->onChanged = UpdateStatus;
     g_app.calendar = std::make_unique<CalendarPanel>(instance);
-    g_app.lock = std::make_unique<LockScreen>(instance);
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
     g_app.widgets->onCalendar = [] {
         if (!g_app.calendar->Visible())
             ToggleCalendar();
-    };
-    // The bar steps aside while the lock screen shows (and comes back as it was).
-    g_app.lock->onBackdrop = [] { g_app.bar->Refreeze(); };
-    g_app.lock->onShown = [](bool shown) {
-        static bool was = true;
-        if (shown) {
-            was = g_app.bar->Visible();
-            g_app.bar->SetVisible(false);
-        } else {
-            g_app.bar->SetVisible(was);
-        }
     };
     g_app.notes->bellRect = [] { return g_app.bar->EntryRect(L"#notify"); };
     g_app.notes->barRect = [] { return g_app.bar->BarRect(); };
@@ -1014,7 +994,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.feishu.reset();
     g_app.notes.reset();
     g_app.widgets.reset();
-    g_app.lock.reset();
     g_app.calendar.reset();
     g_app.control.reset();
     g_app.trayPanel.reset();

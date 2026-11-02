@@ -598,7 +598,7 @@ void Surface::SetShapes(const std::vector<ShapeDip>& shapes)
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
         auto sameRect = [](const D2D1_RECT_F& x, const D2D1_RECT_F& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
         auto samePart = [&](const ShapeDip::Part& x, const ShapeDip::Part& y) { return sameRect(x.rect, y.rect) && std::equal(x.radii, x.radii + 4, y.radii); };
-        return a.radius == b.radius && a.fade == b.fade && a.sdf == b.sdf && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix &&
+        return a.radius == b.radius && a.fade == b.fade && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix &&
                a.parts.size() == b.parts.size() && std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
     };
     if (shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
@@ -620,7 +620,7 @@ void Surface::PublishPanel()
     for (const ShapeDip& s : shapes_) {
         // Whole px, so the glass and the content's washes line up.
         auto px = [&](float v) { return std::round(v * scale_) + p.inset; };
-        GlassShape g{px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade, s.sdf};
+        GlassShape g{px(s.rect.left), px(s.rect.top), px(s.rect.right), px(s.rect.bottom), s.radius * scale_, s.fade};
         for (const ShapeDip::Part& part : s.parts)
             g.parts.push_back({px(part.rect.left), px(part.rect.top), px(part.rect.right), px(part.rect.bottom),
                                {part.radii[0] * scale_, part.radii[1] * scale_, part.radii[2] * scale_, part.radii[3] * scale_}});

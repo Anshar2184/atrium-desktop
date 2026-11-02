@@ -6,7 +6,6 @@
   native (CMake, MSVC) -> settings (dotnet publish, self-contained WinUI 3) -> dist.
   Layout:
     dist/Atrium/Atrium.Core.exe
-    dist/Atrium/Atrium.Guard.exe
     dist/Atrium/Settings/Atrium.Settings.exe (+ runtime)
   -Zip also writes dist/Atrium-<version>-win-x64.zip.
 #>
@@ -36,9 +35,7 @@ try {
     dotnet publish settings/Atrium.Settings/Atrium.Settings.csproj -c $Configuration -o (Join-Path $dist "Settings")
     if ($LASTEXITCODE) { throw "settings publish failed" }
 
-    foreach ($exe in "Atrium.Core.exe", "Atrium.Guard.exe") {
-        Copy-Item (Join-Path "native/build/win-x64/$Configuration" $exe) $dist
-    }
+    Copy-Item (Join-Path "native/build/win-x64/$Configuration" "Atrium.Core.exe") $dist
     Copy-Item LICENSE $dist
 
     if ($Zip) {
