@@ -16,6 +16,7 @@
 #include "shell/wechat_source.h"
 #include "ui/calendar_panel.h"
 #include "ui/control_center.h"
+#include "ui/desktop_widgets.h"
 #include "ui/lock_screen.h"
 #include "ui/notifications.h"
 #include "ui/start_menu.h"
@@ -52,7 +53,8 @@ constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
-    kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager
+    kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager,
+    kCmdWidget = 200 // + 0..4: add a desktop widget
 };
 
 struct App {
@@ -73,6 +75,8 @@ struct App {
     std::unique_ptr<ControlCenter> control;
     std::unique_ptr<CalendarPanel> calendar;
     std::unique_ptr<LockScreen> lock;
+    std::unique_ptr<DesktopWidgets> widgets;
+    bool widgetsOn = false;
 };
 
 App g_app;
@@ -279,6 +283,10 @@ void RunCommand(const std::wstring& line)
         g_app.lock->Dismiss(arg == L"lock");
     else if (verb == L"calendar-open")
         ToggleCalendar();
+    else if (verb == L"widgets-state")
+        g_app.widgets->LogState();
+    else if (verb == L"widgets-do")
+        g_app.widgets->TestAction(arg);
     else if (verb == L"calendar-state")
         g_app.calendar->LogState();
     else if (verb == L"calendar-click")
@@ -373,6 +381,14 @@ void ShowMenu(POINT pt)
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kCmdDesktop, L"显示桌面");
     AppendMenuW(menu, MF_STRING, kCmdTaskManager, L"任务管理器");
+    HMENU widgets = nullptr;
+    if (g_app.widgetsOn) {
+        widgets = CreatePopupMenu();
+        const wchar_t* names[] = {L"时钟", L"世界时钟", L"日历", L"日历（月视图）", L"电池"};
+        for (int i = 0; i < 5; ++i)
+            AppendMenuW(widgets, MF_STRING, kCmdWidget + i, names[i]);
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(widgets), L"添加桌面小组件");
+    }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kCmdToggle, g_app.bar->Visible() ? L"隐藏玻璃栏" : L"显示玻璃栏");
     AppendMenuW(menu, MF_STRING, kCmdExit, L"退出 Atrium");
@@ -397,6 +413,16 @@ void ShowMenu(POINT pt)
         break;
     case kCmdExit:
         DestroyWindow(g_app.host);
+        break;
+    default:
+        if (cmd >= kCmdWidget && cmd < kCmdWidget + 5) {
+            const std::pair<WidgetKind, WidgetSize> kinds[] = {{WidgetKind::Clock, WidgetSize::Small},
+                                                               {WidgetKind::Clock, WidgetSize::Medium},
+                                                               {WidgetKind::Calendar, WidgetSize::Small},
+                                                               {WidgetKind::Calendar, WidgetSize::Medium},
+                                                               {WidgetKind::Battery, WidgetSize::Small}};
+            g_app.widgets->Add(kinds[cmd - kCmdWidget].first, kinds[cmd - kCmdWidget].second);
+        }
         break;
     }
 }
@@ -502,6 +528,11 @@ void ApplySettings(const Settings& s)
     g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
     g_app.tasks->SetShowRunning(s.showRunning);
     g_app.bar->Apply(s);
+    // Widgets live on the bar's monitor, where its capture gives them glass.
+    RECT bar = g_app.bar->BarRect();
+    g_app.widgets->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
+    g_app.widgets->SetEnabled(s.widgets);
+    g_app.widgetsOn = s.widgets;
 }
 
 void ShowItemMenu(const std::wstring& key, POINT pt)
@@ -853,6 +884,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.control->onChanged = UpdateStatus;
     g_app.calendar = std::make_unique<CalendarPanel>(instance);
     g_app.lock = std::make_unique<LockScreen>(instance);
+    g_app.widgets = std::make_unique<DesktopWidgets>(instance);
+    g_app.widgets->onCalendar = [] {
+        if (!g_app.calendar->Visible())
+            ToggleCalendar();
+    };
     // The bar steps aside while the lock screen shows (and comes back as it was).
     g_app.lock->onBackdrop = [] { g_app.bar->Refreeze(); };
     g_app.lock->onShown = [](bool shown) {
@@ -920,6 +956,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.wechat.reset();
     g_app.feishu.reset();
     g_app.notes.reset();
+    g_app.widgets.reset();
     g_app.lock.reset();
     g_app.calendar.reset();
     g_app.control.reset();

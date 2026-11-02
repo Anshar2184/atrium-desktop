@@ -91,6 +91,8 @@ public:
     void Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c);
     void Stroke(D2D1_RECT_F r, float radius, D2D1_COLOR_F c, float width = 1);
     void Line(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width = 1);
+    // A line with round ends (a clock's hand).
+    void Capsule(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width);
     void Circle(float cx, float cy, float radius, D2D1_COLOR_F c);
     // A circular arc with round ends, clockwise from a0 to a1 (degrees from the right, y down).
     void Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLOR_F c, float width);
@@ -153,6 +155,9 @@ public:
     HWND Hwnd() const { return hwnd_; }
     float Scale() const { return scale_; }
     RECT Rect() const { return rect_; } // the content, screen px
+    // A window on the desktop (a widget) instead of a popup: it is not made
+    // topmost; its owner keeps it in its place among the windows.
+    void SetDesktopLayer(bool on);
     // Corner radius of the glass shape (DIP), matching the bar's.
     void SetRadius(float dip);
     // Separate pieces of glass (content DIP), back to front; empty: the whole
@@ -178,6 +183,7 @@ private:
 
     HWND hwnd_ = nullptr;
     bool activatable_;
+    bool desktopLayer_ = false;
     float insetDip_;
     bool visible_ = false;
     bool hiding_ = false;    // closing animation running

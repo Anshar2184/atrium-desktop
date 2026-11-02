@@ -34,6 +34,7 @@ add_executable(atrium_core WIN32
     shell/system_status.cpp
     shell/wifi.cpp
     shell/radios.cpp
+    shell/lunar.cpp
     shell/audio_devices.cpp
     shell/projection.cpp
     shell/tray_model.cpp
@@ -46,6 +47,7 @@ add_executable(atrium_core WIN32
     ui/calendar_panel.cpp
     ui/lock_screen.cpp
     ui/control_center.cpp
+    ui/desktop_widgets.cpp
     shell/notification_listener.cpp
     render/bar_painter.cpp
     render/capture.cpp

@@ -85,7 +85,7 @@ function Frame {
 
 try {
     $pins = @("where.exe", "charmap.exe", "magnify.exe") | ForEach-Object { '{"name":"' + $_ + '","path":"C:\\Windows\\System32\\' + $_ + '"}' }
-    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"showRunning":false,"showClock":true,"cornerRadius":30,"height":60,"magnify":1.7,"pins":[' + ($pins -join ",") + ']}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false,"showRunning":false,"showClock":true,"cornerRadius":30,"height":60,"magnify":1.7,"pins":[' + ($pins -join ",") + ']}')
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 2
 
@@ -128,7 +128,7 @@ try {
     # An app that is not pinned closes: the bar's width glides to its new size
     # (the window keeps its width; the shape eases) instead of jumping.
     Start-Process $Core -ArgumentList "--exit" -Wait
-    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"showRunning":true,"showClock":true,"pins":[]}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false,"showRunning":true,"showClock":true,"pins":[]}')
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 2
     $app = Start-Process "$env:SystemRoot\System32\charmap.exe" -PassThru

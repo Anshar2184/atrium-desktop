@@ -2,16 +2,14 @@
 
 #include "clock.h"
 #include "log.h"
+#include "shell/lunar.h"
 
-#include <icu.h>
 #include <shellapi.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
 #include <cmath>
-
-#pragma comment(lib, "icu.lib")
 
 namespace atrium {
 
@@ -29,41 +27,7 @@ float Ease(float t)
     return 1 - (1 - t) * (1 - t) * (1 - t);
 }
 
-int DaysIn(int y, int m)
-{
-    static const int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    return m == 2 && leap ? 29 : days[m - 1];
-}
-
-// 0 Monday .. 6 Sunday (Zeller-free: days since 1 Jan 1 is a Monday in the proleptic calendar).
-int Weekday(int y, int m, int d)
-{
-    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
-    if (m < 3)
-        y -= 1;
-    int sunday0 = (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7; // 0 Sunday
-    return (sunday0 + 6) % 7;
-}
-
 const wchar_t* const kWeekNames[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
-const wchar_t* const kLunarMonths[] = {L"正", L"二", L"三", L"四", L"五", L"六", L"七", L"八", L"九", L"十", L"冬", L"腊"};
-
-std::wstring LunarDay(int d)
-{
-    static const wchar_t* const digits[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"七", L"八", L"九", L"十"};
-    if (d == 10)
-        return L"初十";
-    if (d == 20)
-        return L"二十";
-    if (d == 30)
-        return L"三十";
-    const wchar_t* tens = d < 10 ? L"初" : d < 20 ? L"十" : d < 30 ? L"廿" : L"三";
-    return std::wstring(tens) + digits[(d - 1) % 10];
-}
-
-std::wstring LunarMonth(int m, bool leap) { return std::wstring(leap ? L"闰" : L"") + kLunarMonths[std::clamp(m, 1, 12) - 1] + L"月"; }
-
 void OpenUri(const wchar_t* uri) { ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL); }
 
 } // namespace
@@ -73,60 +37,12 @@ CalendarPanel::CalendarPanel(HINSTANCE instance) : surface_(instance, L"Atrium C
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
     surface_.onMargin = [this] { Close(); };
-    UErrorCode e = U_ZERO_ERROR;
-    gregorian_ = ucal_open(nullptr, 0, "en_US@calendar=gregorian", UCAL_GREGORIAN, &e);
-    if (U_FAILURE(e))
-        gregorian_ = nullptr;
-    e = U_ZERO_ERROR;
-    chinese_ = ucal_open(nullptr, 0, "zh_CN@calendar=chinese", UCAL_DEFAULT, &e);
-    if (U_FAILURE(e))
-        chinese_ = nullptr;
-    if (!gregorian_ || !chinese_)
-        Log(L"calendar: ICU unavailable, no lunar dates");
     DWORD first = 0;
     if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK | LOCALE_RETURN_NUMBER, reinterpret_cast<LPWSTR>(&first), 2))
         firstWeekday_ = int(first % 7);
 }
 
-CalendarPanel::~CalendarPanel()
-{
-    if (gregorian_)
-        ucal_close(static_cast<UCalendar*>(gregorian_));
-    if (chinese_)
-        ucal_close(static_cast<UCalendar*>(chinese_));
-}
-
-bool CalendarPanel::Lunar(int y, int m, int d, int& lm, int& ld, bool& leap, int& cycleYear) const
-{
-    if (!gregorian_ || !chinese_)
-        return false;
-    UCalendar* g = static_cast<UCalendar*>(gregorian_);
-    UCalendar* c = static_cast<UCalendar*>(chinese_);
-    UErrorCode e = U_ZERO_ERROR;
-    ucal_clear(g);
-    ucal_setDateTime(g, y, m - 1, d, 12, 0, 0, &e);
-    UDate t = ucal_getMillis(g, &e);
-    ucal_setMillis(c, t, &e);
-    lm = ucal_get(c, UCAL_MONTH, &e) + 1;
-    ld = ucal_get(c, UCAL_DATE, &e);
-    leap = ucal_get(c, UCAL_IS_LEAP_MONTH, &e) != 0;
-    cycleYear = ucal_get(c, UCAL_YEAR, &e);
-    return U_SUCCESS(e);
-}
-
-std::wstring CalendarPanel::LunarLine(int y, int m, int d) const
-{
-    int lm = 0, ld = 0, cy = 0;
-    bool leap = false;
-    if (!Lunar(y, m, d, lm, ld, leap, cy))
-        return {};
-    static const wchar_t stems[] = L"甲乙丙丁戊己庚辛壬癸";
-    static const wchar_t branches[] = L"子丑寅卯辰巳午未申酉戌亥";
-    std::wstring year;
-    if (cy >= 1)
-        year = std::wstring(1, stems[(cy - 1) % 10]) + branches[(cy - 1) % 12] + L"年 ";
-    return L"农历" + year + LunarMonth(lm, leap) + LunarDay(ld);
-}
+CalendarPanel::~CalendarPanel() = default;
 
 void CalendarPanel::ShowMonth(int y, int m, int direction)
 {
@@ -146,38 +62,7 @@ void CalendarPanel::ShowMonth(int y, int m, int direction)
     days_.clear();
     for (int i = 0; i < 42; ++i) {
         Day day{cy, cm, cd};
-        int lm = 0, ld = 0, cyc = 0;
-        bool leap = false;
-        if (cm == 1 && cd == 1)
-            day.lunar = L"元旦", day.festival = true;
-        else if (cm == 5 && cd == 1)
-            day.lunar = L"劳动节", day.festival = true;
-        else if (cm == 10 && cd == 1)
-            day.lunar = L"国庆节", day.festival = true;
-        if (!day.festival && Lunar(cy, cm, cd, lm, ld, leap, cyc)) {
-            // The lunar festivals, then the day (the month's name on its first day).
-            struct F {
-                int m, d;
-                const wchar_t* name;
-            };
-            static const F festivals[] = {{1, 1, L"春节"}, {1, 15, L"元宵节"}, {5, 5, L"端午节"}, {7, 7, L"七夕"},
-                                          {8, 15, L"中秋节"}, {9, 9, L"重阳节"}, {12, 8, L"腊八节"}};
-            for (const F& f : festivals)
-                if (!leap && f.m == lm && f.d == ld)
-                    day.lunar = f.name, day.festival = true;
-            if (!day.festival && lm == 12 && !leap) {
-                // New Year's Eve: the day before the first of the first month.
-                int ny = cy, nm = cm, nd = cd + 1;
-                if (nd > DaysIn(ny, nm))
-                    nd = 1, nm = nm == 12 ? 1 : nm + 1, ny = nm == 1 ? ny + 1 : ny;
-                int lm2 = 0, ld2 = 0, c2 = 0;
-                bool leap2 = false;
-                if (Lunar(ny, nm, nd, lm2, ld2, leap2, c2) && lm2 == 1 && ld2 == 1)
-                    day.lunar = L"除夕", day.festival = true;
-            }
-            if (!day.festival)
-                day.lunar = ld == 1 ? LunarMonth(lm, leap) : LunarDay(ld);
-        }
+        day.lunar = lunar_.DayLabel(cy, cm, cd, &day.festival);
         days_.push_back(std::move(day));
         if (++cd > DaysIn(cy, cm)) {
             cd = 1;
@@ -356,7 +241,7 @@ void CalendarPanel::PaintCapsule(Canvas& c, const Theme& t, D2D1_RECT_F cap)
                         kWeekNames[Weekday(selected_.wYear, selected_.wMonth, selected_.wDay)];
     if (selected_.wYear != now.wYear)
         date = std::to_wstring(selected_.wYear) + L"年" + date;
-    std::wstring lunar = LunarLine(selected_.wYear, selected_.wMonth, selected_.wDay);
+    std::wstring lunar = lunar_.Line(selected_.wYear, selected_.wMonth, selected_.wDay);
     D2D1_RECT_F text = D2D1::RectF(cap.left + edge + tw + 16, cap.top, cap.right - edge, cap.bottom);
     if (lunar.empty()) {
         c.Text(date, text, 13, t.text, DWRITE_FONT_WEIGHT_NORMAL, 2);
@@ -419,7 +304,7 @@ void CalendarPanel::LogState() const
     Log(L"calendar: spots%s", spots.c_str());
     std::wstring first = days_.empty() ? L"" : std::to_wstring(days_[0].m) + L"/" + std::to_wstring(days_[0].d) + L" " + days_[0].lunar;
     Log(L"calendar: state visible=%d month=%d-%02d selected=%d-%02d-%02d first=%s lunar=%s shapes=%zu rect=%ld,%ld,%ld,%ld", surface_.Visible() ? 1 : 0, year_,
-        month_, selected_.wYear, selected_.wMonth, selected_.wDay, first.c_str(), LunarLine(selected_.wYear, selected_.wMonth, selected_.wDay).c_str(),
+        month_, selected_.wYear, selected_.wMonth, selected_.wDay, first.c_str(), lunar_.Line(selected_.wYear, selected_.wMonth, selected_.wDay).c_str(),
         surface_.Shapes(), r.left, r.top, r.right, r.bottom);
 }
 

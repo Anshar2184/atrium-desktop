@@ -98,7 +98,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::Run()
 "@
     $child = Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile", "-EncodedCommand", ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))) -PassThru -WindowStyle Hidden
-    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"pins":[],"showRunning":false,"showClock":true}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false,"pins":[],"showRunning":false,"showClock":true}')
     Start-Process $Core -ArgumentList "--debug-layout"
     Start-Sleep 4
 

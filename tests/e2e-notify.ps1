@@ -100,7 +100,7 @@ function StartCore($json) {
 }
 
 try {
-    StartCore '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"pins":[],"showRunning":true,"notifyTimeout":3}'
+    StartCore '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false,"pins":[],"showRunning":true,"notifyTimeout":3}'
     $a = TestWindow "Atrium Notify Test"
     FocusWindow $a
 
@@ -223,7 +223,7 @@ try {
     # Hidden text: setting on, cards excluded from capture.
     # A real Windows toast (from PowerShell's own identity, tagged so it can be
     # removed again) comes back as an Atrium card through the listener.
-    StartCore '{"notifyListener":true,"notifyWeChat":false,"notifyFeishu":false,"pins":[],"showRunning":true,"notifyTimeout":3}'
+    StartCore '{"notifyListener":true,"notifyWeChat":false,"notifyFeishu":false,"widgets":false,"pins":[],"showRunning":true,"notifyTimeout":3}'
     $listening = @(NewLog | Where-Object { $_ -match "listener: (mirroring|access)" })[-1]
     if ($listening -notmatch "mirroring") {
         "SKIP windows-toast: $listening"
@@ -242,7 +242,7 @@ try {
         Check "windows-toast" ($s.first -eq "Atrium toast test" -and $s.popup -eq "1") "a Windows toast became the card '$($s.first)' (popup=$($s.popup)); the toast was removed from the notification centre again"
     }
 
-    StartCore '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"pins":[],"showRunning":true,"notifyTimeout":5,"notifyHideBody":true}'
+    StartCore '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false,"pins":[],"showRunning":true,"notifyTimeout":5,"notifyHideBody":true}'
     Post "Bank" "Verification code" "Your code is 123456"
     $s = State
     $popup = [U]::FindWindow("AtriumSurface", "Atrium Notification")

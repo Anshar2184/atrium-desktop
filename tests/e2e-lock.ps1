@@ -67,7 +67,7 @@ Add-Type -AssemblyName System.Windows.Forms
     $child = Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile", "-EncodedCommand", ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))) -PassThru
     $win = [IntPtr]::Zero
     for ($i = 0; $i -lt 40 -and $win -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 250; $win = [U]::FindWindow([NullString]::Value, "Atrium Lock Test") }
-    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"pins":[],"showRunning":false,"showClock":true}')
+    [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":false,"pins":[],"showRunning":false,"showClock":true}')
     $env:ATRIUM_LOCK_DRYRUN = "1"
     Start-Process $Core
     Start-Sleep 3

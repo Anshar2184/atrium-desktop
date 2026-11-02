@@ -33,6 +33,7 @@ internal sealed class BarSettings
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
     public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
+    public bool Widgets { get; set; } = true;          // desktop widgets (their layout is the core's widgets.json)
     // Null = the key was absent (never saved); the core then imports the Windows pins.
     public List<PinnedApp>? Pins { get; set; }
 
@@ -88,6 +89,7 @@ internal sealed class BarSettings
             ["notifyListener"] = NotifyListener,
             ["notifyWeChat"] = NotifyWeChat,
             ["notifyFeishu"] = NotifyFeishu,
+            ["widgets"] = Widgets,
         };
         if (Pins != null)
         {
@@ -134,6 +136,7 @@ internal sealed class BarSettings
         s.NotifyListener = v1 ? f.NotifyListener : Flag("notifyListener", f.NotifyListener);
         s.NotifyWeChat = Flag("notifyWeChat", f.NotifyWeChat);
         s.NotifyFeishu = Flag("notifyFeishu", f.NotifyFeishu);
+        s.Widgets = Flag("widgets", f.Widgets);
         s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
             ? (tcs is "light" or "dark" ? tcs : "auto")
             : f.TextColor;

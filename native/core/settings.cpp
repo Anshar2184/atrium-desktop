@@ -109,6 +109,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
     o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
     o.SetNamedValue(L"notifyFeishu", json::JsonValue::CreateBooleanValue(notifyFeishu));
+    o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
     if (pins) {
         json::JsonArray a;
         for (const auto& p : *pins) {
@@ -170,6 +171,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
         flag(L"notifyListener", s.notifyListener);
     flag(L"notifyWeChat", s.notifyWeChat);
     flag(L"notifyFeishu", s.notifyFeishu);
+    flag(L"widgets", s.widgets);
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
         s.textColor = std::wstring(o.GetNamedString(L"textColor"));
     if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {
@@ -204,9 +206,7 @@ std::wstring SettingsPath()
     return dir + L"\\settings.json";
 }
 
-namespace {
-
-std::wstring ReadUtf8(const std::wstring& path)
+std::wstring ReadTextFile(const std::wstring& path)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in)
@@ -224,24 +224,9 @@ std::wstring ReadUtf8(const std::wstring& path)
     return w;
 }
 
-} // namespace
-
-Settings LoadSettings()
+bool WriteTextFile(const std::wstring& path, const std::wstring& text)
 {
-    Settings s;
-    std::wstring text = ReadUtf8(SettingsPath());
-    if (text.empty())
-        return s;
-    if (!Settings::FromJson(text, Settings{}, s))
-        Log(L"settings: %s is not valid JSON, using defaults", SettingsPath().c_str());
-    return s;
-}
-
-bool SaveSettings(const Settings& s)
-{
-    std::wstring path = SettingsPath();
     std::wstring tmp = path + L".tmp";
-    std::wstring text = s.ToJson();
     int n = WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0, nullptr, nullptr);
     std::string bytes(size_t(n), '\0');
     WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), bytes.data(), n, nullptr, nullptr);
@@ -254,5 +239,18 @@ bool SaveSettings(const Settings& s)
     }
     return MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 }
+
+Settings LoadSettings()
+{
+    Settings s;
+    std::wstring text = ReadTextFile(SettingsPath());
+    if (text.empty())
+        return s;
+    if (!Settings::FromJson(text, Settings{}, s))
+        Log(L"settings: %s is not valid JSON, using defaults", SettingsPath().c_str());
+    return s;
+}
+
+bool SaveSettings(const Settings& s) { return WriteTextFile(SettingsPath(), s.ToJson()); }
 
 } // namespace atrium

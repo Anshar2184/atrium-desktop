@@ -546,6 +546,30 @@
                                     </Grid>
                                 </Border>
                             </local:ResponsiveGrid>
+
+                            <TextBlock Text="桌面" Style="{StaticResource SectionLabelStyle}" Margin="0,12,0,0" />
+                            <local:ResponsiveGrid MinCellWidth="340" Gap="16">
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE80A;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                <TextBlock Text="桌面小组件" Style="{StaticResource CardTitleStyle}" />
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="WidgetsSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
+                                                          AutomationProperties.Name="桌面小组件" VerticalAlignment="Center" Toggled="OnWidgetsToggled" />
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="时钟、世界时钟、日历和电池，放在桌面左上角，位于所有窗口之下；桌面在前台时显示全彩，打开应用时变为单色玻璃。拖动可移动，右键可改变大小、移除或添加。" />
+                                    </Grid>
+                                </Border>
+                            </local:ResponsiveGrid>
                             </StackPanel>
                         </ScrollViewer>
 

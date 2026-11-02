@@ -214,6 +214,17 @@ void Canvas::Line(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float 
     d2d_->DrawLine(D2D1::Point2F(x0 * scale, y0 * scale), D2D1::Point2F(x1 * scale, y1 * scale), Brush(c), width * scale);
 }
 
+void Canvas::Capsule(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width)
+{
+    D2D1_COLOR_F unused;
+    c = InkAt(D2D1::RectF(std::min(x0, x1), std::min(y0, y1), std::max(x0, x1) + 1, std::max(y0, y1) + 1), c, unused);
+    winrt::com_ptr<ID2D1Factory> f;
+    d2d_->GetFactory(f.put());
+    winrt::com_ptr<ID2D1StrokeStyle> round;
+    f->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
+    d2d_->DrawLine(D2D1::Point2F(x0 * scale, y0 * scale), D2D1::Point2F(x1 * scale, y1 * scale), Brush(c), width * scale, round.get());
+}
+
 void Canvas::Circle(float cx, float cy, float radius, D2D1_COLOR_F c)
 {
     D2D1_COLOR_F unused;
@@ -662,7 +673,8 @@ void Surface::Place(RECT rect)
     scale_ = MonitorScale(rect);
     int inset = InsetPx();
     window_ = RECT{rect.left - inset, rect.top - inset, rect.right + inset, rect.bottom + inset};
-    SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top, SWP_NOACTIVATE);
+    SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top,
+                 SWP_NOACTIVATE | (desktopLayer_ ? SWP_NOZORDER : 0));
 }
 
 void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
@@ -682,7 +694,8 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
         }
         ShowWindow(hwnd_, activate && activatable_ ? SW_SHOW : SW_SHOWNOACTIVATE);
     }
-    SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | (activate && activatable_ ? 0 : SWP_NOACTIVATE));
+    if (!desktopLayer_)
+        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | (activate && activatable_ ? 0 : SWP_NOACTIVATE));
     if (activate && activatable_ && !SetForegroundWindow(hwnd_))
         SwitchToThisWindow(hwnd_, TRUE);
     // Content and glass pop out of the anchor together (DWM runs both
@@ -698,6 +711,13 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
     }
     Paint();
     PublishPanel();
+}
+
+void Surface::SetDesktopLayer(bool on)
+{
+    desktopLayer_ = on;
+    if (on) // created topmost, as popups are
+        SetWindowPos(hwnd_, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void Surface::Move(RECT rect)

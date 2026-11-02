@@ -44,6 +44,7 @@ struct Settings {
     bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)
     bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
     bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
+    bool widgets = true;             // desktop widgets (their layout is widgets.json)
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;
 
@@ -62,6 +63,9 @@ struct Settings {
 
 // %LOCALAPPDATA%\Atrium\settings.json
 std::wstring SettingsPath();
+// UTF-8 text files (a BOM is skipped); the write replaces the file at once.
+std::wstring ReadTextFile(const std::wstring& path);
+bool WriteTextFile(const std::wstring& path, const std::wstring& text);
 Settings LoadSettings();
 // Atomic replace; returns false if the file could not be written.
 bool SaveSettings(const Settings& s);

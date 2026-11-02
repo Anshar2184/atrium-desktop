@@ -5,6 +5,7 @@
 // lunar calendar comes from Windows' ICU.
 #pragma once
 
+#include "shell/lunar.h"
 #include "ui/surface.h"
 
 #include <map>
@@ -50,13 +51,8 @@ private:
     void Place();
     float Hover(Canvas& c, const std::wstring& id, bool on);
     D2D1_SIZE_F Size() const;
-    // The lunar date of a day: month (1-12), day, leap month; false without ICU.
-    bool Lunar(int y, int m, int d, int& lm, int& ld, bool& leap, int& cycleYear) const;
-    std::wstring LunarLine(int y, int m, int d) const; // "丙午年 九月十二"
-
     Surface surface_;
-    void* gregorian_ = nullptr; // ICU UCalendar*
-    void* chinese_ = nullptr;
+    ChineseCalendar lunar_;
     int firstWeekday_ = 0; // 0 Monday .. 6 Sunday
     int year_ = 0, month_ = 0;      // shown
     SYSTEMTIME selected_{};          // the selected day (today when opened)
