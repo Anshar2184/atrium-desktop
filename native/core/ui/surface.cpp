@@ -4,6 +4,7 @@
 #include "render/capture.h"
 #include "log.h"
 #include "render/glass_renderer.h"
+#include "render/wifi_glyph.h"
 
 #include <dwmapi.h>
 #include <shellscalingapi.h>
@@ -327,6 +328,17 @@ void Canvas::Text(const std::wstring& s, D2D1_RECT_F r, float size, D2D1_COLOR_F
         }
         d2d_->DrawText(s.c_str(), UINT32(s.size()), f, p, Brush(c), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
+}
+
+void Canvas::WifiFan(float cx, float cy, float radius, int lit, D2D1_COLOR_F c)
+{
+    D2D1_COLOR_F unused;
+    c = InkAt(D2D1::RectF(cx - radius, cy - radius / 2, cx + radius, cy + radius / 2), c, unused);
+    D2D1_COLOR_F off = c;
+    off.a *= 0.28f;
+    c.a *= alpha_;
+    off.a *= alpha_;
+    DrawWifiFan(d2d_, Brush(c), cx * scale, cy * scale, radius * scale, lit, c, off);
 }
 
 void Canvas::Glyph(const std::wstring& g, D2D1_RECT_F r, float size, D2D1_COLOR_F c)

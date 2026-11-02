@@ -1,5 +1,7 @@
 #include "bar_painter.h"
 
+#include "wifi_glyph.h"
+
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -523,33 +525,9 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
             }
             return;
         }
-        // The iPhone's fan: a wedge and two bands, all three lit at full
-        // signal. `size` sets the radius; the shape is centred on its box.
-        const float R = size * 0.62f, t = R * 0.2f, oy = cy + R * 0.5f;
-        const int lit = !st.connected ? -1 : st.signal >= 60 ? 3 : st.signal >= 30 ? 2 : 1; // -1: offline
-        const D2D1_COLOR_F on = fade(ink, alpha), off = dim((lit < 0 ? 0.32f : 0.24f) * alpha);
-        constexpr float kFrom = 226, kSpan = 88;
-        // The wedge, its outline stroked with round joins to soften its corners.
-        winrt::com_ptr<ID2D1PathGeometry> g;
-        winrt::com_ptr<ID2D1GeometrySink> sink;
-        if (SUCCEEDED(factory->CreatePathGeometry(g.put())) && SUCCEEDED(g->Open(sink.put()))) {
-            const float r0 = R * 0.34f - t * 0.15f, top = oy - t * 0.25f;
-            sink->BeginFigure(D2D1::Point2F(cx, top), D2D1_FIGURE_BEGIN_FILLED);
-            sink->AddLine(D2D1::Point2F(cx + r0 * std::cos(kFrom * kDeg), top + r0 * std::sin(kFrom * kDeg)));
-            sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(cx + r0 * std::cos((kFrom + kSpan) * kDeg), top + r0 * std::sin((kFrom + kSpan) * kDeg)),
-                                          D2D1::SizeF(r0, r0), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-            sink->Close();
-            winrt::com_ptr<ID2D1StrokeStyle> joins;
-            factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
-                                                                   D2D1_LINE_JOIN_ROUND),
-                                       nullptr, 0, joins.put());
-            brush->SetColor(lit >= 1 ? on : off);
-            d2d->FillGeometry(g.get(), brush);
-            d2d->DrawGeometry(g.get(), brush, t * 0.3f, joins.get());
-        }
-        arc(cx, oy, R * 0.56f, kFrom, kSpan, lit >= 2 ? on : off, t);
-        arc(cx, oy, R * 0.88f, kFrom, kSpan, lit >= 3 ? on : off, t);
+        // The iPhone's fan (wifi_glyph); `size` is the room it has.
+        const int lit = !st.connected ? -1 : WifiSteps(st.signal); // -1: offline
+        DrawWifiFan(d2d, brush, cx, cy, size * 0.62f, lit, fade(ink, alpha), dim((lit < 0 ? 0.32f : 0.24f) * alpha));
     };
 
     const bool ring = st.battery || st.audio;
@@ -595,7 +573,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
 
     // Inside: the connection, or the speaker while the volume shows.
     const float speaker = st.battery ? sm.volumeMix : 0.f;
-    connection(h * 0.56f, 1 - speaker);
+    connection(h * 0.6f, 1 - speaker);
     if (speaker > 0.003f) {
         const wchar_t* glyph = st.muted || st.volume == 0 ? L"\uE74F" : st.volume < 34 ? L"\uE993" : st.volume < 67 ? L"\uE994" : L"\uE995";
         if (IDWriteTextFormat* f = Format(h * 0.40f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {

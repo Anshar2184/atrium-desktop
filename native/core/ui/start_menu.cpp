@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "render/wifi_glyph.h"
 
 #include <imm.h>
 #include <sddl.h>
@@ -526,7 +527,10 @@ void StartMenu::PaintShelf(Canvas& c, const Theme& t)
         if (hv > 0)
             c.Fill(b, bh / 2, Alpha(pressed_ == id ? t.press : t.hover, hv));
         D2D1_RECT_F g = label.empty() ? b : D2D1::RectF(b.left + 10, b.top, b.left + 34, b.bottom);
-        c.Glyph(glyph, g, 16, dim ? t.faint : t.text);
+        if (id == L"network" && status_.connected && status_.wifi)
+            c.WifiFan((g.left + g.right) / 2, cy, 12, WifiSteps(status_.signal), t.text);
+        else
+            c.Glyph(glyph, g, 16, dim ? t.faint : t.text);
         if (!label.empty())
             c.Text(label, D2D1::RectF(b.left + 36, b.top, b.right - 8, b.bottom), 12, dim ? t.faint : t.subtext);
         hits_.push_back({b, id});
@@ -543,7 +547,7 @@ void StartMenu::PaintShelf(Canvas& c, const Theme& t)
     }
     if (status_.audio)
         button(L"volume", status_.muted ? L"\uE74F" : status_.volume < 34 ? L"\uE993" : status_.volume < 67 ? L"\uE994" : L"\uE995", L"", status_.muted);
-    button(L"network", status_.connected ? L"\uE701" : L"\uEB55", L"", !status_.connected);
+    button(L"network", !status_.connected ? L"\uEB55" : status_.wifi ? L"\uE701" : L"\uE839", L"", !status_.connected);
 
     // Account, in what is left.
     std::wstring name = userName_.empty() ? L"用户" : userName_;

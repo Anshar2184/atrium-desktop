@@ -100,6 +100,8 @@ public:
     void Text(const std::wstring& s, D2D1_RECT_F r, float size, D2D1_COLOR_F c, DWRITE_FONT_WEIGHT w = DWRITE_FONT_WEIGHT_NORMAL, int align = 0,
               bool wrap = false);
     void Glyph(const std::wstring& g, D2D1_RECT_F r, float size, D2D1_COLOR_F c);
+    // The iPhone's Wi-Fi symbol (wifi_glyph) centred on (cx, cy), `radius` DIP high; `lit` steps 0..3 in `c`, the rest faint.
+    void WifiFan(float cx, float cy, float radius, int lit, D2D1_COLOR_F c);
     float TextWidth(const std::wstring& s, float size, DWRITE_FONT_WEIGHT w = DWRITE_FONT_WEIGHT_NORMAL);
     // An icon by a stable cache key; `image` is only read the first time.
     void Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity = 1);

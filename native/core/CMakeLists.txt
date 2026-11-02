@@ -54,6 +54,7 @@ add_executable(atrium_core WIN32
     render/glass_renderer.cpp
     render/glass_panel.cpp
     render/gpu.cpp
+    render/wifi_glyph.cpp
     core.rc
     core.manifest
     ${shader_headers})

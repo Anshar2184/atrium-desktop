@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "render/wifi_glyph.h"
 
 #include <shellapi.h>
 #include <windowsx.h>
@@ -68,16 +69,8 @@ void SendWinK()
     SendInput(4, in, sizeof(INPUT));
 }
 
-// Signal as four rising bars.
-void Bars(Canvas& c, float x, float cy, int signal, D2D1_COLOR_F ink)
-{
-    int lit = WifiBars(signal);
-    for (int i = 0; i < 4; ++i) {
-        float h = 4.f + 3.f * float(i);
-        D2D1_RECT_F b = D2D1::RectF(x + float(i) * 4.5f, cy + 6 - h, x + float(i) * 4.5f + 3, cy + 6);
-        c.Fill(b, 1.2f, i < lit ? ink : Alpha(ink, 0.28f));
-    }
-}
+// Signal as the bar's three-step Wi-Fi symbol, in the 18 DIP from x.
+void Bars(Canvas& c, float x, float cy, int signal, D2D1_COLOR_F ink) { c.WifiFan(x + 8, cy, 12, WifiSteps(signal), ink); }
 
 // Runs `work` on a thread of its own with a multithreaded COM apartment (WinRT, WMI).
 template <class F> void OnWorker(F work)
@@ -434,7 +427,11 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
         c.Circle((disc.left + disc.right) / 2, cy, 18, on ? t.accent : Alpha(t.text, 0.16f + 0.08f * dh));
         bool halo = c.halo;
         c.halo = false;
-        c.Glyph(glyph, disc, 15, on ? D2D1::ColorF(1, 1, 1, 0.98f) : avail ? t.text : t.faint);
+        D2D1_COLOR_F mark = on ? D2D1::ColorF(1, 1, 1, 0.98f) : avail ? t.text : t.faint;
+        if (id == L"wifi")
+            c.WifiFan((disc.left + disc.right) / 2, cy, 13, 3, mark);
+        else
+            c.Glyph(glyph, disc, 15, mark);
         c.halo = halo;
         if (avail)
             hits_.push_back({disc, id});
