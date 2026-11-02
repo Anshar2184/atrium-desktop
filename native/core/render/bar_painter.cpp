@@ -335,10 +335,14 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
 {
     const float s = scene.scale;
     // Ink colours: white on dark glass, near-black on light glass, per region.
-    auto inkFor = [](bool dark) { return dark ? D2D1::ColorF(0.07f, 0.07f, 0.09f, 0.92f) : D2D1::ColorF(1, 1, 1, 0.96f); };
-    auto haloFor = [](bool dark) { return dark ? D2D1::ColorF(1, 1, 1, 0.35f) : D2D1::ColorF(0, 0, 0, 0.32f); };
-    auto washFor = [](bool dark) { return dark ? D2D1::ColorF(0, 0, 0, 0.10f) : D2D1::ColorF(1, 1, 1, 0.20f); };
-    bool darkText = inks.darkClock;
+    // `dark` is the amount of dark ink: colours in between while the ink fades.
+    auto mix = [](float dark, D2D1_COLOR_F d, D2D1_COLOR_F l) {
+        return D2D1::ColorF(l.r + (d.r - l.r) * dark, l.g + (d.g - l.g) * dark, l.b + (d.b - l.b) * dark, l.a + (d.a - l.a) * dark);
+    };
+    auto inkFor = [&](float dark) { return mix(dark, D2D1::ColorF(0.07f, 0.07f, 0.09f, 0.92f), D2D1::ColorF(1, 1, 1, 0.96f)); };
+    auto haloFor = [&](float dark) { return mix(dark, D2D1::ColorF(1, 1, 1, 0.35f), D2D1::ColorF(0, 0, 0, 0.32f)); };
+    auto washFor = [&](float dark) { return mix(dark, D2D1::ColorF(0, 0, 0, 0.10f), D2D1::ColorF(1, 1, 1, 0.20f)); };
+    float darkText = inks.darkClock;
     D2D1_COLOR_F ink = inkFor(inks.darkApps);
     D2D1_COLOR_F halo = haloFor(darkText);
     D2D1_COLOR_F wash = washFor(inks.darkApps);
@@ -367,7 +371,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
 
     if (sepX_ >= 0) {
         D2D1_COLOR_F c = inkFor(darkText);
-        c.a = darkText ? 0.18f : 0.30f;
+        c.a = 0.30f + (0.18f - 0.30f) * darkText;
         brush->SetColor(c);
         float h = (scene.bar.bottom - scene.bar.top) * 0.46f, mid = (scene.bar.top + scene.bar.bottom) / 2, x = MapX(sepX_);
         d2d->FillRectangle(D2D1::RectF(x - 0.5f * s, mid - h / 2, x + 0.5f * s, mid + h / 2), brush.get());

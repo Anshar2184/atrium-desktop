@@ -339,6 +339,7 @@ public sealed partial class MainWindow : Window
         FeishuSwitch.IsOn = _current.NotifyFeishu;
         WidgetsSwitch.IsOn = _current.Widgets;
         HideTaskbarSwitch.IsOn = _current.HideTaskbar;
+        WidgetBackdropBox.SelectedIndex = _current.WidgetBackdrop == "wallpaper" ? 1 : 0;
         HideBannersSwitch.IsOn = _current.HideBanners;
         _autoWidthGlyph?.Update(_current.AutoWidth ? 1 : 0);
         _clockGlyph?.Update(_current.ShowClock ? 1 : 0);
@@ -440,6 +441,13 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.Widgets = WidgetsSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnWidgetBackdropChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || WidgetBackdropBox.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        _current.WidgetBackdrop = tag;
         Changed();
     }
 

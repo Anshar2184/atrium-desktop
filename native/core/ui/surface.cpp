@@ -170,6 +170,22 @@ Theme Theme::For(bool darkInk)
     return t;
 }
 
+Theme Theme::Mix(float darkInk)
+{
+    if (darkInk <= 0.001f || darkInk >= 0.999f)
+        return For(darkInk >= 0.5f);
+    Theme a = For(false), b = For(true), t = b;
+    auto mix = [&](D2D1_COLOR_F Theme::*c) {
+        const D2D1_COLOR_F &x = a.*c, &y = b.*c;
+        t.*c = D2D1::ColorF(x.r + (y.r - x.r) * darkInk, x.g + (y.g - x.g) * darkInk, x.b + (y.b - x.b) * darkInk, x.a + (y.a - x.a) * darkInk);
+    };
+    for (auto c : {&Theme::border, &Theme::text, &Theme::subtext, &Theme::faint, &Theme::hover, &Theme::press, &Theme::divider, &Theme::card,
+                   &Theme::cardHot, &Theme::halo})
+        mix(c);
+    t.light = darkInk >= 0.5f;
+    return t;
+}
+
 Theme Theme::Panel()
 {
     Theme t = For(PanelToneFor(g_tint, g_transparency).light);
@@ -303,10 +319,10 @@ D2D1_COLOR_F Canvas::InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk)
     D2D1_MATRIX_3X2_F m;
     d2d_->GetTransform(&m); // groups move and scale what they draw
     float x0 = p.left * m._11 + m._31, y0 = p.top * m._22 + m._32, x1 = p.right * m._11 + m._31, y1 = p.bottom * m._22 + m._32;
-    bool dark = ink.DarkAt(x0, y0, x1, y1, theme.light);
-    if (dark == theme.light)
+    float dark = ink.DarkAt(x0, y0, x1, y1, inkDark);
+    if (std::fabs(dark - inkDark) < 0.002f)
         return c;
-    Theme t = Theme::For(dark);
+    Theme t = Theme::Mix(dark);
     haloInk = t.halo;
     const D2D1_COLOR_F& to = isText ? t.text : t.hover;
     return D2D1::ColorF(to.r, to.g, to.b, std::min(1.f, c.a * to.a / std::max(0.01f, from.a)));
@@ -614,6 +630,8 @@ void Surface::PublishPanel()
         return;
     GlassPanel p;
     p.hwnd = hwnd_;
+    p.gen = ++glassGen_;
+    glassPending_ = true;
     p.window = window_;
     p.inset = float(InsetPx());
     p.radius = radius_ * scale_;
@@ -629,6 +647,7 @@ void Surface::PublishPanel()
         p.shapes.push_back(std::move(g));
     }
     p.visible = visible_ || hiding_;
+    p.desktop = desktopLayer_;
     p.pop = pop_;
     p.popOpen = popOpen_;
     p.popX = float(anchor_.x - window_.left);
@@ -686,9 +705,7 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_GLASS_INK:
-        self->darkInk_ = w != 0;
-        self->ink_ = InkFor(h);
-        self->Invalidate();
+        self->SetInk(w != 0, InkFor(h));
         return 0;
     }
     // Mouse positions in content coordinates; presses on the margin are the caller's to decide.
@@ -826,6 +843,23 @@ void Surface::FinishHide()
     ResetDevice();  // the swap chain is recreated on the next Show
 }
 
+void Surface::SetInk(bool dark, const InkGrid& grid)
+{
+    double now = ClockMs();
+    // Not on screen yet (or a new grid): the ink is just taken.
+    bool snap = !visible_ || !glassReady_;
+    darkInk_ = dark;
+    if (snap)
+        inkAll_ = InkFade{};
+    inkAll_.Target(dark ? 1.f : 0.f, now);
+    if (snap || grid.w != inkGrid_.w || grid.h != inkGrid_.h || grid.dark.size() != inkCells_.size())
+        inkCells_.assign(grid.dark.size(), InkFade{});
+    inkGrid_ = grid;
+    for (size_t i = 0; i < inkCells_.size(); ++i)
+        inkCells_[i].Target(grid.dark[i] ? 1.f : 0.f, now);
+    Invalidate();
+}
+
 void Surface::Invalidate()
 {
     if (visible_)
@@ -922,17 +956,40 @@ void Surface::Paint()
         Canvas c(*this, d2d_.get(), scale_, base);
         c.now = ClockMs();
         c.panel = !host_ || (!glassReady_ && c.now - shownMs_ > kGlassWaitMs);
-        c.theme = c.panel ? Theme::Panel() : Theme::For(darkInk_);
-        if (!c.panel)
-            c.ink = ink_;
+        if (c.panel) {
+            c.theme = Theme::Panel();
+            c.inkDark = c.theme.light ? 1.f : 0.f;
+        } else {
+            // The inks fade to what the glass needs now (InkFade).
+            bool fading = inkAll_.Moving(c.now);
+            c.inkDark = inkAll_.set ? inkAll_.Value(c.now) : (darkInk_ ? 1.f : 0.f);
+            c.theme = Theme::Mix(c.inkDark);
+            if (!inkCells_.empty()) {
+                c.ink.w = inkGrid_.w;
+                c.ink.h = inkGrid_.h;
+                c.ink.cellX = inkGrid_.cellX;
+                c.ink.cellY = inkGrid_.cellY;
+                c.ink.dark.resize(inkCells_.size());
+                for (size_t i = 0; i < inkCells_.size(); ++i) {
+                    c.ink.dark[i] = inkCells_[i].Value(c.now);
+                    fading |= inkCells_[i].Moving(c.now);
+                }
+            }
+            if (fading)
+                frameWanted_ = true;
+        }
         paint(c);
         d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
     }
     HRESULT hr = d2d_->EndDraw();
     d2d_->SetTarget(nullptr);
+    QueryPerformanceCounter(&t1); // the paint, without the wait below
+    // The glass of this frame's shapes first, so both show together.
+    if (glassPending_ && glassReady_ && visible_)
+        WaitGlass(hwnd_, glassGen_, 12);
+    glassPending_ = false;
     if (SUCCEEDED(hr))
         hr = swap_->Present(0, 0);
-    QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
     double ms = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart);
     if (firstPaint_ || ms > 16) {
@@ -947,6 +1004,25 @@ void Surface::Paint()
             shared_->lost = true;
         ResetDevice();
         return;
+    }
+    // Frame statistics of an animation (a run of frames that asked for more).
+    double end = ClockMs();
+    if (frameWanted_) {
+        if (!burst_.frames)
+            burst_ = Burst{end, end, 0, 0, 0};
+        burst_.maxGap = std::max(burst_.maxGap, end - burst_.last);
+        burst_.maxPaint = std::max(burst_.maxPaint, ms);
+        burst_.last = end;
+        ++burst_.frames;
+    } else if (burst_.frames) {
+        if (burst_.frames >= 4) {
+            wchar_t title[64] = {};
+            GetWindowTextW(hwnd_, title, 64);
+            double span = end - burst_.start;
+            Log(L"surface: %s animated %d frames in %.0f ms (%.0f fps), longest gap %.1f ms, slowest paint %.1f ms", title, burst_.frames + 1, span,
+                span > 0 ? 1000.0 * burst_.frames / span : 0.0, std::max(burst_.maxGap, end - burst_.last), std::max(burst_.maxPaint, ms));
+        }
+        burst_ = Burst{};
     }
     if (frameWanted_)
         RequestFrame();

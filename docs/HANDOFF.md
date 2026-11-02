@@ -1,10 +1,10 @@
-# 交接文档（2026-11-02，v0.9.3）
+# 交接文档（2026-11-02，v0.9.4）
 
-给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D37，D25 / D30 / D35 在 v0.9.2 修订，D37 为 v0.9.3 新增）和 [VERIFICATION](VERIFICATION.md) 第 20–28 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
+给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D38，D25 / D30 / D35 在 v0.9.2 修订，D37 为 v0.9.3、D38 为 v0.9.4 新增，D24 / D26 在 v0.9.4 补充）和 [VERIFICATION](VERIFICATION.md) 第 20–28 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
 
 ## 0. 一句话现状
 
-C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.3**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
+C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.4**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
 
 ## 1. 用户与协作方式（重要）
 
@@ -35,6 +35,8 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 
 - v0.9.3：**只留 Atrium 栏**（D37，`shell/system_chrome.*`）：设置“隐藏系统任务栏”（`hideTaskbar`，隐藏 `Shell_TrayWnd`，Explorer 再显示时立即再隐藏）与“隐藏系统通知横幅”（`hideBanners`，经 QuietHoursSettings 打开“请勿打扰·仅闹钟”，通知仍成为卡片）；默认关；关闭或退出时恢复，强制结束后由下次启动按 `system.json` 撤销。
 
+- v0.9.4：**小组件只映出桌面**（D38，`render/desktop_backdrop.*`：实时抓取桌面窗口 Progman，或设置“静态壁纸（省电）”直接合成壁纸文件；上层窗口不再进入小组件玻璃，小组件玻璃只在桌面变化、拖动时重画）；**文字颜色渐变**（D26，缓出 450 ms，栏与所有弹窗）；**通知动画流畅度**（D24 / D26：内容与玻璃同帧 `WaitGlass`、弹窗玻璃不等垂直同步、弹窗变化不重画栏、着色器按形状剪裁、通知窗口打开期间不改尺寸；实测弹出、展开、关闭、清除 60–70 帧，最长间隔约 20 ms，原来玻璃 30–45 帧、最长 134 ms）；**日志改为后台线程写入**（原来每行开关文件、所有线程共用一把锁，动画会被日志卡住；超过 8 MB 启动时移到 `core.1.log`）。
+
 ## 3. 代码地图（native/core）
 
 | 文件 | 内容 |
@@ -42,6 +44,7 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 | `shell/system_chrome.*` | 隐藏系统任务栏 / 系统通知横幅及其恢复（D37）；测试命令 `chrome-state` |
 | `main.cpp` | 进程入口、`g_app`、托盘与栏右键菜单（含“添加桌面小组件”，取自 `WidgetChoices()`）、`ApplySettings`、`UpdateStatus`（音量回调 `WM_VOLUME`、`status-fake`）、`--command` 测试命令 |
 | `bar.cpp/.h` | 栏：布局、输入、层级守护、自动隐藏（`UpdateCover` / `UpdateAutoHide` / `WatchPointer`）、渲染线程 `RenderSession`（背景来源选择 DDA/WGC、`ShowOwnWindowsToCapture`、弹窗玻璃 `renderPanels`，面板移动后 1 秒内保留最新帧 `keepFrame`） |
+| `render/desktop_backdrop.*` | 小组件的背景（D38）：桌面窗口抓取或壁纸合成 |
 | `render/capture.*` | `BackdropSource` 接口；`MonitorCapture`（WGC）、`DuplicationCapture`（DDA，取帧线程 `AcquireNextFrame(0)` + 5 ms 轮询，交出帧不整屏复制）；`SetCaptureExclusion`；`PreferPowerSavingGpu` |
 | `render/gpu.*` | 选扫描输出的 GPU；同一 GPU 被列两次时选列出该屏输出的那一项 |
 | `render/glass_renderer.*`、`shaders/glass.hlsl` | 玻璃着色器；`GlassParams` **336 字节**（含 6 个融合部件 `parts`、`partRadii`、`melt`、`partMix`；`pad0` / `pad1` 占位），与 HLSL cbuffer 一一对应 |
@@ -118,7 +121,7 @@ nohup $PS -NoProfile -ExecutionPolicy Bypass -File "$T\\run-tests.ps1" -Core 'D:
 - 测试命令：`Atrium.Core.exe --command <verb> [arg]`。常用：`bar-state`；`start*`；`notify*`；`tray-*`；`calendar-*`；`status-fake <battery=..,charging=..,volume=..,muted=..,signal=..|off>`（截图用，伪造状态图标，不改真实音量）；`control-open|control-state|control-volume <n>|control-click <id>`（id：`wifi-page`、`bt-page`、`sound-page`、`cast`、`back`、`out:<i>`、`amute:<i>`、`disp:<i>`、`mode:<i>`、`mute`；**`wifi`/`bt` 会真拨无线电、`mode:*` 会改投影模式、`disp:*` 会投屏，测试不要用**）；`widgets-state`、`widgets-do <add:kind:size|remove:i|size:i:size|restack|type:i:text>`（kind：clock、calendar、battery、digital、system、notes、reminders、photos；size：small、medium、large）。
 - 环境变量：`ATRIUM_START_LAYOUT=<json>`、`ATRIUM_PRIVACY=1`（截图隐藏个人信息）、`ATRIUM_WIDGETS_TEST=1`（小组件置顶，截图与测试用）、`ATRIUM_CAPTURE=wgc`（强制旧的 WGC 背景，对比用）。
 - `--debug-capturable`：窗口始终可被截图；用 DDA 时背景实时，退回 WGC 时背景冻结在第一帧。`--debug-layout`：记录各项屏幕矩形。
-- 日志：`%LOCALAPPDATA%\Atrium\logs\core.log`。渲染每分钟一行 `render: last minute ... work p50/p95/max`，改渲染/捕获后要看它有无退化（DDA 修复后基准：p50 0.6 ms、p95 12 ms；4 个小组件开着时 p95 约 20 ms）。自动隐藏记录 `bar: a maximized or full-screen app is in front ... (类名)` 与 `bar: slide down/up`。
+- 日志：`%LOCALAPPDATA%\Atrium\logs\core.log`（后台线程写入，超过 8 MB 启动时移到 `core.1.log`）。动画流畅度：每段动画结束时记录 `surface: <标题> animated N frames in T ms (fps), longest gap, slowest paint`（内容）与 `render: <标题> glass animated N presents ...`（玻璃）；`atrium-tools\notify-anim.ps1` 播放一轮通知动画供对照。渲染每分钟一行 `render: last minute ... work p50/p95/max`，改渲染/捕获后要看它有无退化（DDA 修复后基准：p50 0.6 ms、p95 12 ms；4 个小组件开着时 p95 约 20 ms）。自动隐藏记录 `bar: a maximized or full-screen app is in front ... (类名)` 与 `bar: slide down/up`。
 - 本地辅助脚本（`%LOCALAPPDATA%\atrium-tools\`，不在仓库）：`run-tests.ps1`、`idle.ps1`；截图 `cc-shot.ps1`/`cc2-shot.ps1`（控制中心各页）、`cc-anim.ps1`（换页连拍 12 帧）、`widgets-shot.ps1`（小组件，`-Layout` 指定 widgets.json，如 `widgets-all.json` 全部种类）、`ring-shot.ps1`（状态圆环各状态）、`slide-shot.ps1`（自动隐藏连拍）、`dev-update.sh`、`widgets-desk.ps1`（真实桌面 Win+D 层级）、`capture-shot.ps1`（非调试模式 GDI 截屏，验证截图兼容与背景实时）、`v07-shot.ps1` 等；性能 `blink.ps1` + `perf-compare.sh`；对比 `mot-compare.sh`；`switch-check.ps1`（切换输出设备并切回）；设置样例 `demo-v07.json` 等。截图拷到 `devshots/tmp/`（已被 .gitignore 忽略）再用 `remote_read_file` 看。
 
 ## 6. 调用 Codex（agent-control-bridge）
@@ -147,6 +150,7 @@ atrium-desktop 的对话 `01a19124-4b29-7172-a13a-3f5b0122f0c1`（cwd 为本仓�
 - 双显卡：DXGI 只在进程所在 GPU 下列出屏幕；Atrium 首次运行写入 `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`（本机 dist 与开发版 exe 都已写入）。
 - 弹窗窗口 = 内容 + 阴影边距；`Surface::Rect()` 是内容区；控制中心窗口固定为最高页高度，命中坐标要减 `cardTop_`。
 - 跨进程 `SendMessage`（`--command`）里不能发 COM 调用。
+- 渲染线程里不要调用会给 UI 线程发消息的函数（`GetWindowTextW` 取弹窗标题等，用 `InternalGetWindowText`）：UI 线程可能正在 `WaitGlass` 等这一帧的玻璃。动画路径上少写日志。
 - 在 `Surface` 自己的消息处理中不能销毁该 Surface（小组件移除用 `PostMessage` 延后）。
 - 本机：Windows 11 家庭中文版 26H2（26300），3200×2000 @200%，系统任务栏自动隐藏，Intel Arc（输出）+ RTX 4060；两台播放设备（Realtek、NICEHCK，默认 NICEHCK）；附近有一台无线显示器；单屏。
 - 用户当前设置：`settings.json` 为 `{}`（事故后恢复的默认值，3 个固定项导入在内存中、下次保存时写入），`widgets.json` 不存在（默认 4 个小组件）。

@@ -40,12 +40,20 @@ struct GlassPanel {
     // window minus `inset`, with `radius`.
     std::vector<GlassShape> shapes;
     bool visible = false;     // false removes the layer
+    bool desktop = false;     // a widget: its backdrop is the desktop (DesktopBackdrop), not the screen
     unsigned pop = 0;         // bumped to play a pop animation
     bool popOpen = true;
     float popX = 0, popY = 0; // fixed point of the pop, window px
     float rippleX = 0, rippleY = 0; // press ripple centre, window px
     double rippleMs = 0;      // ClockMs() of the press; 0 = none
+    unsigned gen = 0;         // bumped with every change: the popup waits for its glass (WaitGlass)
 };
+
+// A popup's content and its glass come from two threads. So that both show
+// in the same composition, the popup waits (briefly) after publishing a
+// change until the render thread has presented that panel's glass.
+void GlassPresented(HWND hwnd, unsigned gen);              // render thread
+bool WaitGlass(HWND hwnd, unsigned gen, double timeoutMs); // UI thread; false on timeout
 
 class GlassHost {
 public:
@@ -74,6 +82,29 @@ struct InkGrid {
 };
 void PublishInk(HWND hwnd, const InkGrid& grid); // render thread
 InkGrid InkFor(HWND hwnd);                        // UI thread
+
+// Ink changes fade instead of switching: the amount of dark ink (0 light,
+// 1 dark) eases out (cubic) over kInkFadeMs. A change while fading
+// starts from where the fade is; the first target is taken at once.
+constexpr double kInkFadeMs = 450;
+struct InkFade {
+    float from = 0, to = 0;
+    double start = 0;
+    bool set = false;
+    void Target(float target, double nowMs);
+    float Value(double nowMs) const;
+    bool Moving(double nowMs) const { return set && from != to && nowMs - start < kInkFadeMs; }
+};
+
+// An InkGrid as shown: each cell's amount of dark ink (0..1) while it fades.
+struct InkField {
+    int w = 0, h = 0;
+    float cellX = 1, cellY = 1;
+    std::vector<float> dark;
+    // The amount for a rectangle (window px): the median of the cells under it
+    // (at rest, what most of them need, as InkGrid::DarkAt); `fallback` without cells.
+    float DarkAt(float x0, float y0, float x1, float y1, float fallback) const;
+};
 
 // Tone of the plain panel that stands in while the glass is unavailable: the
 // user's tint when the bar is clearly tinted, otherwise the system theme.

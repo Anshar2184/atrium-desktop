@@ -35,6 +35,8 @@ struct Theme {
     bool light = false; // dark ink
     D2D1_COLOR_F panel, border, text, subtext, faint, hover, press, accent, accentText, divider, card, cardHot, halo;
     static Theme For(bool darkInk);
+    // Between the light (0) and the dark (1) ink, while the ink fades.
+    static Theme Mix(float darkInk);
     // The plain stand-in panel: its tone, and the ink over it.
     static Theme Panel();
     // The bar's tint and transparency (ApplySettings), which decide the stand-in's tone.
@@ -75,10 +77,11 @@ public:
     bool panel = false; // the glass is not there (yet): paint a plain panel instead
     double now = 0;     // ClockMs() of this frame
     Theme theme;        // ink for this frame
+    float inkDark = 0;  // the theme's amount of dark ink (it fades, InkFade)
     bool halo = true;   // Text and Glyph draw the theme's halo under the ink
     // Ink region by region (WM_GLASS_INK): Text and Glyph in the theme's ink
-    // switch to the other ink where the glass under them needs it.
-    InkGrid ink;
+    // take the ink the glass under them needs, fading as it changes.
+    InkField ink;
 
     // Asks for another frame (an animation is still running).
     void Continue();
@@ -189,6 +192,7 @@ private:
     void ResetDevice();
     void Place(RECT rect);   // window = content + margin
     void PublishPanel();
+    void SetInk(bool dark, const InkGrid& grid); // WM_GLASS_INK: the inks start fading there
     void FinishHide();
     int InsetPx() const;
 
@@ -201,6 +205,13 @@ private:
     bool firstPaint_ = false;
     bool glassReady_ = false;
     bool frameWanted_ = false;
+    unsigned glassGen_ = 0;  // of the panel last published
+    bool glassPending_ = false; // published since the last present: wait for that glass first
+    // An animation's frames, logged when it ends (smoothness checks).
+    struct Burst {
+        double start = 0, last = 0, maxGap = 0, maxPaint = 0;
+        int frames = 0;
+    } burst_;
     double shownMs_ = 0;
     RECT rect_{};            // content, screen px
     RECT window_{};          // window, screen px
@@ -208,7 +219,9 @@ private:
     float radius_ = 20;
     std::vector<ShapeDip> shapes_;
     bool darkInk_ = false;
-    InkGrid ink_;
+    InkFade inkAll_;               // the theme's ink, fading
+    InkGrid inkGrid_;              // the ink region by region, as published
+    std::vector<InkFade> inkCells_; // and each cell's fade
     POINT anchor_{};
     unsigned pop_ = 0;
     bool popOpen_ = true;

@@ -3,6 +3,7 @@
 #include "clock.h"
 #include "log.h"
 #include "render/capture.h"
+#include "render/desktop_backdrop.h"
 #include "render/glass_renderer.h"
 #include "ui/surface.h"
 
@@ -1035,7 +1036,7 @@ void Bar::SetPanel(const GlassPanel& panel)
         panels_[panel.hwnd] = panel;
     else
         panels_.erase(panel.hwnd);
-    Publish();
+    Publish(false);
 }
 
 void CALLBACK Bar::WinEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD)
@@ -1384,7 +1385,7 @@ void Bar::UpdateTooltips()
         ShowTooltip(); // e.g. the window count changed while hovering
 }
 
-void Bar::Publish()
+void Bar::Publish(bool bar)
 {
     {
         std::lock_guard g(lock_);
@@ -1398,7 +1399,8 @@ void Bar::Publish()
         snapshot_.panels.clear();
         for (const auto& [hwnd, p] : panels_)
             snapshot_.panels.push_back(p);
-        ++snapshot_.generation;
+        if (bar)
+            ++snapshot_.generation;
     }
     SetEvent(wake_);
 }
@@ -1487,12 +1489,14 @@ bool Bar::RenderSession()
     }
     // --debug-capturable with Windows.Graphics.Capture: a frozen backdrop (later frames contain the glass).
     const bool freeze = debugCapturable_ && !capture->KeepsOwnWindowsOut();
+    DesktopBackdrop desktop(gpu, frame_); // the widgets' backdrop (D38)
     GlassRenderer renderer(gpu, visual_, snap.window.right - snap.window.left, snap.window.bottom - snap.window.top);
     BarPainter painter(renderer.D2D(), renderer.DWrite());
 
     unsigned drawnGeneration = 0;
     std::wstring drawnText;
     bool darkClock = false, darkApps = false, drawnDark = false, drawnDarkIcons = false, animating = false;
+    InkFade clockInk, appsInk; // the inks fade to a new colour, not switch
     ULONGLONG lastPresent = 0;
     LARGE_INTEGER freq;
     QueryPerformanceFrequency(&freq);
@@ -1510,6 +1514,10 @@ bool Bar::RenderSession()
         bool ready = false;   // presented once (the popup was told)
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         RECT window{};        // where it was last drawn: a moved panel is drawn again at once
+        unsigned desktopVersion = 0; // a widget: the desktop picture its backdrop came from
+        // Presents of an animation, logged when it ends (smoothness checks).
+        double burstStart = 0, burstLast = 0, burstGap = 0;
+        int burstFrames = 0;
         bool dark = false;
         InkGrid grid;         // ink region by region (published for the popup)
         std::vector<GlassParams> params;
@@ -1520,13 +1528,16 @@ bool Bar::RenderSession()
     // for a second after a move the newest frame is kept.
     winrt::com_ptr<ID3D11Texture2D> lastFrame;
     double panelMovedMs = -1e9;
+    // A popup that opens needs it too (Atrium's own windows bring no frame):
+    // otherwise it is kept at most every 100 ms.
+    double keptMs = -1e9;
     auto keepFrame = [&](ID3D11Texture2D* frame) {
-        if (ClockMs() - panelMovedMs > 1000) {
-            lastFrame = nullptr;
-            return;
-        }
         if (!frame)
             return;
+        double now = ClockMs();
+        if (now - panelMovedMs > 1000 && now - keptMs < 100)
+            return;
+        keptMs = now;
         D3D11_TEXTURE2D_DESC d{};
         frame->GetDesc(&d);
         D3D11_TEXTURE2D_DESC have{};
@@ -1553,6 +1564,21 @@ bool Bar::RenderSession()
         }
         bool moving = false;
         double now = ClockMs();
+        // Widgets sample the desktop, never the windows above them; only a
+        // new picture of it (or a move) draws their glass again.
+        bool widgets = std::any_of(snap.panels.begin(), snap.panels.end(), [](const GlassPanel& p) { return p.desktop && p.visible; });
+        desktop.Update(widgets ? snap.settings.widgetBackdrop : std::wstring(L"off"));
+        for (auto& [hwnd, ps] : panels)
+            if (ps.burstFrames && now - ps.burstLast > 250) {
+                if (ps.burstFrames >= 4) {
+                    wchar_t title[64] = {};
+                    InternalGetWindowText(hwnd, title, 64); // no message to the UI thread (it may be waiting for this glass)
+                    double span = ps.burstLast - ps.burstStart;
+                    Log(L"render: %s glass animated %d presents in %.0f ms (%.0f fps), longest gap %.1f ms", title, ps.burstFrames, span,
+                        span > 0 ? 1000.0 * (ps.burstFrames - 1) / span : 0.0, ps.burstGap);
+                }
+                ps.burstFrames = 0;
+            }
         for (const GlassPanel& p : snap.panels) {
             int w = p.window.right - p.window.left, h = p.window.bottom - p.window.top;
             if (w <= 0 || h <= 0 || !IsWindow(p.hwnd))
@@ -1573,8 +1599,15 @@ bool Bar::RenderSession()
             if (moved)
                 panelMovedMs = now;
             r.Resize(w, h);
-            if (ID3D11Texture2D* under = source ? source : moved ? lastFrame.get() : nullptr)
+            if (p.desktop) {
+                ID3D11Texture2D* pic = desktop.Texture();
+                if (pic && (changed || ps.desktopVersion != desktop.Version() || !r.HasBackdrop())) {
+                    r.UpdateBackdrop(pic, p.window.left - desktop.Origin().x, p.window.top - desktop.Origin().y);
+                    ps.desktopVersion = desktop.Version();
+                }
+            } else if (ID3D11Texture2D* under = source ? source : (moved || !r.HasBackdrop()) ? lastFrame.get() : nullptr) {
                 r.UpdateBackdrop(under, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
+            }
             std::vector<GlassParams> gp = PanelParams(snap.settings, snap.scale, p);
             if (auto rb = r.Poll()) {
                 changed |= rb->changed;
@@ -1635,18 +1668,30 @@ bool Bar::RenderSession()
             if (!r.HasBackdrop())
                 continue; // waits for the first capture frame under it
             bool same = gp.size() == ps.params.size() && memcmp(gp.data(), ps.params.data(), gp.size() * sizeof(GlassParams)) == 0;
-            if (!changed && r.HasPresented() && same)
+            if (!changed && r.HasPresented() && same) {
+                GlassPresented(p.hwnd, p.gen);
                 continue;
+            }
             if (!r.Present(gp, nullptr)) {
                 lost = true;
                 return false;
             }
+            GlassPresented(p.hwnd, p.gen);
             ps.params = gp;
+            if (!ps.burstFrames || now - ps.burstLast > 250) {
+                ps.burstStart = now;
+                ps.burstGap = 0;
+                ps.burstFrames = 0;
+            } else {
+                ps.burstGap = std::max(ps.burstGap, now - ps.burstLast);
+            }
+            ps.burstLast = now;
+            ++ps.burstFrames;
             if (!ps.ready) {
                 ps.ready = true;
                 PostMessageW(p.hwnd, WM_GLASS_READY, 0, 0);
                 wchar_t title[64] = {};
-                GetWindowTextW(p.hwnd, title, 64);
+                InternalGetWindowText(p.hwnd, title, 64);
                 Log(L"render: popup glass ready for %s (%dx%d px, %zu shapes, radius %.0f px, tint %.2f, ink %s)", title, w, h, gp.size(),
                     gp.empty() ? 0.f : gp[0].radius, gp.empty() ? 0.f : gp[0].tintMix, ps.dark ? L"dark" : L"light");
             }
@@ -1784,7 +1829,12 @@ bool Bar::RenderSession()
         if (snap.settings.showClock)
             ClockStrings(time, date);
         std::wstring textKey = time + L"|" + date;
-        animating = painter.Animate(snap.scene, ClockMs());
+        const double nowMs = ClockMs();
+        animating = painter.Animate(snap.scene, nowMs);
+        clockInk.Target(dark ? 1.f : 0.f, nowMs);
+        appsInk.Target(darkIcons ? 1.f : 0.f, nowMs);
+        animating |= clockInk.Moving(nowMs) || appsInk.Moving(nowMs);
+        const Ink inks{clockInk.Value(nowMs), appsInk.Value(nowMs)};
         if (frameLog_.exchange(false)) {
             const BarFrame& f = painter.Frame();
             Log(L"bar: frame shape=%.0f-%.0f base=%.0f-%.0f magnified=%.2f hop=%.2f ripple=%.2f", f.shape.left, f.shape.right, snap.scene.bar.left,
@@ -1812,7 +1862,7 @@ bool Bar::RenderSession()
         params.rippleA = bf.rippleA;
         bool ok = renderer.Present(params,
                                    [&](ID2D1DeviceContext2* d2d) {
-                                       painter.Draw(d2d, snap.scene, {dark, darkIcons}, time, date,
+                                       painter.Draw(d2d, snap.scene, inks, time, date,
                                                     std::to_wstring(snap.generation) + textKey + (dark ? L"d" : L"l") + (darkIcons ? L"d" : L"l"),
                                                     animating);
                                    });

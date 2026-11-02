@@ -5,6 +5,7 @@
 #include "glass_vs.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace atrium {
 
@@ -57,6 +58,7 @@ void GlassRenderer::Pop(bool open, float cx, float cy) { PopVisual(dcomp_.get(),
 
 GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost, bool overlay) : gpu_(gpu), w_(width), h_(height)
 {
+    sync_ = overlay ? 1 : 0; // the bar draws its content over the glass; a popup's content is its own
     auto* dev = gpu_.device.get();
     Check(dev->CreateVertexShader(g_GlassVS, sizeof(g_GlassVS), nullptr, vs_.put()));
     Check(dev->CreatePixelShader(g_GlassPS, sizeof(g_GlassPS), nullptr, ps_.put()));
@@ -92,6 +94,12 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, b
     rt.BlendOp = rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
     rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
     Check(dev->CreateBlendState(&bd, blend_.put()));
+    D3D11_RASTERIZER_DESC rd{};
+    rd.FillMode = D3D11_FILL_SOLID;
+    rd.CullMode = D3D11_CULL_NONE;
+    rd.DepthClipEnable = TRUE;
+    rd.ScissorEnable = TRUE;
+    Check(dev->CreateRasterizerState(&rd, scissor_.put()));
 
     DXGI_SWAP_CHAIN_DESC1 desc{};
     desc.Width = UINT(w_);
@@ -301,6 +309,7 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ctx->OMSetBlendState(blend_.get(), nullptr, 0xFFFFFFFF);
     D3D11_VIEWPORT vp{0, 0, float(w_), float(h_), 0, 1};
     ctx->RSSetViewports(1, &vp);
+    ctx->RSSetState(scissor_.get());
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ctx->IASetInputLayout(nullptr);
     ctx->VSSetShader(vs_.get(), nullptr, 0);
@@ -323,9 +332,25 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
             p.shapeR = float(w_) - p.inset;
             p.shapeB = float(h_) - p.inset;
         }
+        // The shader runs only over the shape's bounds and its shadow (a tall
+        // popup with a few cards would otherwise shade every pixel per card).
+        float l = p.shapeL, t = p.shapeT, r = p.shapeR, b = p.shapeB;
+        for (int i = 0; i < int(p.partCount) && i < kMaxGlassParts; ++i) {
+            l = std::min(l, p.parts[i][0]);
+            t = std::min(t, p.parts[i][1]);
+            r = std::max(r, p.parts[i][2]);
+            b = std::max(b, p.parts[i][3]);
+        }
+        const float m = 2 * std::max(p.inset, 1.f) + 2; // the shadow has faded out by then
+        D3D11_RECT sc{LONG(std::max(0.f, std::floor(l - m))), LONG(std::max(0.f, std::floor(t - m))), LONG(std::min(float(w_), std::ceil(r + m))),
+                      LONG(std::min(float(h_), std::ceil(b + m)))};
+        if (sc.right <= sc.left || sc.bottom <= sc.top)
+            continue;
+        ctx->RSSetScissorRects(1, &sc);
         ctx->UpdateSubresource(cb_.get(), 0, nullptr, &p, 0, 0);
         ctx->Draw(3, 0);
     }
+    ctx->RSSetState(nullptr);
     ID3D11ShaderResourceView* none[2] = {};
     ctx->PSSetShaderResources(0, 2, none);
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
@@ -348,7 +373,7 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
 
     ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
     hasPresented_ = hasBackdrop_;
-    HRESULT hr = swap_->Present(1, 0);
+    HRESULT hr = swap_->Present(sync_, 0);
     return hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET;
 }
 

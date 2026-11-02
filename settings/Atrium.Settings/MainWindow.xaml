@@ -574,6 +574,24 @@
                                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                         <Grid ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="小组件背景" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
+                                            <ComboBox x:Name="WidgetBackdropBox" Grid.Column="1" MinWidth="140" VerticalAlignment="Center"
+                                                      AutomationProperties.Name="小组件背景" SelectionChanged="OnWidgetBackdropChanged">
+                                                <ComboBoxItem Content="实时桌面" Tag="desktop" />
+                                                <ComboBoxItem Content="静态壁纸（省电）" Tag="wallpaper" />
+                                            </ComboBox>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
+                                                   Text="小组件的玻璃只映出桌面，不映出上面的窗口。实时桌面：跟随桌面变化（幻灯片放映、动态壁纸）。静态壁纸：直接读取壁纸图片，不占用屏幕捕获，开销最低；换壁纸后几秒内更新。" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardSurfaceStyle}">
+                                    <Grid RowSpacing="12">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">

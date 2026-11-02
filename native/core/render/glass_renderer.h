@@ -121,9 +121,14 @@ private:
     winrt::com_ptr<ID3D11UnorderedAccessView> cmpUav_;
     winrt::com_ptr<ID3D11SamplerState> sampler_;
     winrt::com_ptr<ID3D11BlendState> blend_;
+    winrt::com_ptr<ID3D11RasterizerState> scissor_; // each shape only where it and its shadow are
     winrt::com_ptr<ID3D11Texture2D> roi_, presented_;
     winrt::com_ptr<ID3D11ShaderResourceView> roiSrv_, presentedSrv_;
     bool hasPresented_ = false;
+    // The bar waits for the display between frames; a popup's glass is shown
+    // at once, as its content is (Surface presents without waiting), so a
+    // frame of the two lands in the same composition.
+    UINT sync_ = 1;
     bool hasBackdrop_ = false;
 
     winrt::com_ptr<ID2D1Factory3> d2dFactory_;

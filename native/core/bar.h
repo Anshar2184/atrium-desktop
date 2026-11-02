@@ -121,7 +121,9 @@ private:
     static LRESULT CALLBACK InputProc(HWND, UINT, WPARAM, LPARAM);
     LRESULT OnInput(HWND h, UINT m, WPARAM w, LPARAM l);
     std::wstring HitTest(POINT client) const;
-    void Publish(); // copies scene state to the render thread
+    // Copies scene state to the render thread; `bar` false: only the popups'
+    // glass changed (the bar is not drawn again for it).
+    void Publish(bool bar = true);
     void UpdateTooltips();   // refreshes the text of a visible tooltip
     void HideTooltip();
     void ShowTooltip();      // above the hovered item, after a short delay

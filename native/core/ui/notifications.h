@@ -90,6 +90,7 @@ private:
         std::wstring rippleId;
         float rippleX = 0, rippleY = 0;
         double rippleMs = 0;
+        int regionTop = -1; // window px where the window's region starts (at rest), -1: none
     };
 
     void Paint(Mode mode, Canvas& c);

@@ -1,4 +1,4 @@
-// Minimal append-only log at %LOCALAPPDATA%\Atrium\logs\core.log.
+// Append-only log at %LOCALAPPDATA%\Atrium\logs\core.log, written by a thread of its own.
 #pragma once
 
 namespace atrium {

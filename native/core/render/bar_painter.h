@@ -72,10 +72,11 @@ struct BarFrame {
     float slideY = 0;    // auto-hide: how far the bar is down (px; the content and the glass move together)
 };
 
-// Ink colour per region: near-black on light glass, white on dark glass.
+// Ink colour per region: near-black on light glass, white on dark glass; the
+// amount of dark ink, 0..1, in between while it fades (InkFade).
 struct Ink {
-    bool darkClock = false;
-    bool darkApps = false;
+    float darkClock = 0;
+    float darkApps = 0;
 };
 
 class BarPainter {

@@ -52,6 +52,7 @@ add_executable(atrium_core WIN32
     shell/notification_listener.cpp
     render/bar_painter.cpp
     render/capture.cpp
+    render/desktop_backdrop.cpp
     render/glass_renderer.cpp
     render/glass_panel.cpp
     render/gpu.cpp
