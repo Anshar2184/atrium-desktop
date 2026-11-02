@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "motion.h"
 #include "shell/lunar.h"
 
 #include <shellapi.h>
@@ -21,12 +22,6 @@ constexpr double kMonthMs = 260;
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
-float Ease(float t)
-{
-    t = std::clamp(t, 0.f, 1.f);
-    return 1 - (1 - t) * (1 - t) * (1 - t);
-}
-
 const wchar_t* const kWeekNames[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
 void OpenUri(const wchar_t* uri) { ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL); }
 
@@ -36,7 +31,7 @@ CalendarPanel::CalendarPanel(HINSTANCE instance) : surface_(instance, L"Atrium C
 {
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
-    surface_.onMargin = [this] { Close(); };
+    surface_.onDismiss = [this] { Close(); };
     DWORD first = 0;
     if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK | LOCALE_RETURN_NUMBER, reinterpret_cast<LPWSTR>(&first), 2))
         firstWeekday_ = int(first % 7);
@@ -109,14 +104,9 @@ void CalendarPanel::Close()
 
 float CalendarPanel::Hover(Canvas& c, const std::wstring& id, bool on)
 {
-    auto& [v, last] = hoverAnim_[id];
-    double dt = last > 0 ? std::clamp(c.now - last, 0.0, 100.0) : 0;
-    last = c.now;
-    float target = on ? 1.f : 0.f;
-    v += (target - v) * (1 - std::exp(-float(dt) / 1000.f * (on ? 20.f : 11.f)));
-    if (std::fabs(target - v) < 0.01f)
-        v = target;
-    else
+    auto& f = hoverAnim_[id];
+    float v = f.Step(on, c.now);
+    if (f.moving)
         c.Continue();
     return v;
 }
@@ -176,7 +166,7 @@ void CalendarPanel::PaintMonth(Canvas& c, const Theme& t, D2D1_RECT_F card)
         c.Text(kWeekNames[wd], D2D1::RectF(kPad + float(i) * cellW, top, kPad + float(i + 1) * cellW, top + kWeekH), 12,
                wd >= 5 ? t.subtext : t.faint, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
-    float e = Ease(float((c.now - monthMs_) / kMonthMs));
+    float e = motion::EaseOut(float((c.now - monthMs_) / kMonthMs));
     if (e < 1)
         c.Continue();
     const float gridTop = top + kWeekH;

@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "motion.h"
 #include "settings.h"
 
 #include <dwmapi.h>
@@ -40,12 +41,6 @@ constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2; // a burst of window events, one 
 constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;   // lParam PhotoRead*: a photo was read
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
-
-float Ease(float t)
-{
-    t = std::clamp(t, 0.f, 1.f);
-    return 1 - (1 - t) * (1 - t) * (1 - t);
-}
 
 struct KindName {
     WidgetKind kind;
@@ -385,14 +380,16 @@ bool DesktopWidgets::FreeCellNear(float col, float row, WidgetSize size, const W
 void DesktopWidgets::Load()
 {
     widgets_.clear();
+    unplaced_.clear();
     std::wstring text = ReadTextFile(LayoutPath());
     bool read = false;
     auto add = [&](WidgetKind k, WidgetSize s, int c, int r, WidgetContent content) {
         if (!WidgetSupports(k, s))
             s = WidgetSize::Small;
         if (!Fits(c, r, s, nullptr) && !FreeCellNear(float(c), float(r), s, nullptr, c, r))
-            return; // no room left on this screen
+            return false; // no room left on this screen
         Create(k, s, c, r).content = std::move(content);
+        return true;
     };
     if (!text.empty()) {
         json::JsonObject o{nullptr};
@@ -415,8 +412,9 @@ void DesktopWidgets::Load()
                         json::JsonObject io = iv.GetObject();
                         content.items.push_back({std::wstring(io.GetNamedString(L"text", L"")), io.GetNamedBoolean(L"done", false)});
                     }
-                add(k, ParseSize(std::wstring(e.GetNamedString(L"size", L"small"))), int(e.GetNamedNumber(L"col", 0)), int(e.GetNamedNumber(L"row", 0)),
-                    std::move(content));
+                if (!add(k, ParseSize(std::wstring(e.GetNamedString(L"size", L"small"))), int(e.GetNamedNumber(L"col", 0)),
+                         int(e.GetNamedNumber(L"row", 0)), std::move(content)))
+                    unplaced_.emplace_back(e.Stringify());
             }
         } else {
             Log(L"widgets: %s is not valid, starting afresh", LayoutPath().c_str());
@@ -458,6 +456,9 @@ void DesktopWidgets::Save() const
             e.SetNamedValue(L"folder", json::JsonValue::CreateStringValue(c.folder));
         list.Append(e);
     }
+    for (const auto& s : unplaced_)
+        if (json::JsonObject e{nullptr}; json::JsonObject::TryParse(s, e))
+            list.Append(e);
     json::JsonObject o;
     o.SetNamedValue(L"widgets", list);
     if (!WriteTextFile(LayoutPath(), std::wstring(o.Stringify())))
@@ -538,7 +539,7 @@ void DesktopWidgets::Glide()
     for (auto& w : widgets_) {
         if (w->glideMs <= 0 || !w->surface)
             continue;
-        float k = Ease(float((now - w->glideMs) / kGlideMs));
+        float k = motion::EaseOut(float((now - w->glideMs) / kGlideMs));
         // Size changes too (a widget made larger or smaller).
         auto lerp = [&](LONG a, LONG b) { return LONG(std::lround(float(a) + float(b - a) * k)); };
         RECT r{lerp(w->glideFrom.left, w->glideTo.left), lerp(w->glideFrom.top, w->glideTo.top), lerp(w->glideFrom.right, w->glideTo.right),

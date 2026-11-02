@@ -7,6 +7,7 @@
 // recent files or file search. Tiles lift under the pointer, presses ripple.
 #pragma once
 
+#include "motion.h"
 #include "shell/app_catalog.h"
 #include "shell/system_status.h"
 #include "shell/task_model.h"
@@ -102,7 +103,7 @@ private:
     ULONGLONG lastClosed_ = 0;
     float radius_ = 30, barH_ = 60;
     // Animation.
-    std::map<std::wstring, std::pair<float, double>> hoverAnim_; // value, last update
+    std::map<std::wstring, motion::Follow> hoverAnim_;
     double stageMs_ = 0;    // content (re)appeared: tiles slide in staggered
     double lastPaint_ = 0;
     std::wstring rippleId_;

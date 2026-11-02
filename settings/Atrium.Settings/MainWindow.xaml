@@ -77,6 +77,13 @@
                             <TextBlock Grid.Column="1" Text="内容" VerticalAlignment="Center" />
                         </Grid>
                     </ListViewItem>
+                    <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="设计规范">
+                        <Grid Padding="12,0,12,0" ColumnSpacing="14">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8D2;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="设计规范" VerticalAlignment="Center" />
+                        </Grid>
+                    </ListViewItem>
                     <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="关于">
                         <Grid Padding="12,0,12,0" ColumnSpacing="14">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -627,7 +634,12 @@
                             </StackPanel>
                         </ScrollViewer>
 
-                        <!-- 05 About -->
+                        <!-- 05 Design: built in code (MainWindow.Design.cs) the first time it is shown -->
+                        <ScrollViewer x:Name="PageDesign" Visibility="Collapsed">
+                            <StackPanel x:Name="DesignStack" MaxWidth="960" Margin="40,24,40,32" Spacing="32" />
+                        </ScrollViewer>
+
+                        <!-- 06 About -->
                         <ScrollViewer x:Name="PageAbout" Visibility="Collapsed">
                             <StackPanel MaxWidth="960" Margin="40,24,40,32" Spacing="32">
                                 <Grid ColumnSpacing="28" Margin="0,8,0,0">
@@ -670,7 +682,7 @@
                                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Typography.NumeralAlignment="Tabular" />
                                                 <TextBlock Text="与系统任务栏共存" Style="{StaticResource CardTitleStyle}" />
                                                 <TextBlock Style="{StaticResource CardDescriptionStyle}"
-                                                           Text="不替换资源管理器，不向系统进程注入代码；崩溃时由守护进程恢复。" />
+                                                           Text="不替换资源管理器，不向系统进程注入代码；意外退出后，下次启动会撤销它对系统做过的改动。" />
                                             </StackPanel>
                                         </Border>
                                         <Border Style="{StaticResource CardSurfaceStyle}">

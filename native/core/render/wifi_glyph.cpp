@@ -1,5 +1,7 @@
 #include "wifi_glyph.h"
 
+#include "round_stroke.h"
+
 #include <winrt/base.h>
 
 #include <cmath>
@@ -16,9 +18,7 @@ void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx,
     const float R = radius, t = R * 0.19f, oy = cy + R * 0.5f; // the point; the shape is centred on its box
     winrt::com_ptr<ID2D1Factory> factory;
     d2d->GetFactory(factory.put());
-    winrt::com_ptr<ID2D1StrokeStyle> round;
-    factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND),
-                               nullptr, 0, round.put());
+    ID2D1StrokeStyle* round = RoundStroke(d2d);
     auto point = [&](float r, float a) { return D2D1::Point2F(cx + r * std::cos(a * kDeg), oy + r * std::sin(a * kDeg)); };
     // The wedge, its outline stroked with round joins to soften its corners.
     winrt::com_ptr<ID2D1PathGeometry> g;
@@ -32,7 +32,7 @@ void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx,
         sink->Close();
         brush->SetColor(lit >= 1 ? on : off);
         d2d->FillGeometry(g.get(), brush);
-        d2d->DrawGeometry(g.get(), brush, t * 0.3f, round.get());
+        d2d->DrawGeometry(g.get(), brush, t * 0.3f, round);
     }
     // The bands.
     const float radii[2] = {R * 0.595f, R * 0.905f};
@@ -47,7 +47,7 @@ void DrawWifiFan(ID2D1DeviceContext* d2d, ID2D1SolidColorBrush* brush, float cx,
         s->EndFigure(D2D1_FIGURE_END_OPEN);
         s->Close();
         brush->SetColor(lit >= k + 2 ? on : off);
-        d2d->DrawGeometry(band.get(), brush, t, round.get());
+        d2d->DrawGeometry(band.get(), brush, t, round);
     }
 }
 

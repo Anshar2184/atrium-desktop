@@ -116,8 +116,10 @@ internal sealed class CoreClient : IDisposable
     {
         var request = new JsonObject { ["op"] = op };
         if (s != null) request["settings"] = s.ToJson();
+        bool connected = Connected;
         var r = await RequestAsync(request);
-        if (r == null) return Connected ? "no reply" : null; // not connected: nothing to preview
+        // Not connected: nothing to preview. A connection lost on the way: not done.
+        if (r == null) return connected ? "no reply" : null;
         return r["op"]?.GetValue<string>() == "ok" ? null : r["message"]?.GetValue<string>() ?? "error";
     }
 

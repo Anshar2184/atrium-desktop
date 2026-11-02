@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "motion.h"
 
 #include <shellapi.h>
 #include <shellscalingapi.h>
@@ -27,15 +28,10 @@ constexpr double kLeaveMs = 340, kRippleMs = 520;
 constexpr float kStackPush = 6.5f, kStackFriction = 5.5f, kStackCoast = 2.5f, kStackSpring = 110, kStackOverrun = 8;
 constexpr float kStackLift = 24; // DIP a passed card rises over the stack's peeking edges as it goes
 
-float Smooth(float t)
-{
-    t = std::clamp(t, 0.f, 1.f);
-    return 1 - (1 - t) * (1 - t) * (1 - t);
-}
 // Moves v towards target at `rate` per second; true while still moving.
 bool Glide(float& v, float target, float dt, float rate, float eps)
 {
-    v += (target - v) * (1 - std::exp(-dt / 1000.f * rate));
+    v = motion::Approach(v, target, dt, rate);
     if (std::fabs(target - v) < eps) {
         v = target;
         return false;
@@ -56,13 +52,6 @@ std::wstring Ago(ULONGLONG t)
     return std::to_wstring(s / 3600) + L" 小时前"; // N 小时前
 }
 
-float MonitorScale(RECT r)
-{
-    HMONITOR mon = MonitorFromRect(&r, MONITOR_DEFAULTTOPRIMARY);
-    UINT x = 96, y = 96;
-    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &x, &y);
-    return float(x) / 96.f;
-}
 
 } // namespace
 
@@ -82,7 +71,7 @@ Notifications::Notifications(HINSTANCE instance)
             popup_.surface->Hide(false);
         }
     };
-    center_.surface->onMargin = [this] { // a press next to the list closes it
+    center_.surface->onDismiss = [this] { // a press next to the list closes it
         center_.surface->Hide();
         centerClosed_ = GetTickCount64();
     };
@@ -168,8 +157,11 @@ void Notifications::Post(Notice n)
     leaving_.erase(n.id); // a card closing just now that the new message continues stays
     notices_.insert(notices_.begin(), n);
     ShiftStack(Mode::Center, 0, +1);
-    if (notices_.size() > kMaxNotices)
+    if (notices_.size() > kMaxNotices) {
         notices_.resize(kMaxNotices);
+        // The oldest went: so do their places in a stack held back meanwhile.
+        std::erase_if(popupIds_, [&](uint64_t id) { return std::none_of(notices_.begin(), notices_.end(), [&](const Notice& o) { return o.id == id; }); });
+    }
     Log(L"notify: posted %llu from %s (%s)", n.id, n.app.c_str(), n.source.c_str());
 
     // The open list shows it right away; otherwise it pops up, unless the user
@@ -383,7 +375,7 @@ void Notifications::Layout(Mode mode)
     }
     RECT bell = bellRect ? bellRect() : RECT{};
     RECT bar = barRect ? barRect() : bell;
-    float s = MonitorScale(bar);
+    float s = PopupScale(bar);
     HMONITOR mon = MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(mon, &mi);
@@ -645,13 +637,13 @@ void Notifications::Paint(Mode mode, Canvas& c)
                 ty = listH - card - kPeek * k;
                 tinset = 12.f * k;
                 talpha = std::clamp(3.f - rel, 0.f, 1.f);
-                tcontent = Smooth(std::clamp(1.f - rel * 1.6f, 0.f, 1.f)); // the text comes in the later part
+                tcontent = motion::EaseOut(std::clamp(1.f - rel * 1.6f, 0.f, 1.f)); // the text comes in the later part
             } else {
                 float u = std::min(-rel, 1.f);
                 ty = listH - card - (2 * kPeek + kStackLift) * u;
                 tinset = 28.f * u;
                 talpha = (1 - u) * (1 - u);
-                tcontent = 1 - Smooth(std::clamp(u * 2.f, 0.f, 1.f)); // its text goes first: two texts never show strongly at once
+                tcontent = 1 - motion::EaseOut(std::clamp(u * 2.f, 0.f, 1.f)); // its text goes first: two texts never show strongly at once
             }
         } else {
             ty = listH - card - float(i) * (card + kGap) + v.scroll;
@@ -677,7 +669,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         float alpha = a.alpha, dx = 0, shrink = 0;
         if (auto l = leaving_.find(n.id); l != leaving_.end()) {
             // Closing: it fades out while drifting right and settling back a little.
-            float e = Smooth(float(std::max(0.0, c.now - l->second) / kLeaveMs));
+            float e = motion::EaseOut(float(std::max(0.0, c.now - l->second) / kLeaveMs));
             dx = 36 * e;
             shrink = 0.07f * e;
             alpha *= (1 - e) * (1 - e);

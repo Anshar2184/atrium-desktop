@@ -84,17 +84,13 @@ internal static class Specimens
         c = Mix(c, Rgb(0xFFF4D6), disc);
 
         // Dunes, back to front.
-        float[] bases = { 0.690f, 0.790f, 0.905f };
-        Vector3[] top = { Rgb(0xE5675B), Rgb(0xA83A63), Rgb(0x5E2358) };
-        Vector3[] bottom = { Rgb(0x92315F), Rgb(0x5A2160), Rgb(0x2A1240) };
-        float[] amp1 = { 0.034f, 0.046f, 0.032f }, f1 = { 5.1f, 3.3f, 4.4f }, p1 = { 0.6f, 2.0f, 4.1f };
-        float[] amp2 = { 0.012f, 0.014f, 0.011f }, f2 = { 13.0f, 9.1f, 11.0f }, p2 = { 1.7f, 0.4f, 2.3f };
         for (int k = 0; k < 3; k++)
         {
-            float ridge = (bases[k] + amp1[k] * MathF.Sin(u * f1[k] + p1[k]) + amp2[k] * MathF.Sin(u * f2[k] + p2[k])) * H;
+            var (b, top, bottom, amp1, f1, p1, amp2, f2, p2) = Dunes[k];
+            float ridge = (b + amp1 * MathF.Sin(u * f1 + p1) + amp2 * MathF.Sin(u * f2 + p2)) * H;
             float m = Smooth(ridge - aa, ridge + aa, y);
             float depth = Sat((y - ridge) / (0.20f * H));
-            var layer = Mix(top[k], bottom[k], depth);
+            var layer = Mix(top, bottom, depth);
             layer += Rgb(0xFFB070) * (0.30f * MathF.Exp(-(y - ridge) / (0.012f * H)) * (k == 0 ? 1f : 0.55f));
             c = Mix(c, layer, m);
         }
@@ -103,6 +99,14 @@ internal static class Specimens
         c *= 1 - 0.28f * Sat(MathF.Sqrt(vx * vx + vy * vy) * 1.5f - 0.2f);
         return c;
     }
+
+    // Sunset's dunes: base, top and bottom colour, two waves (amplitude, frequency, phase).
+    private static readonly (float, Vector3, Vector3, float, float, float, float, float, float)[] Dunes =
+    {
+        (0.690f, Rgb(0xE5675B), Rgb(0x92315F), 0.034f, 5.1f, 0.6f, 0.012f, 13.0f, 1.7f),
+        (0.790f, Rgb(0xA83A63), Rgb(0x5A2160), 0.046f, 3.3f, 2.0f, 0.014f, 9.1f, 0.4f),
+        (0.905f, Rgb(0x5E2358), Rgb(0x2A1240), 0.032f, 4.4f, 4.1f, 0.011f, 11.0f, 2.3f),
+    };
 
     // ---- Night: aurora, stars and a lit skyline ----
 

@@ -61,6 +61,7 @@ std::vector<CatalogApp> Enumerate()
         if (auto item2 = item.try_as<IShellItem2>()) {
             app.aumid = PropString(item2.get(), PKEY_AppUserModel_ID);
             app.target = PropString(item2.get(), PKEY_Link_TargetParsingPath);
+            app.args = PropString(item2.get(), PKEY_Link_Arguments);
         }
         if (!app.name.empty() && !app.id.empty())
             apps.push_back(std::move(app));
@@ -248,6 +249,7 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
             CoTaskMemFree(s);
             link.aumid = PropString(item.get(), PKEY_AppUserModel_ID);
             link.target = PropString(item.get(), PKEY_Link_TargetParsingPath);
+            link.args = PropString(item.get(), PKEY_Link_Arguments);
         }
         if (link.name.empty()) {
             std::wstring file = link.id.substr(link.id.find_last_of(L"\\/") + 1);
@@ -442,8 +444,10 @@ PinnedApp AppCatalog::PinFor(const CatalogApp& app)
     std::wstring lower = app.target;
     for (auto& c : lower)
         c = wchar_t(towlower(c));
-    if (!app.target.empty() && lower.size() > 4 && lower.substr(lower.size() - 4) == L".exe")
+    if (!app.target.empty() && lower.size() > 4 && lower.substr(lower.size() - 4) == L".exe") {
         p.path = app.target;
+        p.args = app.args;
+    }
     else if (IsPath(app.id))
         p.path = app.id; // a shortcut outside the catalog
     else

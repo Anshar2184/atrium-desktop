@@ -1,7 +1,9 @@
 #include "bar_painter.h"
 
+#include "round_stroke.h"
 #include "wifi_glyph.h"
 #include "../log.h"
+#include "../motion.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,23 +18,20 @@ namespace {
 // Positions (items, the bar's edges) ease towards new places at this rate per second (about 0.3 s).
 constexpr float kSlideRate = 14;
 
-// Critically damped approach towards `target`; `rate` in 1/s.
+// motion::Approach, landing on `target` once the rest is invisible: 0..1 values.
 float Approach(float v, float target, double dtMs, float rate)
 {
-    float k = 1.0f - std::exp(-float(dtMs) / 1000.0f * rate);
-    v += (target - v) * k;
+    v = motion::Approach(v, target, dtMs, rate);
     return std::fabs(target - v) < 0.002f ? target : v;
 }
 
 // The same for positions in px.
 float ApproachPx(float v, float target, double dtMs, float rate)
 {
-    float k = 1.0f - std::exp(-float(dtMs) / 1000.0f * rate);
-    v += (target - v) * k;
+    v = motion::Approach(v, target, dtMs, rate);
     return std::fabs(target - v) < 0.25f ? target : v;
 }
 
-float EaseOut(float t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
 
 } // namespace
 
@@ -252,13 +251,8 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
             s.fill = target;
             s.seen = true;
         }
-        constexpr float kStiffness = 170, kDamping = 20; // about 0.4 s, under 5 % overshoot
-        for (double left = dt; left > 0; left -= 8) {
-            float h = float(std::min(left, 8.0)) / 1000.f;
-            s.speed += (kStiffness * (target - s.fill) - kDamping * s.speed) * h;
-            s.fill += s.speed * h;
-        }
-        if (std::fabs(target - s.fill) < 0.002f && std::fabs(s.speed) < 0.01f) {
+        motion::kSmooth.Step(s.fill, s.speed, target, float(dt) / 1000.f); // about 0.4 s, under 5 % overshoot
+        if (motion::Spring::AtRest(s.fill, s.speed, target)) {
             s.fill = target;
             s.speed = 0;
         } else {
@@ -282,9 +276,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
             if (slideDown_) {
                 e = 0.5f - 0.5f * std::cos(3.14159265f * u); // eases in and out
             } else {
-                constexpr float c1 = 1.2f, c3 = c1 + 1; // ease-out-back: a slight overshoot
-                float v = u - 1;
-                e = 1 + c3 * v * v * v + c1 * v * v;
+                e = motion::EaseOutBack(u, 1.2f); // a slight overshoot
             }
             slide_ = u >= 1 ? target : slideFrom_ + (target - slideFrom_) * e;
             moving = true;
@@ -306,7 +298,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
             float u = float(t / kRippleMs);
             frame_.rippleX = MapX(scene.rippleX);
             frame_.rippleY = scene.rippleY + frame_.slideY;
-            frame_.rippleR = (scene.bar.bottom - scene.bar.top) * 1.5f * EaseOut(u);
+            frame_.rippleR = (scene.bar.bottom - scene.bar.top) * 1.5f * motion::EaseOut(u);
             frame_.rippleA = 0.9f * (1 - u) * (1 - u);
             moving = true;
         }
@@ -397,7 +389,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
         d2d->SetTransform(D2D1::Matrix3x2F::Translation(shift, 0));
         if (m.hover > 0.001f) {
             D2D1_COLOR_F c = washFor(darkText);
-            c.a *= EaseOut(m.hover);
+            c.a *= motion::EaseOut(m.hover);
             brush->SetColor(c);
             float r = scene.plateRadius;
             d2d->FillRoundedRectangle(D2D1::RoundedRect(scene.clock, r, r), brush.get());
@@ -435,7 +427,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float pw = std::max(1.f, plate.right - plate.left);
     float grow = (MapX(bx + pw / 2) - MapX(bx - pw / 2)) / pw; // local magnification
     float cx = MapX(bx);
-    float hover = EaseOut(m.hover), lift = EaseOut(m.lift);
+    float hover = motion::EaseOut(m.hover), lift = motion::EaseOut(m.lift);
 
     // Plate (only without magnification): hover, press and drag feedback.
     // Its corners are concentric with the bar's.
@@ -537,8 +529,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
     };
     winrt::com_ptr<ID2D1Factory> factory;
     d2d->GetFactory(factory.put());
-    winrt::com_ptr<ID2D1StrokeStyle> round;
-    factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
+    ID2D1StrokeStyle* round = RoundStroke(d2d);
     constexpr float kDeg = 3.14159265f / 180.f;
     // An arc from `a0` clockwise over `sweep` degrees (0° = right, 90° = down).
     auto arc = [&](float ox, float oy, float rad, float a0, float sweep, D2D1_COLOR_F c, float width) {
@@ -555,7 +546,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
         sink->EndFigure(D2D1_FIGURE_END_OPEN);
         sink->Close();
         brush->SetColor(c);
-        d2d->DrawGeometry(g.get(), brush, width, round.get());
+        d2d->DrawGeometry(g.get(), brush, width, round);
     };
     // The connection: the Wi-Fi fan (a dot and three arcs, lit by the signal),
     // the wired glyph, or a faint fan when offline. `size` is the fan's height.

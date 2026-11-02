@@ -5,6 +5,7 @@
 // hidden-icons window as a fallback.
 #pragma once
 
+#include "motion.h"
 #include "shell/tray_model.h"
 #include "ui/surface.h"
 
@@ -64,7 +65,7 @@ private:
     float radius_ = 30;
     ULONGLONG lastClosed_ = 0;
     bool private_ = false;
-    std::map<std::wstring, std::pair<float, double>> hoverAnim_;
+    std::map<std::wstring, motion::Follow> hoverAnim_;
     double openedMs_ = 0;
     std::wstring rippleId_;
     float rippleX_ = 0, rippleY_ = 0;

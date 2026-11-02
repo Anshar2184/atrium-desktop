@@ -81,7 +81,8 @@ public sealed partial class MainWindow : Window
         ("02 · SHAPE", "形状", "玻璃栏的轮廓与位置：圆角、尺寸与间距。"),
         ("03 · PINNED", "固定的应用", "拖动卡片排序，决定它们在玻璃栏上的先后。"),
         ("04 · CONTENT", "内容", "栏上显示什么、文字如何适应背景，以及通知。"),
-        ("05 · ABOUT", "关于", "一条悬浮在桌面底部的玻璃任务栏。"),
+        ("05 · DESIGN", "设计规范", "排版、圆角、动效与尺寸：每个数值都取自 Atrium 的代码。"),
+        ("06 · ABOUT", "关于", "一条悬浮在桌面底部的玻璃任务栏。"),
     };
 
     private readonly CoreClient _client = new();
@@ -112,7 +113,7 @@ public sealed partial class MainWindow : Window
         }
         AppWindow.Closing += OnClosing;
 
-        _pages = new FrameworkElement[] { PageMaterial, PageShape, PagePins, PageContent, PageAbout };
+        _pages = new FrameworkElement[] { PageMaterial, PageShape, PagePins, PageContent, PageDesign, PageAbout };
         BuildCards();
         InitPins();
         InitHero();
@@ -135,6 +136,7 @@ public sealed partial class MainWindow : Window
     {
         for (int i = 0; i < _pages.Length; i++)
             _pages[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+        if (_pages[index] == PageDesign) BuildDesignPage();
         var info = PageInfo[index];
         HeaderOverline.Text = info.Overline;
         HeaderTitle.Text = info.Title;
@@ -545,13 +547,15 @@ public sealed partial class MainWindow : Window
 
     private async Task<bool> SaveAsync()
     {
-        var error = await _client.CommitAsync(_current.Clone());
+        // What is saved is this snapshot: edits made while it is on its way stay unsaved.
+        var sent = _current.Clone();
+        var error = await _client.CommitAsync(sent.Clone());
         if (error != null)
         {
             ShowMessage(InfoBarSeverity.Error, "保存失败", error);
             return false;
         }
-        _saved = _current.Clone();
+        _saved = sent;
         Status.IsOpen = false;
         UpdateButtons();
         FlashSaved();

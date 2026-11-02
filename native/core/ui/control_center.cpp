@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "motion.h"
 #include "render/wifi_glyph.h"
 
 #include <shellapi.h>
@@ -46,12 +47,6 @@ struct AudioRead {
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
-float Ease(float t)
-{
-    t = std::clamp(t, 0.f, 1.f);
-    return 1 - (1 - t) * (1 - t) * (1 - t);
-}
-
 void OpenUri(const wchar_t* uri) { ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL); }
 
 // Win+K: the system's casting panel (a public shortcut, D11).
@@ -88,7 +83,7 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
 {
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
-    surface_.onMargin = [this] { Close(); };
+    surface_.onDismiss = [this] { Close(); };
     wchar_t privacy[8] = {};
     private_ = GetEnvironmentVariableW(L"ATRIUM_PRIVACY", privacy, 8) && privacy[0] == L'1';
     ReadRadios(false); // the brightness (WMI is slow) before the first opening
@@ -277,14 +272,9 @@ void ControlCenter::ReadMode()
 
 float ControlCenter::Hover(Canvas& c, const std::wstring& id, bool on)
 {
-    auto& [v, last] = hoverAnim_[id];
-    double dt = last > 0 ? std::clamp(c.now - last, 0.0, 100.0) : 0;
-    last = c.now;
-    float target = on ? 1.f : 0.f;
-    v += (target - v) * (1 - std::exp(-float(dt) / 1000.f * (on ? 20.f : 11.f)));
-    if (std::fabs(target - v) < 0.01f)
-        v = target;
-    else
+    auto& f = hoverAnim_[id];
+    float v = f.Step(on, c.now);
+    if (f.moving)
         c.Continue();
     return v;
 }
@@ -321,9 +311,9 @@ void ControlCenter::Paint(Canvas& c)
         toH_ = target;
         heightMs_ = c.now;
     }
-    const float he = heightMs_ > 0 ? Ease(float((c.now - heightMs_) / kPageMs)) : 1.f;
+    const float he = heightMs_ > 0 ? motion::EaseOut(float((c.now - heightMs_) / kPageMs)) : 1.f;
     shownH_ = fromH_ + (toH_ - fromH_) * he;
-    const float e = pageDir_ ? Ease(float((c.now - pageMs_) / kPageMs)) : 1.f;
+    const float e = pageDir_ ? motion::EaseOut(float((c.now - pageMs_) / kPageMs)) : 1.f;
     if (he < 1 || e < 1)
         c.Continue();
     const bool morph = e < 1 && fromPage_ != page_ && (fromPage_ == Page::Main || page_ == Page::Main);
@@ -364,12 +354,12 @@ void ControlCenter::Paint(Canvas& c)
     c.Clip(card);
     if (morph) {
         // The old page goes quickly; the new one comes once it has.
-        c.BeginGroup(1 - Ease(std::min(1.f, e / 0.4f)), 1, kW / 2, card.top, -float(pageDir_) * 18 * e, card.top);
+        c.BeginGroup(1 - motion::EaseOut(std::min(1.f, e / 0.4f)), 1, kW / 2, card.top, -float(pageDir_) * 18 * e, card.top);
         PaintPage(c, t, fromPage_);
         c.EndGroup();
     }
     hits_.clear();
-    float in = morph ? Ease(std::clamp((e - 0.18f) / 0.82f, 0.f, 1.f)) : e;
+    float in = morph ? motion::EaseOut(std::clamp((e - 0.18f) / 0.82f, 0.f, 1.f)) : e;
     c.BeginGroup(in, 1, kW / 2, card.top, float(pageDir_) * 18 * (1 - e), card.top);
     PaintPage(c, t, page_);
     c.EndGroup();

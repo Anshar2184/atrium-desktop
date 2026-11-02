@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "log.h"
+#include "motion.h"
 #include "render/wifi_glyph.h"
 
 #include <imm.h>
@@ -37,18 +38,6 @@ constexpr double kStageMs = 260, kStaggerMs = 12, kRippleMs = 520, kPowerMs = 22
 
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 bool In(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
-float Ease(float t)
-{
-    t = std::clamp(t, 0.f, 1.f);
-    return 1 - (1 - t) * (1 - t) * (1 - t);
-}
-// Ease out with a slight overshoot.
-float EaseBack(float t)
-{
-    t = std::clamp(t, 0.f, 1.f);
-    const float c1 = 1.5f, c3 = c1 + 1;
-    return 1 + c3 * std::pow(t - 1, 3.f) + c1 * std::pow(t - 1, 2.f);
-}
 
 } // namespace
 
@@ -57,7 +46,7 @@ StartMenu::StartMenu(HINSTANCE instance, TaskModel& tasks, AppCatalog& catalog)
 {
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
-    surface_.onMargin = [this] { Close(false); }; // a press next to the menu
+    surface_.onDismiss = [this] { Close(false); }; // a press next to the menu
 }
 
 float StartMenu::W() const { return float(surface_.Rect().right - surface_.Rect().left) / surface_.Scale(); }
@@ -83,7 +72,7 @@ float StartMenu::Covered(const D2D1_RECT_F& r, double now) const
     D2D1_RECT_F p = PowerRect();
     if (r.right <= p.left || r.left >= p.right || r.bottom <= p.top || r.top >= p.bottom)
         return 1;
-    return 1 - Ease(float((now - powerMs_) / (kPowerMs * 0.6)));
+    return 1 - motion::EaseOut(float((now - powerMs_) / (kPowerMs * 0.6)));
 }
 
 void StartMenu::LoadAccount()
@@ -265,15 +254,9 @@ void StartMenu::SetPage(int page)
 
 float StartMenu::Hover(Canvas& c, const std::wstring& id, bool on)
 {
-    auto& [v, last] = hoverAnim_[id];
-    double dt = last > 0 ? std::clamp(c.now - last, 0.0, 100.0) : 0;
-    last = c.now;
-    float target = on ? 1.f : 0.f;
-    float k = 1 - std::exp(-float(dt) / 1000.f * (on ? 20.f : 11.f));
-    v += (target - v) * k;
-    if (std::fabs(target - v) < 0.01f)
-        v = target;
-    else
+    auto& f = hoverAnim_[id];
+    float v = f.Step(on, c.now);
+    if (f.moving)
         c.Continue();
     return v;
 }
@@ -286,7 +269,7 @@ void StartMenu::Paint(Canvas& c)
     float dt = lastPaint_ > 0 ? float(std::clamp(now - lastPaint_, 0.0, 100.0)) : 16.f;
     lastPaint_ = now;
     auto glide = [&](float& v, float target, float rate, float eps) {
-        v += (target - v) * (1 - std::exp(-dt / 1000.f * rate));
+        v = motion::Approach(v, target, dt, rate);
         if (std::fabs(target - v) < eps)
             v = target;
         else
@@ -312,7 +295,7 @@ void StartMenu::Paint(Canvas& c)
     if (powerOpen_) {
         float e = float((now - powerMs_) / kPowerMs);
         D2D1_RECT_F card = PowerRect();
-        float grow = 0.55f + 0.45f * EaseBack(e);
+        float grow = 0.55f + 0.45f * motion::EaseOutBack(e, 1.5f);
         card.top = card.bottom - (card.bottom - card.top) * grow;
         shapes.push_back({card, 20});
         if (c.panel)
@@ -368,7 +351,7 @@ void StartMenu::PaintPins(Canvas& c, const Theme& t)
         if (x + kCellW < 0 || x > w)
             continue;
         D2D1_RECT_F r = D2D1::RectF(x, y, x + kCellW, y + kCellH);
-        float e = Ease(float((now - stageMs_ - kStaggerMs * std::min(k, 18)) / kStageMs));
+        float e = motion::EaseOut(float((now - stageMs_ - kStaggerMs * std::min(k, 18)) / kStageMs));
         if (e < 1)
             c.Continue();
         float shown = Covered(r, now);
@@ -460,7 +443,7 @@ void StartMenu::PaintResults(Canvas& c, const Theme& t)
         if (y + kRowH < kListTop || y > kListBottom)
             continue;
         D2D1_RECT_F r = D2D1::RectF(16, y, w - 16, y + kRowH);
-        float e = Ease(float((now - stageMs_ - kStaggerMs * std::min(shown++, 8)) / kStageMs));
+        float e = motion::EaseOut(float((now - stageMs_ - kStaggerMs * std::min(shown++, 8)) / kStageMs));
         if (e < 1)
             c.Continue();
         float visible = Covered(r, now);
@@ -580,7 +563,7 @@ void StartMenu::PaintPower(Canvas& c, const Theme& t)
     float e = float((c.now - powerMs_) / kPowerMs);
     if (e < 1)
         c.Continue();
-    c.BeginGroup(Ease(e * 1.3f), 0.92f + 0.08f * EaseBack(e), card.right - 22, card.bottom);
+    c.BeginGroup(motion::EaseOut(e * 1.3f), 0.92f + 0.08f * motion::EaseOutBack(e, 1.5f), card.right - 22, card.bottom);
     static const wchar_t* const kGlyphs[] = {L"\uE708", L"\uE72C", L"\uE7E8", L"\uE72E"};
     static const wchar_t* const kNames[] = {L"睡眠", L"重启", L"关机", L"锁定"};
     for (int i = 0; i < 4; ++i) {

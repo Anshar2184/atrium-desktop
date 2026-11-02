@@ -39,7 +39,9 @@ private:
     void SetCurrent(const Settings& s);
 
     HWND host_;
-    std::mutex lock_;
+    // txn_: one change at a time, from reading the settings to writing the
+    // file (the pipe's thread and the UI thread's Modify); lock_ guards the fields.
+    std::mutex txn_, lock_;
     Settings saved_, current_;
     HANDLE quit_;
     std::thread thread_;

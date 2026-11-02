@@ -143,7 +143,9 @@ public:
     std::function<void(Canvas&)> paint;
     // Mouse messages arrive in content coordinates.
     std::function<bool(UINT, WPARAM, LPARAM, LRESULT&)> message;
-    std::function<void()> onMargin; // a press on the shadow margin, outside the content
+    // A press on the shadow margin, outside the content, or Alt+F4: the owner
+    // closes (none: Alt+F4 does nothing, as on a widget).
+    std::function<void()> onDismiss;
     std::function<void()> onReady;  // the glass is on screen (or the plain panel stands in)
 
     // The bar draws the glass layers; development screenshots keep popups capturable.
@@ -242,6 +244,7 @@ private:
     static std::shared_ptr<Shared> SharedDevice();
     std::shared_ptr<Shared> shared_;
     winrt::com_ptr<IDXGISwapChain1> swap_;
+    winrt::com_ptr<ID2D1Bitmap1> backTarget_; // the back buffer for D2D (buffer 0 is always the one to draw in)
     winrt::com_ptr<IDCompositionTarget> target_;
     winrt::com_ptr<IDCompositionVisual> visual_;
     winrt::com_ptr<ID2D1DeviceContext> d2d_;

@@ -23,6 +23,7 @@ struct CatalogApp {
     std::wstring id;      // parsing name inside AppsFolder (AUMID or known-folder path), or a shortcut's full path
     std::wstring aumid;   // System.AppUserModel.ID, may be empty
     std::wstring target;  // link target exe, may be empty
+    std::wstring args;    // the link's arguments (a browser's --app=..., a profile)
 };
 
 class AppCatalog {

@@ -9,6 +9,7 @@
 // Atrium; only the system's dialogs and settings pages are left to Windows.
 #pragma once
 
+#include "motion.h"
 #include "shell/audio_devices.h"
 #include "shell/projection.h"
 #include "shell/radios.h"
@@ -113,7 +114,7 @@ private:
     float radius_ = 30, barH_ = 60;
     ULONGLONG lastClosed_ = 0;
     bool private_ = false;
-    std::map<std::wstring, std::pair<float, double>> hoverAnim_;
+    std::map<std::wstring, motion::Follow> hoverAnim_;
     int brightPending_ = -1; // a brightness the worker has yet to set
     bool brightBusy_ = false;
     // Sound output page.

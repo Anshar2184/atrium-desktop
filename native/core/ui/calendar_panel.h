@@ -5,6 +5,7 @@
 // lunar calendar comes from Windows' ICU.
 #pragma once
 
+#include "motion.h"
 #include "shell/lunar.h"
 #include "ui/surface.h"
 
@@ -63,7 +64,7 @@ private:
     RECT anchor_{}, bar_{};
     float radius_ = 30, barH_ = 60;
     ULONGLONG lastClosed_ = 0;
-    std::map<std::wstring, std::pair<float, double>> hoverAnim_;
+    std::map<std::wstring, motion::Follow> hoverAnim_;
     double monthMs_ = 0;
     int monthDir_ = 0;
 };

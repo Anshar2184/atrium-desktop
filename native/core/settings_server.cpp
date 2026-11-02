@@ -85,6 +85,7 @@ Settings SettingsServer::Current()
 
 bool SettingsServer::Modify(const std::function<void(Settings&)>& change)
 {
+    std::lock_guard t(txn_);
     Settings saved, current;
     {
         std::lock_guard g(lock_);
@@ -135,6 +136,7 @@ void SettingsServer::Run()
         CloseHandle(pipe);
 
         // A client that leaves without committing gets its preview reverted.
+        std::lock_guard t(txn_);
         Settings saved, current;
         {
             std::lock_guard g(lock_);
@@ -205,6 +207,7 @@ std::string SettingsServer::Handle(const std::string& request)
         return Reply(L"error", L"malformed request");
     std::wstring op(o.GetNamedString(L"op", L""));
 
+    std::lock_guard t(txn_);
     Settings saved, current;
     {
         std::lock_guard g(lock_);

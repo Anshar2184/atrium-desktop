@@ -3,6 +3,7 @@
 #include "compare_cs.h"
 #include "glass_ps.h"
 #include "glass_vs.h"
+#include "../motion.h"
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,23 @@ void EaseOut(IDCompositionAnimation* a, double begin, double t, float from, floa
     a->AddCubic(begin, from, float(3 * d / t), float(-3 * d / (t * t)), float(d / (t * t * t)));
 }
 
+// `spring` from `from` (at rest) to `to` as `segments` cubics over `length`
+// seconds: each matches the spring's position and velocity at both of its
+// ends (Hermite), so the compositor plays the spring itself, off our threads.
+void SpringTo(IDCompositionAnimation* a, const motion::Spring& spring, float from, float to, double length, int segments)
+{
+    float x = from, v = 0;
+    const float h = float(length / segments);
+    for (int i = 0; i < segments; ++i) {
+        float x1 = x, v1 = v;
+        spring.Step(x1, v1, to, h);
+        a->AddCubic(i * double(h), x, v, (3 * (x1 - x) / h - 2 * v - v1) / h, (2 * (x - x1) / h + v + v1) / (h * h));
+        x = x1;
+        v = v1;
+    }
+    a->End(length, to);
+}
+
 } // namespace
 
 void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool open, float cx, float cy)
@@ -33,9 +51,7 @@ void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool op
         FAILED(device->CreateAnimation(o.put())) || FAILED(device->CreateEffectGroup(fx.put())))
         return;
     if (open) {
-        EaseOut(s.get(), 0, 0.20, 0.92f, 1.012f);
-        EaseOut(s.get(), 0.20, 0.14, 1.012f, 1.0f);
-        s->End(0.34, 1.0f);
+        SpringTo(s.get(), motion::kPop, 0.92f, 1.0f, 0.6, 12); // a hint past full size, then rest
         EaseOut(o.get(), 0, 0.16, 0.0f, 1.0f);
         o->End(0.16, 1.0f);
     } else {
@@ -186,6 +202,8 @@ void GlassRenderer::Resize(int width, int height)
     h_ = height;
     if (d2d_)
         d2d_->SetTarget(nullptr);
+    rtv_ = nullptr;
+    overlayTarget_ = nullptr;
     Check(swap_->ResizeBuffers(2, UINT(w_), UINT(h_), DXGI_FORMAT_B8G8R8A8_UNORM, 0));
     CreateSizeDependent();
 }
@@ -298,11 +316,12 @@ bool GlassRenderer::Present(const GlassParams& params, const std::function<void(
 bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay)
 {
     auto* ctx = gpu_.context.get();
-    winrt::com_ptr<ID3D11Texture2D> back;
-    Check(swap_->GetBuffer(0, IID_PPV_ARGS(back.put())));
-    winrt::com_ptr<ID3D11RenderTargetView> rtv;
-    Check(gpu_.device->CreateRenderTargetView(back.get(), nullptr, rtv.put()));
-    ID3D11RenderTargetView* rt = rtv.get();
+    if (!rtv_) {
+        winrt::com_ptr<ID3D11Texture2D> back;
+        Check(swap_->GetBuffer(0, IID_PPV_ARGS(back.put())));
+        Check(gpu_.device->CreateRenderTargetView(back.get(), nullptr, rtv_.put()));
+    }
+    ID3D11RenderTargetView* rt = rtv_.get();
     const float clear[4] = {0, 0, 0, 0};
     ctx->ClearRenderTargetView(rt, clear);
     ctx->OMSetRenderTargets(1, &rt, nullptr);
@@ -356,12 +375,14 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
 
     if (overlay && d2d_) {
-        auto surface = back.as<IDXGISurface>();
-        D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                                                             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-        winrt::com_ptr<ID2D1Bitmap1> target;
-        Check(d2d_->CreateBitmapFromDxgiSurface(surface.get(), &bp, target.put()));
-        d2d_->SetTarget(target.get());
+        if (!overlayTarget_) {
+            winrt::com_ptr<IDXGISurface> surface;
+            Check(swap_->GetBuffer(0, IID_PPV_ARGS(surface.put())));
+            D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                                                                 D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            Check(d2d_->CreateBitmapFromDxgiSurface(surface.get(), &bp, overlayTarget_.put()));
+        }
+        d2d_->SetTarget(overlayTarget_.get());
         d2d_->BeginDraw();
         d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
         overlay(d2d_.get());

@@ -93,6 +93,9 @@ private:
     bool enabled_ = false;
     HMONITOR monitor_ = nullptr;
     std::vector<std::unique_ptr<Widget>> widgets_;
+    // Saved widgets this screen has no room for (JSON): kept in the layout
+    // file, with their notes, until a larger screen shows them again.
+    std::vector<std::wstring> unplaced_;
     bool raised_ = false; // every app minimised: over the desktop
     WidgetWorld world_;
     ChineseCalendar lunar_;

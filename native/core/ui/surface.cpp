@@ -4,6 +4,7 @@
 #include "render/capture.h"
 #include "log.h"
 #include "render/glass_renderer.h"
+#include "render/round_stroke.h"
 #include "render/wifi_glyph.h"
 
 #include <dwmapi.h>
@@ -114,13 +115,6 @@ private:
 uint32_t g_tint = 0xFFFFFF;
 double g_transparency = 0.95;
 
-float MonitorScale(RECT r)
-{
-    HMONITOR mon = MonitorFromRect(&r, MONITOR_DEFAULTTOPRIMARY);
-    UINT x = 96, y = 96;
-    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &x, &y);
-    return float(x) / 96.f;
-}
 
 } // namespace
 
@@ -238,11 +232,7 @@ void Canvas::Capsule(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, flo
 {
     D2D1_COLOR_F unused;
     c = InkAt(D2D1::RectF(std::min(x0, x1), std::min(y0, y1), std::max(x0, x1) + 1, std::max(y0, y1) + 1), c, unused);
-    winrt::com_ptr<ID2D1Factory> f;
-    d2d_->GetFactory(f.put());
-    winrt::com_ptr<ID2D1StrokeStyle> round;
-    f->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
-    d2d_->DrawLine(D2D1::Point2F(x0 * scale, y0 * scale), D2D1::Point2F(x1 * scale, y1 * scale), Brush(c), width * scale, round.get());
+    d2d_->DrawLine(D2D1::Point2F(x0 * scale, y0 * scale), D2D1::Point2F(x1 * scale, y1 * scale), Brush(c), width * scale, RoundStroke(d2d_));
 }
 
 void Canvas::Circle(float cx, float cy, float radius, D2D1_COLOR_F c)
@@ -271,9 +261,7 @@ void Canvas::Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLO
                                   D2D1_SWEEP_DIRECTION_CLOCKWISE, a1 - a0 > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
     sink->EndFigure(D2D1_FIGURE_END_OPEN);
     sink->Close();
-    winrt::com_ptr<ID2D1StrokeStyle> round;
-    f->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND), nullptr, 0, round.put());
-    d2d_->DrawGeometry(g.get(), Brush(c), width * scale, round.get());
+    d2d_->DrawGeometry(g.get(), Brush(c), width * scale, RoundStroke(d2d_));
 }
 
 IDWriteTextFormat* Canvas::Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, int align, bool wrap)
@@ -715,8 +703,8 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         int x = GET_X_LPARAM(l) - inset, y = GET_Y_LPARAM(l) - inset;
         bool outside = x < 0 || y < 0 || x >= self->rect_.right - self->rect_.left || y >= self->rect_.bottom - self->rect_.top;
         if (outside && (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)) {
-            if (self->onMargin)
-                self->onMargin();
+            if (self->onDismiss)
+                self->onDismiss();
             return 0;
         }
         if (self->hiding_)
@@ -741,7 +729,8 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
         self->Invalidate();
         return 0;
     case WM_CLOSE:
-        self->Hide();
+        if (self->onDismiss)
+            self->onDismiss();
         return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -750,7 +739,7 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
 void Surface::Place(RECT rect)
 {
     rect_ = rect;
-    scale_ = MonitorScale(rect);
+    scale_ = PopupScale(rect);
     int inset = InsetPx();
     window_ = RECT{rect.left - inset, rect.top - inset, rect.right + inset, rect.bottom + inset};
     SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top,
@@ -879,6 +868,7 @@ void Surface::ResetDevice()
         target_->SetRoot(nullptr);
     visual_ = nullptr;
     target_ = nullptr;
+    backTarget_ = nullptr;
     swap_ = nullptr;
     brush_ = nullptr;
     bitmaps_.clear();
@@ -927,6 +917,7 @@ void Surface::Paint()
     int w = std::max(1, int(window_.right - window_.left)), h = std::max(1, int(window_.bottom - window_.top));
     if (w != bufW_ || h != bufH_) {
         d2d_->SetTarget(nullptr);
+        backTarget_ = nullptr;
         if (FAILED(swap_->ResizeBuffers(2, UINT(w), UINT(h), DXGI_FORMAT_B8G8R8A8_UNORM, 0))) {
             ResetDevice();
             return;
@@ -934,17 +925,18 @@ void Surface::Paint()
         bufW_ = w;
         bufH_ = h;
     }
-    winrt::com_ptr<IDXGISurface> back;
-    winrt::com_ptr<ID2D1Bitmap1> target;
-    D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                                                         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-    if (FAILED(swap_->GetBuffer(0, IID_PPV_ARGS(back.put()))) || FAILED(d2d_->CreateBitmapFromDxgiSurface(back.get(), &bp, target.put()))) {
-        ResetDevice();
-        return;
+    if (!backTarget_) {
+        winrt::com_ptr<IDXGISurface> back;
+        D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                                                             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        if (FAILED(swap_->GetBuffer(0, IID_PPV_ARGS(back.put()))) || FAILED(d2d_->CreateBitmapFromDxgiSurface(back.get(), &bp, backTarget_.put()))) {
+            ResetDevice();
+            return;
+        }
     }
     LARGE_INTEGER t0, t1, f;
     QueryPerformanceCounter(&t0);
-    d2d_->SetTarget(target.get());
+    d2d_->SetTarget(backTarget_.get());
     d2d_->BeginDraw();
     d2d_->Clear(D2D1::ColorF(0, 0, 0, 0));
     d2d_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);

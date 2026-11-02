@@ -98,6 +98,10 @@ private:
     Gpu gpu_;
     int w_, h_;
     winrt::com_ptr<IDXGISwapChain1> swap_;
+    // Views of the back buffer (buffer 0 is always the one to draw in): made
+    // once, dropped before the buffers are resized.
+    winrt::com_ptr<ID3D11RenderTargetView> rtv_;
+    winrt::com_ptr<ID2D1Bitmap1> overlayTarget_;
     winrt::com_ptr<IDCompositionDevice> dcomp_;
     winrt::com_ptr<IDCompositionTarget> target_;
     winrt::com_ptr<IDCompositionVisual> visual_;
