@@ -8,7 +8,9 @@
 //
 // Stacking (D25): both windows are topmost and are raised again when another
 // window covers them (foreground changes, a move ends, a 1 s check); they stay
-// below a revealed system taskbar and hide while a full-screen app is in front.
+// below a revealed system taskbar. While a maximized or full-screen app is in
+// front the bar slides down off the screen and comes up again while the
+// pointer is at the screen's bottom edge below it (auto-hide).
 // The render thread also draws the glass layer of Atrium's popups.
 #pragma once
 
@@ -92,6 +94,8 @@ public:
     std::function<bool(const std::wstring& key)> canOpenFiles;
     std::function<void(const std::wstring& key, const std::vector<std::wstring>& files)> onDropFiles;
     std::function<void()> onCloseRequest; // WM_CLOSE on a bar window (taskkill, logoff)
+    // True while a popup opened from the bar is open: an auto-hidden bar stays up.
+    std::function<bool()> keepShown;
 
 private:
     struct Snapshot {
@@ -136,7 +140,10 @@ private:
     void SetRegion(bool extended); // input region: the shape, plus the room above it while magnified
     static void CALLBACK WinEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD thread, DWORD time);
     void GuardStacking(const wchar_t* why);
-    bool ForegroundIsFullscreen() const;
+    bool ForegroundCoversScreen() const;
+    void UpdateCover();    // the foreground app is maximized or full screen on the bar's monitor
+    void UpdateAutoHide(); // tucks the bar away or brings it up
+    void WatchPointer();   // while covered: the screen's bottom edge brings the bar up, leaving it lets it go
     void Raise();
 
     bool debugCapturable_ = false;
@@ -183,8 +190,12 @@ private:
     std::map<std::wstring, std::pair<double, int>> bounces_; // key -> start (ClockMs), hops
     std::map<HWND, GlassPanel> panels_;
     // Stacking guard.
-    HWINEVENTHOOK hooks_[2]{};
-    bool fullscreen_ = false;
+    HWINEVENTHOOK hooks_[3]{};
+    // Auto-hide: `covered_` by a maximized or full-screen app, `revealed_` by
+    // the pointer; `tucked_` slides the bar off the screen, after which its
+    // windows are hidden (`slidOut_`).
+    bool covered_ = false, revealed_ = false, tucked_ = false, slidOut_ = false;
+    ULONGLONG leftAt_ = 0; // when the pointer left a revealed bar
     std::map<HWND, std::pair<int, ULONGLONG>> raises_; // windows we were raised over: count, first time
     HWND lastCover_ = nullptr;
     std::atomic<bool> frameLog_{false}; // the render thread logs its next frame

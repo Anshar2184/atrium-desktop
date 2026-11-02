@@ -46,6 +46,10 @@ constexpr UINT kFileHoverDelayMs = 600;
 constexpr UINT_PTR kGuardTimer = 3;
 constexpr UINT kGuardMs = 1000;
 constexpr UINT kGuardFastMs = 150; // while below a system taskbar the user is using
+constexpr UINT_PTR kSlideTimer = 4;   // the slide out is over: hide the windows
+constexpr UINT_PTR kPointerTimer = 5; // while covered: watch the pointer
+constexpr UINT kPointerMs = 50;
+constexpr DWORD kLeaveMs = 500;       // a revealed bar goes down this long after the pointer left it
 
 Bar* g_guard = nullptr; // the bar whose stacking the WinEvent hooks look after
 
@@ -311,6 +315,9 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, bool debugLayout) : debugCapt
                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     hooks_[1] = SetWinEventHook(EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND, nullptr, &Bar::WinEvent, 0, 0,
                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    // Maximizing, restoring and entering full screen move the window without a move-size loop.
+    hooks_[2] = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, &Bar::WinEvent, 0, 0,
+                                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     SetTimer(input_, kGuardTimer, kGuardMs, nullptr);
 
     render_ = std::thread([this] { RenderThread(); });
@@ -447,6 +454,18 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         if (w == kGuardTimer) {
             GuardStacking(nullptr);
+            return 0;
+        }
+        if (w == kSlideTimer) {
+            KillTimer(h, kSlideTimer);
+            if (tucked_ && !slidOut_) {
+                slidOut_ = true;
+                Relayout(); // hides the windows; the render thread rests
+            }
+            return 0;
+        }
+        if (w == kPointerTimer) {
+            WatchPointer();
             return 0;
         }
         break;
@@ -801,6 +820,8 @@ void Bar::Relayout()
     scene.scale = s;
     scene.bar = D2D1::RectF(float(insetX), float(insetTop), float(insetX + barW), float(insetTop + barH));
     scene.windowW = float(winW);
+    scene.windowH = float(winH);
+    scene.tucked = tucked_;
     scene.plateRadius = float(std::clamp(radius - v, Px(3, s), plate / 2));
     scene.hoverKey = dragging_ ? std::wstring() : scene_.hoverKey;
     scene.pressedKey = scene_.pressedKey;
@@ -920,7 +941,7 @@ void Bar::Relayout()
     scene_ = std::move(scene);
 
     // The window only changes when the bar's size does (not on every drag move).
-    const bool shown = visible_ && !fullscreen_;
+    const bool shown = visible_ && !slidOut_;
     RECT win{x, y, x + winW, y + winH};
     if (!dragging_ || !EqualRect(&win, &applied_) || shown != appliedVisible_) {
         SetWindowPos(visual_, HWND_TOPMOST, x, y, winW, winH, SWP_NOACTIVATE | (shown ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
@@ -989,8 +1010,8 @@ void Bar::LogState()
         if (pid != GetCurrentProcessId() && GetWindowRect(w, &r) && IntersectRect(&overlap, &r, &bar) && !IgnoredCover(w) && w != tray)
             ++overlapping;
     }
-    Log(L"bar: state visible=%d fullscreen=%d topmost=%d shown=%d coveredBy=%d trayAbove=%d bar=%ld,%ld,%ld,%ld", visible_ ? 1 : 0,
-        fullscreen_ ? 1 : 0, (GetWindowLongW(visual_, GWL_EXSTYLE) & WS_EX_TOPMOST) ? 1 : 0, IsWindowVisible(visual_) ? 1 : 0, overlapping,
+    Log(L"bar: state visible=%d tucked=%d topmost=%d shown=%d coveredBy=%d trayAbove=%d bar=%ld,%ld,%ld,%ld", visible_ ? 1 : 0,
+        tucked_ ? 1 : 0, (GetWindowLongW(visual_, GWL_EXSTYLE) & WS_EX_TOPMOST) ? 1 : 0, IsWindowVisible(visual_) ? 1 : 0, overlapping,
         trayAbove ? 1 : 0, bar.left, bar.top, bar.right, bar.bottom);
     frameLog_ = true;
     SetEvent(wake_);
@@ -1018,16 +1039,22 @@ void Bar::SetPanel(const GlassPanel& panel)
     Publish();
 }
 
-void CALLBACK Bar::WinEvent(HWINEVENTHOOK, DWORD event, HWND, LONG idObject, LONG, DWORD, DWORD)
+void CALLBACK Bar::WinEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD)
 {
-    if (g_guard && idObject == OBJID_WINDOW)
-        g_guard->GuardStacking(event == EVENT_SYSTEM_FOREGROUND ? L"foreground" : L"move");
+    if (!g_guard || idObject != OBJID_WINDOW || idChild != CHILDID_SELF)
+        return;
+    if (event == EVENT_OBJECT_LOCATIONCHANGE) { // only the foreground app's own window matters
+        if (hwnd == GetForegroundWindow())
+            g_guard->UpdateCover();
+        return;
+    }
+    g_guard->GuardStacking(event == EVENT_SYSTEM_FOREGROUND ? L"foreground" : L"move");
 }
 
-// A full-screen app in front on the bar's monitor: covers the whole monitor
-// and is neither maximized (with an auto-hidden taskbar maximized windows
-// cover it too) nor the desktop.
-bool Bar::ForegroundIsFullscreen() const
+// The app in front fills the bar's monitor: maximized there (the system
+// taskbar auto-hides, so maximized windows reach the bottom too) or covering
+// the whole monitor (full screen). Never the desktop or Atrium itself.
+bool Bar::ForegroundCoversScreen() const
 {
     HWND fg = GetForegroundWindow();
     if (!fg)
@@ -1035,7 +1062,7 @@ bool Bar::ForegroundIsFullscreen() const
     fg = GetAncestor(fg, GA_ROOT);
     DWORD pid = 0;
     GetWindowThreadProcessId(fg, &pid);
-    if (pid == GetCurrentProcessId() || IsZoomed(fg) || IsIconic(fg) || !IsWindowVisible(fg))
+    if (pid == GetCurrentProcessId() || IsIconic(fg) || !IsWindowVisible(fg))
         return false;
     wchar_t cls[64] = {};
     GetClassNameW(fg, cls, 64);
@@ -1046,9 +1073,91 @@ bool Bar::ForegroundIsFullscreen() const
     DwmGetWindowAttribute(fg, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
     if (cloaked || MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST) != hmonitor_)
         return false;
+    if (IsZoomed(fg))
+        return true;
     RECT r{};
     GetWindowRect(fg, &r);
     return r.left <= monitor_.left && r.top <= monitor_.top && r.right >= monitor_.right && r.bottom >= monitor_.bottom;
+}
+
+void Bar::UpdateCover()
+{
+    bool covered = ForegroundCoversScreen();
+    if (covered == covered_)
+        return;
+    covered_ = covered;
+    // Maximizing with the pointer on the bar keeps it up until the pointer leaves.
+    POINT p{};
+    GetCursorPos(&p);
+    RECT bar = BarRect(), zone{bar.left, window_.top, bar.right, monitor_.bottom};
+    revealed_ = covered && !slidOut_ && PtInRect(&zone, p);
+    leftAt_ = 0;
+    wchar_t cls[64] = {};
+    GetClassNameW(GetForegroundWindow(), cls, 64);
+    Log(L"bar: %s (%s)", covered ? L"a maximized or full-screen app is in front: auto-hide" : L"no maximized or full-screen app in front", cls);
+    if (covered)
+        SetTimer(input_, kPointerTimer, kPointerMs, nullptr);
+    else
+        KillTimer(input_, kPointerTimer);
+    UpdateAutoHide();
+}
+
+void Bar::UpdateAutoHide()
+{
+    bool tuck = covered_ && !revealed_ && visible_;
+    if (tuck == tucked_)
+        return;
+    tucked_ = tuck;
+    scene_.tucked = tuck;
+    if (tuck) {
+        HideTooltip();
+        SetRegion(false);
+        // The painter's slide out takes kSlideOutMs; then the windows go.
+        SetTimer(input_, kSlideTimer, UINT(BarPainter::kSlideOutMs) + 60, nullptr);
+        Publish();
+        return;
+    }
+    KillTimer(input_, kSlideTimer);
+    if (slidOut_) {
+        slidOut_ = false;
+        Relayout(); // shows the windows; the painter slides the bar up
+    } else {
+        Publish();
+    }
+    Raise();
+}
+
+void Bar::WatchPointer()
+{
+    if (!covered_) {
+        KillTimer(input_, kPointerTimer);
+        return;
+    }
+    POINT p{};
+    GetCursorPos(&p);
+    RECT bar = BarRect();
+    if (!revealed_) {
+        // The bottom edge of the screen, below the bar.
+        if (p.y >= monitor_.bottom - 2 && p.x >= bar.left && p.x < bar.right) {
+            revealed_ = true;
+            leftAt_ = 0;
+            UpdateAutoHide();
+        }
+        return;
+    }
+    RECT zone{bar.left, window_.top, bar.right, monitor_.bottom};
+    if (PtInRect(&zone, p) || dragging_ || (keepShown && keepShown())) {
+        leftAt_ = 0;
+        return;
+    }
+    ULONGLONG now = GetTickCount64();
+    if (!leftAt_)
+        leftAt_ = now;
+    else if (now - leftAt_ >= kLeaveMs) {
+        revealed_ = false;
+        leftAt_ = 0;
+        UpdateAutoHide();
+    }
 }
 
 void Bar::Raise()
@@ -1066,17 +1175,8 @@ void Bar::Raise()
 // wins after a few rounds, so two always-on-top windows never fight.
 void Bar::GuardStacking(const wchar_t* why)
 {
-    bool full = ForegroundIsFullscreen();
-    if (full != fullscreen_) {
-        fullscreen_ = full;
-        Log(L"bar: %s", full ? L"hidden behind a full-screen app" : L"shown again (no full-screen app in front)");
-        if (full) {
-            HideTooltip();
-            SetRegion(false);
-        }
-        Relayout();
-    }
-    if (!visible_ || fullscreen_ || dragging_)
+    UpdateCover();
+    if (!visible_ || tucked_ || dragging_)
         return;
     RECT bar = BarRect(), r{}, overlap{}, trayRect{};
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
@@ -1091,7 +1191,7 @@ void Bar::GuardStacking(const wchar_t* why)
         GetClassNameW(fg, fgCls, 64);
         // The pointer counts on the system taskbar outside the bar (the screen's
         // bottom edge reveals it): over the bar it is meant for the bar.
-        RECT ours{bar.left, window_.top, bar.right, bar.bottom};
+        RECT ours{bar.left, window_.top, bar.right, monitor_.bottom}; // down to the edge that brings an auto-hidden bar up
         usingTray = (PtInRect(&trayRect, cur) && !PtInRect(&ours, cur)) || fg == tray || wcscmp(fgCls, L"TopLevelWindowForOverflowXamlIsland") == 0 ||
                     wcscmp(fgCls, L"Shell_TrayWnd") == 0;
     }
@@ -1295,7 +1395,7 @@ void Bar::Publish()
         snapshot_.monitor = monitor_;
         snapshot_.hmonitor = hmonitor_;
         snapshot_.scale = scale_;
-        snapshot_.visible = visible_ && !fullscreen_;
+        snapshot_.visible = visible_ && !slidOut_;
         snapshot_.panels.clear();
         for (const auto& [hwnd, p] : panels_)
             snapshot_.panels.push_back(p);

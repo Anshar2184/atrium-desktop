@@ -39,6 +39,8 @@ struct SceneItem {
 struct BarScene {
     D2D1_RECT_F bar{};         // the glass shape inside the window (its width eases to this, D27)
     float windowW = 0;         // the window's width: a new one means new coordinates (nothing slides)
+    float windowH = 0;
+    bool tucked = false;       // auto-hide: the bar slides down off the screen
     float scale = 1;
     std::vector<SceneItem> items;  // apps only (drag and drop works on these)
     std::vector<SceneItem> extras; // Atrium logo (#start), overflow (#more), tray (#tray), status (#status), notifications (#notify)
@@ -67,6 +69,7 @@ struct BarFrame {
     float rippleX = 0, rippleY = 0, rippleR = 0, rippleA = 0;
     float magnified = 0; // strength of the magnification, 0..1
     float hop = 0;       // highest launch hop, 0..1
+    float slideY = 0;    // auto-hide: how far the bar is down (px; the content and the glass move together)
 };
 
 // Ink colour per region: near-black on light glass, white on dark glass.
@@ -78,6 +81,9 @@ struct Ink {
 class BarPainter {
 public:
     BarPainter(ID2D1DeviceContext2* d2d, IDWriteFactory3* dwrite);
+    // Auto-hide: going down eases in and out; coming up decelerates with a
+    // slight overshoot.
+    static constexpr double kSlideOutMs = 300, kSlideInMs = 420;
 
     // Advances animations to `nowMs` (ClockMs); true while any animation is still moving.
     bool Animate(const BarScene& scene, double nowMs);
@@ -140,6 +146,10 @@ private:
         float volumeMix = 0;
         float fill = 0, speed = 0;
     } statusMotion_;
+    // Auto-hide: 0 up, 1 down (below 0 while overshooting on the way up).
+    float slide_ = 0, slideFrom_ = 0;
+    bool slideDown_ = false;
+    double slideStartMs_ = 0;
     BarFrame frame_;
     winrt::com_ptr<ID2D1Bitmap1> layer_;
     std::wstring layerKey_;

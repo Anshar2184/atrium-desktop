@@ -976,6 +976,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.bar->onNotifyClick = [](RECT) { g_app.notes->ToggleCenter(); };
     g_app.bar->onTrayClick = ToggleTray;
     g_app.bar->onStatusClick = ToggleControl;
+    g_app.bar->keepShown = [] {
+        return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible() ||
+               g_app.notes->CenterVisible();
+    };
     g_app.bar->onStatusWheel = [](int notches) {
         AdjustVolume(2 * notches);
         UpdateStatus();

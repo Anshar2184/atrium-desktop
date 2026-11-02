@@ -1,6 +1,7 @@
 #include "bar_painter.h"
 
 #include "wifi_glyph.h"
+#include "../log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -253,12 +254,38 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         }
     }
 
+    // Auto-hide slide.
+    if (scene.tucked != slideDown_) {
+        slideDown_ = scene.tucked;
+        slideFrom_ = slide_;
+        slideStartMs_ = nowMs;
+        Log(L"bar: slide %s", slideDown_ ? L"down" : L"up");
+    }
+    {
+        const float target = slideDown_ ? 1.f : 0.f;
+        if (slide_ != target) {
+            double length = slideDown_ ? kSlideOutMs : kSlideInMs;
+            float u = float(std::clamp((nowMs - slideStartMs_) / length, 0.0, 1.0));
+            float e;
+            if (slideDown_) {
+                e = 0.5f - 0.5f * std::cos(3.14159265f * u); // eases in and out
+            } else {
+                constexpr float c1 = 1.2f, c3 = c1 + 1; // ease-out-back: a slight overshoot
+                float v = u - 1;
+                e = 1 + c3 * v * v * v + c1 * v * v;
+            }
+            slide_ = u >= 1 ? target : slideFrom_ + (target - slideFrom_) * e;
+            moving = true;
+        }
+    }
+    frame_.slideY = slide_ * std::max(0.f, scene.windowH - scene.bar.top);
+
     // What the glass shows this frame: the stretched shape and the ripple.
     frame_.magnified = amount_;
     frame_.hop = 0;
     for (const auto& [key, m] : motion_)
         frame_.hop = std::max(frame_.hop, m.hop);
-    frame_.shape = D2D1::RectF(MapX(barL_), scene.bar.top, MapX(barR_), scene.bar.bottom);
+    frame_.shape = D2D1::RectF(MapX(barL_), scene.bar.top + frame_.slideY, MapX(barR_), scene.bar.bottom + frame_.slideY);
     frame_.rippleA = 0;
     if (scene.rippleMs > 0) {
         constexpr double kRippleMs = 720;
@@ -266,7 +293,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
         if (t >= 0 && t < kRippleMs) {
             float u = float(t / kRippleMs);
             frame_.rippleX = MapX(scene.rippleX);
-            frame_.rippleY = scene.rippleY;
+            frame_.rippleY = scene.rippleY + frame_.slideY;
             frame_.rippleR = (scene.bar.bottom - scene.bar.top) * 1.5f * EaseOut(u);
             frame_.rippleA = 0.9f * (1 - u) * (1 - u);
             moving = true;
@@ -300,7 +327,8 @@ void BarPainter::Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, 
         layerKey_ = animating ? std::wstring() : contentKey;
     }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());
-    d2d->DrawImage(layer_.get(), D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_SOURCE_OVER);
+    const D2D1_POINT_2F at = D2D1::Point2F(0, std::round(frame_.slideY));
+    d2d->DrawImage(layer_.get(), &at, nullptr, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_SOURCE_OVER);
 }
 
 void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink inks, const std::wstring& time, const std::wstring& date)

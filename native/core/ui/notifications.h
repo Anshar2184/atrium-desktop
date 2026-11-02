@@ -49,6 +49,7 @@ public:
     void Post(Notice n);
     void PanelsChanged(); // a panel opened: the cards on screen step aside
     void ToggleCenter(bool expand = false);
+    bool CenterVisible() const { return center_.surface && center_.surface->Visible(); }
     void Clear();
     void SetOptions(double timeoutSeconds, bool hideBody);
     // Corner radius (DIP), the bar's; the cards are concentric with it.

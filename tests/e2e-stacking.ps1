@@ -1,9 +1,10 @@
 ﻿<#
 .SYNOPSIS
   Stacking of the bar (D25): raised again over a topmost window that covers
-  it, hidden while a full-screen app is in front and shown when it leaves,
-  kept for maximized windows, and kept below a revealed (auto-hidden) system
-  taskbar.
+  it; auto-hide (slides away while a full-screen or maximized app is in
+  front, comes up at the screen's bottom edge below it and goes again when
+  the pointer leaves, back when the app leaves); kept below a revealed
+  (auto-hidden) system taskbar the user points at beside the bar.
 
 .DESCRIPTION
   Opens test windows of its own and clicks into them, and moves the pointer
@@ -94,7 +95,7 @@ try {
     Check "raised-over-topmost" ($overlaps -and [U]::Above($bar, $t[1])) "a topmost window opened over the bar ($($cr.l),$($cr.t),$($cr.r),$($cr.b)); the bar is above it after 2.5 s: $([U]::Above($bar, $t[1]))"
     $t[0].Kill(); Start-Sleep 0.5
 
-    # A full-screen window in front hides the bar; closing it shows the bar again.
+    # A full-screen window in front tucks the bar away; closing it brings the bar back.
     $t = TestForm "Atrium Fullscreen" "`$f.FormBorderStyle = 'None'; `$f.StartPosition = 'Manual'; `$f.Bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds; `$f.BackColor = [Drawing.Color]::Black"
     Click ([int]($sw / 2)) ([int]($sh / 3)); Start-Sleep 1.5
     $fg = [U]::GetForegroundWindow() -eq $t[1]
@@ -102,17 +103,25 @@ try {
     $t[0].Kill(); Start-Sleep 1.8
     Check "fullscreen-restores" ([U]::IsWindowVisible($bar)) "after the full-screen window closed the bar is visible: $([U]::IsWindowVisible($bar))"
 
-    # A maximized window (with a caption) keeps the bar.
+    # A maximized window tucks the bar away too; the bottom edge below the bar
+    # brings it up over the window, leaving lets it go again.
     $t = TestForm "Atrium Maximized" "`$f.WindowState = 'Maximized'"
     Click ([int]($sw / 2)) ([int]($sh / 3)); Start-Sleep 1.5
     $fg = [U]::GetForegroundWindow() -eq $t[1]
-    Check "maximized-keeps-bar" ($fg -and [U]::IsWindowVisible($bar) -and [U]::Above($bar, $t[1])) "maximized window in front: $fg; bar visible and above it: $([U]::IsWindowVisible($bar))"
-    $t[0].Kill(); Start-Sleep 0.5
+    Check "maximized-tucks" ($fg -and -not [U]::IsWindowVisible($bar)) "maximized window in front: $fg; bar visible: $([U]::IsWindowVisible($bar))"
+    MoveTo ([int](($br.l + $br.r) / 2)) ($sh - 1); Start-Sleep 0.9
+    Check "edge-reveals" ([U]::IsWindowVisible($bar) -and [U]::Above($bar, $t[1])) "pointer at the bottom edge below the bar: bar visible $([U]::IsWindowVisible($bar)), above the window $([U]::Above($bar, $t[1]))"
+    MoveTo ([int](($br.l + $br.r) / 2)) ([int](($br.t + $br.b) / 2)); Start-Sleep 1.2
+    Check "stays-while-on-bar" ([U]::IsWindowVisible($bar)) "pointer on the bar for 1.2 s: bar visible $([U]::IsWindowVisible($bar))"
+    MoveTo ([int]($sw / 2)) ([int]($sh / 3)); Start-Sleep 1.5
+    Check "leave-tucks" (-not [U]::IsWindowVisible($bar)) "pointer gone from the bar for 1.5 s: bar visible $([U]::IsWindowVisible($bar))"
+    $t[0].Kill(); Start-Sleep 1.5
+    Check "maximized-gone-restores" ([U]::IsWindowVisible($bar)) "after the maximized window closed the bar is visible: $([U]::IsWindowVisible($bar))"
 
     # An auto-hidden system taskbar revealed at the bottom edge stays in front of the bar.
     $stuck = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3" -ErrorAction SilentlyContinue).Settings
     if ($stuck -and ($stuck[8] -band 1)) {
-        MoveTo ([int]($sw / 2)) ($sh - 1); Start-Sleep 1.6
+        MoveTo ([int]($br.l / 2)) ($sh - 1); Start-Sleep 1.6 # beside the bar: below it the edge is the bar's
         $tray = [U]::FindWindow("Shell_TrayWnd", [NullString]::Value)
         $tr = New-Object U+R; [U]::GetWindowRect($tray, [ref]$tr) | Out-Null
         $revealed = $tr.t -lt $br.b
