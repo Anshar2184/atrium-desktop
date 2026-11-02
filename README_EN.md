@@ -18,7 +18,7 @@ Floating taskbar with real-time refraction · desktop widgets in one material ·
 </div>
 
 > [!NOTE]
-> **v0.9 development build.** A C++ glass taskbar that coexists with the Windows taskbar by default, or stands alone: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), Atrium's own tray panel, a monochrome ring status icon (battery and Wi-Fi; the volume while it changes) (it opens a macOS-style control centre: Wi-Fi, Bluetooth, battery, casting and projection modes, brightness, sound with the output device and per-app volume), a clock (it opens Atrium's calendar, with Chinese lunar dates), and Atrium notifications that also show Windows notifications and WeChat messages, macOS-style desktop widgets, plus a settings app with a live preview. Every popup is exactly the bar's liquid glass, and the icons swell like the macOS Dock under the pointer. By default it leaves the Windows taskbar alone; the settings can hide the Windows taskbar and the system notification banners so that only Atrium remains (undone when turned off or when Atrium exits).
+> **v0.9 development build.** A C++ glass taskbar that coexists with the Windows taskbar by default, or stands alone: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), Atrium's own tray panel, a monochrome ring status icon (battery and Wi-Fi; the volume or the brightness while it changes) (it opens a macOS-style control centre: Wi-Fi, Bluetooth, battery, casting and projection modes, brightness, sound with the output device and per-app volume), a clock (it opens Atrium's calendar, with Chinese lunar dates), and Atrium notifications that also show Windows notifications and WeChat messages, macOS-style desktop widgets, plus a settings app with a live preview. Every popup is exactly the bar's liquid glass, and the icons swell like the macOS Dock under the pointer. By default it leaves the Windows taskbar alone; the settings can hide the Windows taskbar and the system notification banners so that only Atrium remains (undone when turned off or when Atrium exits).
 
 <p align="center">
   <img src="docs/images/v04-magnify.png" alt="v0.4 taskbar: magnification" width="80%"><br>
@@ -133,7 +133,7 @@ native/core    Atrium.Core: glass bar, start menu, notifications, control centre
 settings/      settings app Atrium.Settings (C# / WinUI 3)
 tools/         build.ps1 packaging script, icon generator
 tests/         end-to-end and protocol test scripts
-docs/          current decisions, verification log, settings protocol, hand-over notes (Chinese)
+docs/          current decisions, design specification, verification log, settings protocol, hand-over notes (Chinese)
 ```
 
 The early design documents and the verification probes (`poc/`, `native/guard`) left the repository in v0.9.2; see the git history.

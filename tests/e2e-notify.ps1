@@ -27,6 +27,12 @@ public static class U {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(P p);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int a, int b, int c, int d);
+  [DllImport("user32.dll")] public static extern int GetWindowRgnBox(IntPtr h, out R r);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  public static string Title(IntPtr h) { var s = new StringBuilder(256); GetWindowText(h, s, 256); return s.ToString(); }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out R r);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
@@ -185,12 +191,18 @@ try {
     $script:children += $charmap
     Start-Sleep 1.5
     $other = $charmap.MainWindowHandle
-    FocusWindow $other
+    # Not by a click: one in its grid starts Character Map's magnifier, which keeps the mouse.
+    [U]::SwitchToThisWindow($other, $true); Start-Sleep -Milliseconds 400
     Post "PowerShell" "Build finished" "Click to switch to the app" "app:$psKey"
-    ClickAt (Spot "popup" "card:0")
+    $spot = Spot "popup" "card:0"
+    $under = New-Object U+P; $under.x = $spot[0]; $under.y = $spot[1]
+    $hw = [U]::WindowFromPoint($under); $hit = "$([U]::Class($hw)) '$([U]::Title($hw))'"
+    $pw = [U]::FindWindow("AtriumSurface", "Atrium Notification"); $pr = New-Object U+R; [U]::GetWindowRect($pw, [ref]$pr) | Out-Null; $rb = New-Object U+R; $rk = [U]::GetWindowRgnBox($pw, [ref]$rb)
+    $hit += "; popup visible=$([U]::IsWindowVisible($pw)) rect=$($pr.l),$($pr.t),$($pr.r),$($pr.b) ex=0x$('{0:X}' -f [U]::GetWindowLong($pw, -20)) rgn=$rk $($rb.l),$($rb.t),$($rb.r),$($rb.b)"
+    ClickAt $spot
     Start-Sleep 0.8
     $fg = [U]::GetForegroundWindow()
-    Check "click-runs-action" (((NewLog) -match "notify: activated \d+ action 'app:.*' ok") -and $fg -eq $a) "log reports the action; the sender's window replaced Character Map in front ($([U]::Class($fg)))"
+    Check "click-runs-action" (((NewLog) -match "notify: activated \d+ action 'app:.*' ok") -and $fg -eq $a) "log reports the action; the sender's window replaced Character Map in front ($([U]::Class($fg))); under the card: $hit"
 
     C notify-open; Start-Sleep 0.5
     $s = State

@@ -9,6 +9,7 @@
 
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <psapi.h>
 #include <shellapi.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
@@ -1712,9 +1713,11 @@ bool Bar::RenderSession()
             auto pct = [&](double q) { return workMs.empty() ? 0.0 : workMs[std::min(workMs.size() - 1, size_t(q * double(workMs.size())))]; };
             std::sort(presentMs.begin(), presentMs.end());
             double presentP95 = presentMs.empty() ? 0.0 : presentMs[std::min(presentMs.size() - 1, size_t(0.95 * double(presentMs.size())))];
+            PROCESS_MEMORY_COUNTERS_EX mem{sizeof(mem)};
+            GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem), sizeof(mem));
             Log(L"render: last minute %u frames, %u presents, %u echoes skipped; work p50 %.2f ms, p95 %.2f ms, max %.2f ms; "
-                L"presenting p95 %.2f ms",
-                frames, presents, skipped, pct(0.5), pct(0.95), workMs.empty() ? 0.0 : workMs.back(), presentP95);
+                L"presenting p95 %.2f ms; private %zu MB",
+                frames, presents, skipped, pct(0.5), pct(0.95), workMs.empty() ? 0.0 : workMs.back(), presentP95, size_t(mem.PrivateUsage >> 20));
             frames = presents = skipped = 0;
             workMs.clear();
             presentMs.clear();

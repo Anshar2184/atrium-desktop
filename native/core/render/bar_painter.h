@@ -125,6 +125,8 @@ private:
                   D2D1_COLOR_F wash);
     winrt::com_ptr<IDWriteFactory3> dwrite_;
     winrt::com_ptr<ID2D1Effect> shadow_;
+    winrt::com_ptr<ID2D1LinearGradientBrush> logoBlue_; // the start logo's panes and their lit edge (DrawLogo)
+    winrt::com_ptr<ID2D1SolidColorBrush> logoSheen_;
     std::map<std::wstring, Motion> motion_;
     std::map<uint64_t, winrt::com_ptr<ID2D1Bitmap1>> bitmaps_;
     std::set<uint64_t> usedBitmaps_; // during one DrawContent

@@ -18,7 +18,7 @@
 </div>
 
 > [!NOTE]
-> **v0.9 开发版。** 一条 C++ 玻璃任务栏（默认与系统任务栏共存，也可以只留它自己）：Windows 徽标打开 Atrium 开始菜单，固定与运行中的应用（可拖动排序），自绘的托盘面板，一个单色的圆环状态图标（电量、Wi-Fi，调音量时显示音量）（点开是 macOS 式的控制中心：Wi-Fi、蓝牙、电池、投屏与投影模式、亮度、声音与输出设备、各应用音量），时钟（点开是 Atrium 日历，带农历），以及显示 Windows 通知和微信消息的 Atrium 通知，macOS 式的桌面小组件，加上可实时预览的设置中心。所有弹出窗口都是与任务栏完全相同的液态玻璃；悬停时图标像 macOS 程序坞一样波浪放大。默认不隐藏系统任务栏；在设置里可以隐藏系统任务栏和系统通知横幅，只留 Atrium 栏（关闭开关或退出 Atrium 时恢复）。
+> **v0.9 开发版。** 一条 C++ 玻璃任务栏（默认与系统任务栏共存，也可以只留它自己）：Windows 徽标打开 Atrium 开始菜单，固定与运行中的应用（可拖动排序），自绘的托盘面板，一个单色的圆环状态图标（电量、Wi-Fi，调音量或亮度时显示音量或亮度）（点开是 macOS 式的控制中心：Wi-Fi、蓝牙、电池、投屏与投影模式、亮度、声音与输出设备、各应用音量），时钟（点开是 Atrium 日历，带农历），以及显示 Windows 通知和微信消息的 Atrium 通知，macOS 式的桌面小组件，加上可实时预览的设置中心。所有弹出窗口都是与任务栏完全相同的液态玻璃；悬停时图标像 macOS 程序坞一样波浪放大。默认不隐藏系统任务栏；在设置里可以隐藏系统任务栏和系统通知横幅，只留 Atrium 栏（关闭开关或退出 Atrium 时恢复）。
 
 <p align="center">
   <img src="docs/images/v04-magnify.png" alt="v0.4 任务栏：悬停放大" width="80%"><br>
@@ -133,10 +133,10 @@ native/core    Atrium.Core：玻璃栏、开始菜单、通知、控制中心、
 settings/      设置中心 Atrium.Settings（C# / WinUI 3）
 tools/         build.ps1 打包脚本、图标生成
 tests/         端到端与协议测试脚本
-docs/          有效决策、验证记录、设置协议、交接文档
+docs/          有效决策、设计规范、验证记录、设置协议、交接文档
 ```
 
-建议阅读顺序：[HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [VERIFICATION](docs/VERIFICATION.md)。早期的设计文档与验证探测程序（`poc/`、`native/guard`）已在 v0.9.2 移出仓库，可在 git 历史中查看。
+建议阅读顺序：[HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [VERIFICATION](docs/VERIFICATION.md)；界面与动效遵循 [设计规范](docs/DESIGN.md)（设置中心“设计规范”页是它的图解）。早期的设计文档与验证探测程序（`poc/`、`native/guard`）已在 v0.9.2 移出仓库，可在 git 历史中查看。
 
 ## 构建
 

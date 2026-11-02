@@ -631,21 +631,28 @@ void BarPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity
     float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
     float left = cx - w / 2, top = cy - w / 2;
     float gap = w * 0.08f, pane = (w - gap) / 2, corner = pane * 0.10f;
-    D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(0x5CCBFF, opacity)}, {0.5f, D2D1::ColorF(0x1A9BF0, opacity)}, {1.f, D2D1::ColorF(0x0060C8, opacity)}};
-    winrt::com_ptr<ID2D1GradientStopCollection> coll;
-    winrt::com_ptr<ID2D1LinearGradientBrush> grad;
-    if (FAILED(d2d->CreateGradientStopCollection(stops, 3, coll.put())) ||
-        FAILED(d2d->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(left, top), D2D1::Point2F(left + w, top + w)),
-                                              coll.get(), grad.put())))
-        return;
-    winrt::com_ptr<ID2D1SolidColorBrush> sheen;
-    d2d->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.16f * opacity), sheen.put());
+    if (!logoBlue_) {
+        D2D1_GRADIENT_STOP stops[] = {{0.f, D2D1::ColorF(0x5CCBFF)}, {0.5f, D2D1::ColorF(0x1A9BF0)}, {1.f, D2D1::ColorF(0x0060C8)}};
+        winrt::com_ptr<ID2D1GradientStopCollection> coll;
+        if (FAILED(d2d->CreateGradientStopCollection(stops, 3, coll.put())) ||
+            FAILED(d2d->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties({}, {}), coll.get(), logoBlue_.put())) ||
+            FAILED(d2d->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.16f), logoSheen_.put()))) {
+            logoBlue_ = nullptr;
+            return;
+        }
+    }
+    ID2D1LinearGradientBrush* grad = logoBlue_.get();
+    grad->SetStartPoint(D2D1::Point2F(left, top));
+    grad->SetEndPoint(D2D1::Point2F(left + w, top + w));
+    grad->SetOpacity(opacity);
+    ID2D1SolidColorBrush* sheen = logoSheen_.get();
+    sheen->SetOpacity(opacity);
     for (int i = 0; i < 4; ++i) {
         float x = left + float(i % 2) * (pane + gap), y = top + float(i / 2) * (pane + gap);
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(x, y, x + pane, y + pane), corner, corner);
-        d2d->FillRoundedRectangle(rr, grad.get());
+        d2d->FillRoundedRectangle(rr, grad);
         // A faint lit edge on top of each pane.
-        d2d->FillRectangle(D2D1::RectF(x + corner, y, x + pane - corner, y + std::max(0.6f, pane * 0.06f)), sheen.get());
+        d2d->FillRectangle(D2D1::RectF(x + corner, y, x + pane - corner, y + std::max(0.6f, pane * 0.06f)), sheen);
     }
 }
 
