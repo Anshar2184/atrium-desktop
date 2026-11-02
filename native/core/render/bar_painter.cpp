@@ -219,23 +219,35 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     for (const auto& it : scene.items)
         lastApps_[it.key] = it;
 
-    // Status ring: a changed volume shows on the ring for a while; the fill
-    // follows on a spring with a slight overshoot (no linear sweep).
+    // Status ring: a changed volume or brightness shows on the ring for a
+    // while; the fill follows on a spring with a slight overshoot (no linear
+    // sweep).
     {
-        constexpr double kVolumeShowMs = 1500;
+        constexpr double kLevelShowMs = 1500;
         const SystemStatus& st = scene.status;
         StatusMotion& s = statusMotion_;
-        if (s.seen && st.audio && (st.volume != s.volume || st.muted != s.muted))
-            s.volumeUntilMs = nowMs + kVolumeShowMs;
+        if (s.seen && st.audio && (st.volume != s.volume || st.muted != s.muted)) {
+            s.volumeUntilMs = nowMs + kLevelShowMs;
+            s.brightUntilMs = 0;
+        }
+        // The first reported brightness is the current one, not a change.
+        if (s.seen && st.brightness >= 0 && s.brightness >= 0 && st.brightness != s.brightness) {
+            s.brightUntilMs = nowMs + kLevelShowMs;
+            s.volumeUntilMs = 0;
+        }
         s.volume = st.volume;
         s.muted = st.muted;
-        bool showVolume = st.audio && nowMs < s.volumeUntilMs;
-        moving |= showVolume;
-        float mix = Approach(s.volumeMix, showVolume ? 1.f : 0.f, dt, 12);
-        moving |= mix != s.volumeMix;
+        s.brightness = st.brightness;
+        bool showVolume = st.audio && nowMs < s.volumeUntilMs, showBright = st.brightness >= 0 && nowMs < s.brightUntilMs;
+        moving |= showVolume || showBright;
+        float mix = Approach(s.volumeMix, showVolume ? 1.f : 0.f, dt, 12), bmix = Approach(s.brightMix, showBright ? 1.f : 0.f, dt, 12);
+        moving |= mix != s.volumeMix || bmix != s.brightMix;
         s.volumeMix = mix;
+        s.brightMix = bmix;
         float volume = st.muted ? 0.f : float(st.volume) / 100.f;
-        float target = (showVolume || !st.battery) ? volume : float(std::clamp(st.batteryPercent, 0, 100)) / 100.f;
+        float target = showBright ? float(st.brightness) / 100.f
+                       : (showVolume || !st.battery) ? volume
+                                                     : float(std::clamp(st.batteryPercent, 0, 100)) / 100.f;
         if (!s.seen) {
             s.fill = target;
             s.seen = true;
@@ -562,7 +574,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
         DrawWifiFan(d2d, brush, cx, cy, size * 0.62f, lit, fade(ink, alpha), dim((lit < 0 ? 0.32f : 0.24f) * alpha));
     };
 
-    const bool ring = st.battery || st.audio;
+    const bool ring = st.battery || st.audio || sm.brightMix > 0.003f;
     if (!ring) { // nothing to measure: the fan alone, full size
         connection(h, 1);
         return;
@@ -572,20 +584,22 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
     // (not charging) is red.
     constexpr float kGap = 64, kStart = 90 + kGap / 2, kSweep = 360 - kGap;
     const float rad = h * 0.44f, stroke = std::max(1.5f, h * 0.07f);
-    const float mix = st.battery ? sm.volumeMix : 1.f; // 1: the ring shows the volume
+    // How much the ring shows the volume or the brightness rather than the battery.
+    const float shown = std::min(1.f, sm.volumeMix + sm.brightMix);
+    const float mix = st.battery ? sm.volumeMix : 1.f - sm.brightMix; // 1: the ring shows the volume
     const bool low = st.battery && !st.charging && st.batteryPercent >= 0 && st.batteryPercent <= 20;
     D2D1_COLOR_F level = ink;
     if (low) {
         D2D1_COLOR_F red = D2D1::ColorF(darkInk ? 0xE0352B : 0xFF453A);
-        float k = 1 - sm.volumeMix;
+        float k = 1 - shown;
         level = D2D1::ColorF(red.r + (ink.r - red.r) * (1 - k), red.g + (ink.g - red.g) * (1 - k), red.b + (ink.b - red.b) * (1 - k), ink.a);
     }
     const bool silent = st.muted && mix > 0.5f;
     arc(cx, cy, rad, kStart, kSweep, dim(silent ? 0.16f : 0.24f), stroke);
     arc(cx, cy, rad, kStart, kSweep * std::clamp(sm.fill, 0.f, 1.f), level, stroke);
 
-    // In the gap: a bolt while charging (fades out while the volume shows).
-    float bolt = st.battery && st.charging ? 1 - sm.volumeMix : 0;
+    // In the gap: a bolt while charging (fades out while a level shows).
+    float bolt = st.battery && st.charging ? 1 - shown : 0;
     if (bolt > 0.003f) {
         winrt::com_ptr<ID2D1PathGeometry> g;
         winrt::com_ptr<ID2D1GeometrySink> sink;
@@ -603,16 +617,19 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
         }
     }
 
-    // Inside: the connection, or the speaker while the volume shows.
+    // Inside: the connection, or the speaker or the sun while a level shows.
     const float speaker = st.battery ? sm.volumeMix : 0.f;
-    connection(h * 0.6f, 1 - speaker);
-    if (speaker > 0.003f) {
-        const wchar_t* glyph = st.muted || st.volume == 0 ? L"\uE74F" : st.volume < 34 ? L"\uE993" : st.volume < 67 ? L"\uE994" : L"\uE995";
+    connection(h * 0.6f, 1 - std::min(1.f, speaker + sm.brightMix));
+    auto symbol = [&](const wchar_t* glyph, float alpha) {
+        if (alpha <= 0.003f)
+            return;
         if (IDWriteTextFormat* f = Format(h * 0.40f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
-            brush->SetColor(fade(ink, speaker));
+            brush->SetColor(fade(ink, alpha));
             d2d->DrawText(glyph, 1, f, D2D1::RectF(cx - h / 2, cy - h / 2, cx + h / 2, cy + h / 2), brush);
         }
-    }
+    };
+    symbol(st.muted || st.volume == 0 ? L"\uE74F" : st.volume < 34 ? L"\uE993" : st.volume < 67 ? L"\uE994" : L"\uE995", speaker);
+    symbol(L"\uE706", sm.brightMix);
 }
 
 // The start entry: the Windows logo, redrawn as four panes with Windows 11's

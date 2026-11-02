@@ -1089,6 +1089,20 @@ void ControlCenter::Activate(const std::wstring& id)
 
 void ControlCenter::TestClick(const std::wstring& id) { Activate(id); }
 
+void ControlCenter::BrightnessChanged(int percent)
+{
+    // Not while the slider's own value is on its way, nor where WMI cannot set it.
+    if (dragging_ == L"bright" || brightBusy_ || percent == brightness_ || brightness_ == -1)
+        return;
+    float before = Size().height;
+    brightness_ = percent;
+    if (!surface_.Visible())
+        return;
+    if (Size().height != before)
+        Place();
+    surface_.Invalidate();
+}
+
 void ControlCenter::LogState() const
 {
     const RECT r = surface_.Rect();

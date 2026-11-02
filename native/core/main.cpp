@@ -79,9 +79,16 @@ struct App {
     std::unique_ptr<DesktopWidgets> widgets;
     std::unique_ptr<SystemChrome> chrome;
     bool widgetsOn = false;
+    int brightness = -1; // the built-in screen's, from GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS
+    HPOWERNOTIFY brightnessNotify = nullptr;
 };
 
 App g_app;
+
+// GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS: Windows reports every change of the
+// built-in screen's brightness (keys, quick settings, our slider), and the
+// current level once on registration.
+constexpr GUID kBrightnessSetting = {0x8ffee2c6, 0x2d01, 0x46be, {0xad, 0xb9, 0x39, 0x8a, 0xdd, 0xc5, 0xb4, 0xff}};
 
 std::wstring ExeDir()
 {
@@ -295,7 +302,7 @@ void RunCommand(const std::wstring& line)
         g_app.calendar->TestClick(arg);
     else if (verb == L"tray-find")
         g_app.trayPanel->LogFind(arg);
-    else if (verb == L"status-fake") { // screenshots: "battery=15,charging=0,volume=40,muted=0,signal=80" or "off"
+    else if (verb == L"status-fake") { // screenshots: "battery=15,charging=0,volume=40,muted=0,signal=80,brightness=60" or "off"
         FakeStatus(arg);
         UpdateStatus();
     }
@@ -364,8 +371,11 @@ void UpdateStatus()
         } else if (key == L"signal") {
             st.connected = st.wifi = value >= 0;
             st.signal = std::max(value, 0);
+        } else if (key == L"brightness") {
+            g_app.brightness = value;
         }
     }
+    st.brightness = g_app.brightness;
     // Volume notifications follow the default playback device.
     static std::wstring watched;
     static bool watching = false;
@@ -787,6 +797,16 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_VOLUME:
         UpdateStatus();
         return 0;
+    case WM_POWERBROADCAST:
+        if (w == PBT_POWERSETTINGCHANGE) {
+            const auto* s = reinterpret_cast<const POWERBROADCAST_SETTING*>(l);
+            if (s && s->PowerSetting == kBrightnessSetting && s->DataLength == sizeof(DWORD)) {
+                g_app.brightness = int(std::min<DWORD>(*reinterpret_cast<const DWORD*>(s->Data), 100));
+                g_app.control->BrightnessChanged(g_app.brightness);
+                UpdateStatus();
+            }
+        }
+        return TRUE;
     case WM_CHROME_STATE:
         if (g_app.chrome)
             g_app.chrome->LogState();
@@ -868,6 +888,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_DESTROY:
+        if (g_app.brightnessNotify)
+            UnregisterPowerSettingNotification(g_app.brightnessNotify);
         RemoveTrayIcon();
         PostQuitMessage(0);
         return 0;
@@ -1018,6 +1040,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     };
     AddTrayIcon();
     UpdateStatus();
+    g_app.brightnessNotify = RegisterPowerSettingNotification(g_app.host, &kBrightnessSetting, DEVICE_NOTIFY_WINDOW_HANDLE);
     SetTimer(g_app.host, kStatusTimer, kStatusMs, nullptr);
     g_app.tray->Refresh(); // the panel opens with the icons already read
 

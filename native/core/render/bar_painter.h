@@ -102,8 +102,8 @@ private:
     void DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity);
     // The status icon in `r` (icon height): a ring open at the bottom with the
     // battery's level (the volume without a battery) round the Wi-Fi fan (or
-    // wired / offline); while the volume changes the ring shows it and a
-    // speaker takes the fan's place (StatusMotion).
+    // wired / offline); while the volume or the brightness changes the ring
+    // shows it and a speaker or a sun takes the fan's place (StatusMotion).
     void DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, bool darkInk);
     float MapX(float u) const; // base x -> displayed x under the magnification
 
@@ -137,14 +137,15 @@ private:
     // Magnification state: strength 0..1 (eases in and out), wave centre and
     // its parameters of the current frame.
     float amount_ = 0, centre_ = 0, mag_ = 1, range_ = 1;
-    // The status ring: its fill springs to the battery or the volume; `volume`
-    // (0..1) fades the speaker in for a while after the volume changed.
+    // The status ring: its fill springs to the battery, the volume or the
+    // brightness. A changed level shows for a while (the latest change wins);
+    // `volumeMix` and `brightMix` (0..1) fade the speaker and the sun in.
     struct StatusMotion {
         bool seen = false;
-        int volume = 0;
+        int volume = 0, brightness = -1;
         bool muted = false;
-        double volumeUntilMs = 0;
-        float volumeMix = 0;
+        double volumeUntilMs = 0, brightUntilMs = 0;
+        float volumeMix = 0, brightMix = 0;
         float fill = 0, speed = 0;
     } statusMotion_;
     // Auto-hide: 0 up, 1 down (below 0 while overshooting on the way up).

@@ -38,6 +38,8 @@ public:
     // Test hooks: log what is shown (screen px); act as a click on `id`.
     void LogState() const;
     void TestClick(const std::wstring& id);
+    // Windows reported the built-in screen's brightness (keys, quick settings).
+    void BrightnessChanged(int percent);
 
     std::function<void()> onChanged; // volume, mute or the network changed: the bar's icon updates
 

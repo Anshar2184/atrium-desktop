@@ -23,6 +23,7 @@ struct SystemStatus {
     std::wstring network;   // name of the connected network
     bool wifi = false;      // the connection is Wi-Fi (else wired or other)
     int signal = 0;         // Wi-Fi signal 0..100
+    int brightness = -1;    // the built-in screen 0..100 (the power notifications); -1 unknown
     bool operator==(const SystemStatus&) const = default;
 };
 
