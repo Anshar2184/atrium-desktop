@@ -145,12 +145,19 @@ try {
     $s = State
     Check "hover-keeps" ($s.popup -eq "1") "pointer on the popup for 4 s (timeout 3 s): popup=$($s.popup)"
 
-    # The wheel over the stack turns it: the next older card comes to the front, and back.
-    [U]::mouse_event(0x0800, 0, 0, [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]-120), 0), [UIntPtr]::Zero); Start-Sleep -Milliseconds 500
-    [U]::mouse_event(0x0800, 0, 0, 120, [UIntPtr]::Zero); Start-Sleep -Milliseconds 500
-    $turned = @(NewLog | Where-Object { $_ -match "notify: stack turned" })
+    # The wheel goes through the stack, which stays a stack: one notch down
+    # brings the next older card to the front; a quick flick of four goes past
+    # several and stops at the oldest (bouncing back); one notch up, one back.
+    function Wheel($d) { [U]::mouse_event(0x0800, 0, 0, [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$d), 0), [UIntPtr]::Zero) }
+    function Settled { $l = @(NewLog | Where-Object { $_ -match "notify: stack settled on card" })[-1]; if ($l -match "card (\d+) of (\d+)") { @([int]$Matches[1], [int]$Matches[2]) } else { @(0, 0) } }
+    Wheel -120; Start-Sleep -Milliseconds 900
+    $one = Settled
+    foreach ($k in 1..4) { Wheel -120; Start-Sleep -Milliseconds 15 }; Start-Sleep -Milliseconds 1300
+    $flick = Settled
+    Wheel 120; Start-Sleep -Milliseconds 900
+    $back = Settled
     $s = State
-    Check "wheel-turns-stack" ($turned.Count -ge 2 -and $s.popup -eq "1") "$($turned.Count) turns; $(@($turned)[-1])"
+    Check "wheel-goes-through-stack" ($one[0] -eq 2 -and $flick[0] -eq $flick[1] -and $flick[1] -ge 4 -and $back[0] -eq $flick[1] - 1 -and $s.popup -eq "1" -and $s.popupCards -eq "$($flick[1])") "one notch: card $($one[0]); a flick of four: card $($flick[0]) of $($flick[1]) (the oldest); one notch up: card $($back[0]); still $($s.popupCards) cards in the stack"
 
     ClickAt $p
     $s = State

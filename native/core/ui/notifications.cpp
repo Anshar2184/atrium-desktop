@@ -20,6 +20,12 @@ constexpr ULONGLONG kMergeMs = 120000;
 constexpr UINT_PTR kPopupTimer = 1, kSweepTimer = 2, kHoldTimer = 3;
 constexpr UINT kHoldMs = 250;
 constexpr double kLeaveMs = 340, kRippleMs = 520;
+// The stack under the wheel: a notch pushes it this fast (cards per second);
+// the push dies away (per second), and below kStackCoast a spring
+// (stiffness, critically damped) settles it on a card. Past either end it
+// gives at most kStackOverrun of speed, so it bounces back a little.
+constexpr float kStackPush = 6.5f, kStackFriction = 5.5f, kStackCoast = 2.5f, kStackSpring = 110, kStackOverrun = 8;
+constexpr float kStackLift = 24; // DIP a passed card rises over the stack's peeking edges as it goes
 
 float Smooth(float t)
 {
@@ -137,6 +143,7 @@ void Notifications::Post(Notice n)
             updated.body = n.body;
             updated.time = n.time;
             updated.unread = true;
+            ShiftStack(Mode::Center, size_t(it - notices_.begin()), -1);
             notices_.erase(it);
             n = updated;
             Log(L"notify: %llu updated by its sender", n.id);
@@ -149,6 +156,7 @@ void Notifications::Post(Notice n)
             merged.count += 1;
             merged.time = n.time;
             merged.unread = true;
+            ShiftStack(Mode::Center, size_t(it - notices_.begin()), -1);
             notices_.erase(it);
             n = merged;
             Log(L"notify: merged into %llu (x%d)", n.id, n.count);
@@ -159,6 +167,7 @@ void Notifications::Post(Notice n)
         n.id = nextId_++;
     leaving_.erase(n.id); // a card closing just now that the new message continues stays
     notices_.insert(notices_.begin(), n);
+    ShiftStack(Mode::Center, 0, +1);
     if (notices_.size() > kMaxNotices)
         notices_.resize(kMaxNotices);
     Log(L"notify: posted %llu from %s (%s)", n.id, n.app.c_str(), n.source.c_str());
@@ -175,8 +184,12 @@ void Notifications::Post(Notice n)
         Changed();
         return;
     }
-    std::erase(popupIds_, n.id);
+    if (auto old = std::find(popupIds_.begin(), popupIds_.end(), n.id); old != popupIds_.end()) {
+        ShiftStack(Mode::Popup, size_t(old - popupIds_.begin()), -1);
+        popupIds_.erase(old);
+    }
     popupIds_.insert(popupIds_.begin(), n.id);
+    ShiftStack(Mode::Popup, 0, +1);
     Layout(Mode::Popup);
     if (popup_.surface->Visible())
         SetTimer(popup_.surface->Hwnd(), kPopupTimer, UINT(timeout_ * 1000), nullptr);
@@ -278,6 +291,11 @@ void Notifications::Sweep()
     for (auto it = leaving_.begin(); it != leaving_.end();) {
         if (now - it->second >= kLeaveMs || (!center_.surface->Visible() && !popup_.surface->Visible())) {
             uint64_t id = it->first;
+            for (Mode mode : {Mode::Popup, Mode::Center}) {
+                auto shown = Shown(mode);
+                if (auto at = std::find_if(shown.begin(), shown.end(), [&](const Notice* n) { return n->id == id; }); at != shown.end())
+                    ShiftStack(mode, size_t(at - shown.begin()), -1);
+            }
             std::erase_if(notices_, [&](const Notice& n) { return n.id == id; });
             std::erase(popupIds_, id);
             it = leaving_.erase(it);
@@ -392,7 +410,7 @@ void Notifications::Layout(Mode mode)
     int bottom = bar.top - gap;
     float maxContent = float(bottom - wa.top - margin) / s - pill;
     v.contentH = content;
-    v.viewH = mode == Mode::Popup ? std::min(card + 2 * kPeek, std::max(card, maxContent)) : std::max(card, maxContent);
+    v.viewH = mode == Mode::Popup ? std::min(card + 2 * kPeek + kStackLift, std::max(card, maxContent)) : std::max(card, maxContent);
     v.scrollTarget = std::clamp(v.scrollTarget, 0.f, std::max(0.f, v.contentH - v.viewH));
     v.scroll = std::clamp(v.scroll, 0.f, std::max(0.f, v.contentH - v.viewH));
     int w = int(std::lround(kW * s)), h = int(std::lround((v.viewH + pill) * s));
@@ -402,6 +420,9 @@ void Notifications::Layout(Mode mode)
     if (!v.surface->Visible()) {
         v.cards.clear(); // the cards arrive afresh
         v.glow.clear();
+        v.stackPos = v.stackVel = 0;
+        v.stackGoal = -1;
+        v.stackMoving = false;
         bool handoff = mode == Mode::Center && handoffPending_;
         if (handoff) {
             // From the popup's stack: each card starts where it was on screen.
@@ -443,6 +464,88 @@ float Notifications::Ease(View& v, Canvas& c, const std::wstring& id, bool on, f
 
 float Notifications::CardRadius() const { return std::min(radius_, CardHeight() / 2); }
 
+void Notifications::PushStack(View& v, size_t n, int wheelDelta)
+{
+    if (n < 2)
+        return;
+    const float last = float(n - 1);
+    if (!v.stackMoving || v.stackGoal >= 0)
+        v.stackFrom = int(std::lround(std::clamp(v.stackPos, 0.f, last)));
+    float push = -float(wheelDelta) / WHEEL_DELTA * kStackPush;
+    if ((push < 0 && v.stackPos <= 0.01f) || (push > 0 && v.stackPos >= last - 0.01f))
+        push *= 0.35f; // past the end it gives only a little
+    if ((push > 0) != (v.stackVel > 0))
+        v.stackVel = 0; // turning back stops the coast first
+    v.stackVel += push;
+    v.stackGoal = -1;
+    v.stackMoving = true;
+    v.surface->Invalidate();
+}
+
+bool Notifications::StepStack(View& v, size_t n, float dtMs)
+{
+    if (!v.stackMoving)
+        return false;
+    const float last = float(n ? n - 1 : 0);
+    const float t = std::clamp(dtMs, 0.f, 50.f) / 1000.f;
+    const bool out = v.stackPos < 0 || v.stackPos > last;
+    if (v.stackGoal < 0 && !out && std::fabs(v.stackVel) > kStackCoast) {
+        // Coasting: the wheel's push dies away.
+        v.stackVel *= std::exp(-kStackFriction * t);
+        v.stackPos += v.stackVel * t;
+        return true;
+    }
+    if (v.stackGoal < 0) {
+        // The card it would come to rest on; one notch moves at least one card.
+        float goal = std::round(v.stackPos + v.stackVel / kStackFriction);
+        if (int(goal) == v.stackFrom && std::fabs(v.stackVel) > 0.01f)
+            goal += v.stackVel > 0 ? 1.f : -1.f;
+        v.stackGoal = std::clamp(goal, 0.f, last);
+        if ((v.stackGoal == 0 && v.stackVel < 0) || (v.stackGoal == last && v.stackVel > 0))
+            v.stackVel = std::clamp(v.stackVel, -kStackOverrun, kStackOverrun); // into the end: a small bounce
+    }
+    v.stackGoal = std::min(v.stackGoal, last); // cards went meanwhile
+    // Settling: a critically damped spring (in small steps, steady at any frame rate).
+    const float k = kStackSpring, d = 2 * std::sqrt(kStackSpring);
+    int steps = std::max(1, int(std::ceil(t / 0.004f)));
+    float h = t / float(steps);
+    for (int i = 0; i < steps; ++i) {
+        v.stackVel += (k * (v.stackGoal - v.stackPos) - d * v.stackVel) * h;
+        v.stackPos += v.stackVel * h;
+    }
+    if (std::fabs(v.stackGoal - v.stackPos) < 0.002f && std::fabs(v.stackVel) < 0.02f) {
+        v.stackPos = v.stackGoal;
+        v.stackVel = 0;
+        v.stackMoving = false;
+        Log(L"notify: stack settled on card %d of %zu", int(v.stackGoal) + 1, n);
+        v.stackGoal = -1;
+        return false;
+    }
+    return true;
+}
+
+void Notifications::ShiftStack(Mode mode, size_t index, int by)
+{
+    View& v = ViewOf(mode);
+    if (!v.surface->Visible())
+        return;
+    int front = int(std::lround(v.stackPos));
+    if (by > 0) {
+        // A new card at the front: a stack turned to older ones comes back to show it.
+        if (v.stackPos > 0.001f || v.stackMoving) {
+            v.stackPos += 1;
+            v.stackVel = 0;
+            v.stackGoal = 0;
+            v.stackMoving = true;
+        }
+    } else if (int(index) < front) {
+        v.stackPos -= 1; // a newer card went: the one in front stays
+        if (v.stackGoal > 0)
+            v.stackGoal -= 1;
+    }
+    v.surface->Invalidate();
+}
+
 // A card's content over its own piece of glass. Cards behind the newest one
 // in the stack show only their glass's edge.
 void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha)
@@ -453,7 +556,7 @@ void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int ind
     const float cardR = CardRadius();
     std::wstring cardId = L"card:" + std::to_wstring(index), closeId = L"close:" + std::to_wstring(index);
     bool hot = v.hover == cardId || v.hover == closeId;
-    bool pressed = v.pressed == cardId || (index == 0 && v.pressed == L"stack");
+    bool pressed = v.pressed == cardId || (index == v.front && v.pressed == L"stack");
     float glow = Ease(v, c, cardId, hot, float(std::clamp(c.now - v.lastPaint, 0.0, 100.0)));
     float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
     // A pressed card gives way a little, like the glass under it.
@@ -476,11 +579,8 @@ void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int ind
         app += L"  ·  " + std::to_wstring(n.count) + L" 条";
     c.Text(app, D2D1::RectF(nameX, ty, x + w - 170, ty + 16), 12, t.subtext, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     std::wstring when = Ago(n.time);
-    if (index == 0 && &v == &popup_ && popupIds_.size() > 1) {
-        // Which card of the stack is in front (the wheel turns the stack).
-        size_t newer = size_t(std::count_if(popupIds_.begin(), popupIds_.end(), [&](uint64_t id) { return id > n.id; }));
-        when = std::to_wstring(newer + 1) + L"/" + std::to_wstring(popupIds_.size()) + L"  ·  " + when;
-    }
+    if (v.stacked && v.count > 1 && index == v.front) // which card of the stack is in front (the wheel turns it)
+        when = std::to_wstring(index + 1) + L"/" + std::to_wstring(v.count) + L"  ·  " + when;
     c.Text(when, D2D1::RectF(x + w - 170, ty, x + w - 50, ty + 16), 12, t.faint, DWRITE_FONT_WEIGHT_NORMAL, 2);
     c.Text(n.title, D2D1::RectF(tx, ty + 22, x + w - 20, ty + 42), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     std::wstring body = BodyHidden() ? L"内容已隐藏" : n.body;
@@ -509,6 +609,21 @@ void Notifications::Paint(Mode mode, Canvas& c)
 
     const bool stack = mode == Mode::Popup || (!expanded_ && shown.size() > 1);
     bool moving = Glide(v.scroll, v.scrollTarget, dt, 18, 0.2f); // anything moving: the region waits
+    if (stack) {
+        const float last = float(shown.empty() ? 0 : shown.size() - 1);
+        if (!v.stackMoving && v.stackPos > last + 0.001f) { // cards went: back to the last one
+            v.stackGoal = last;
+            v.stackMoving = true;
+        }
+        moving |= StepStack(v, shown.size(), dt);
+        v.front = int(std::lround(std::clamp(v.stackPos, 0.f, last)));
+    } else {
+        v.stackPos = v.stackVel = 0;
+        v.stackMoving = false;
+        v.front = 0;
+    }
+    v.stacked = stack;
+    v.count = shown.size();
     float top = listH;                                             // the top of what is shown
     if (moving)
         c.Continue();
@@ -518,12 +633,26 @@ void Notifications::Paint(Mode mode, Canvas& c)
     std::vector<float> alphas(shown.size());
     for (size_t i = 0; i < shown.size(); ++i) {
         const Notice& n = *shown[i];
-        float ty, tinset, talpha;
+        float ty, tinset, talpha, tcontent = 1;
         if (stack) {
-            float k = float(std::min<size_t>(i, 2));
-            ty = listH - card - kPeek * k;
-            tinset = 12.f * k;
-            talpha = i <= 2 ? 1.f : 0.f;
+            // Where the card is relative to the one in front (fractional
+            // while the wheel turns the stack): behind it, peeking out above
+            // and narrower, its text gone; in front of it (passed), moving
+            // back into the stack while it fades, under the new front.
+            float rel = float(i) - v.stackPos;
+            if (rel >= 0) {
+                float k = std::min(rel, 2.f);
+                ty = listH - card - kPeek * k;
+                tinset = 12.f * k;
+                talpha = std::clamp(3.f - rel, 0.f, 1.f);
+                tcontent = Smooth(std::clamp(1.f - rel * 1.6f, 0.f, 1.f)); // the text comes in the later part
+            } else {
+                float u = std::min(-rel, 1.f);
+                ty = listH - card - (2 * kPeek + kStackLift) * u;
+                tinset = 28.f * u;
+                talpha = (1 - u) * (1 - u);
+                tcontent = 1 - Smooth(std::clamp(u * 2.f, 0.f, 1.f)); // its text goes first: two texts never show strongly at once
+            }
         } else {
             ty = listH - card - float(i) * (card + kGap) + v.scroll;
             tinset = 0;
@@ -532,10 +661,19 @@ void Notifications::Paint(Mode mode, Canvas& c)
         CardAnim& a = v.cards[n.id];
         if (!a.placed) // a new card rises from the bar
             a = {ty + 18, tinset, 0, 1, true};
-        bool cardMoving = Glide(a.y, ty, dt, 16, 0.2f);
-        cardMoving |= Glide(a.inset, tinset, dt, 16, 0.1f);
-        cardMoving |= Glide(a.alpha, talpha, dt, 12, 0.01f);
-        cardMoving |= Glide(a.content, stack && i > 0 ? 0.f : 1.f, dt, 9, 0.01f);
+        bool cardMoving = false;
+        if (stack && v.stackMoving) {
+            // The wheel drives the stack: every card follows it exactly (it is smooth already).
+            a.y = ty;
+            a.inset = tinset;
+            a.alpha = talpha;
+            a.content = tcontent;
+        } else {
+            cardMoving = Glide(a.y, ty, dt, 16, 0.2f);
+            cardMoving |= Glide(a.inset, tinset, dt, 16, 0.1f);
+            cardMoving |= Glide(a.alpha, talpha, dt, 12, 0.01f);
+            cardMoving |= Glide(a.content, tcontent, dt, 9, 0.01f);
+        }
         float alpha = a.alpha, dx = 0, shrink = 0;
         if (auto l = leaving_.find(n.id); l != leaving_.end()) {
             // Closing: it fades out while drifting right and settling back a little.
@@ -561,8 +699,16 @@ void Notifications::Paint(Mode mode, Canvas& c)
     // piece of glass; a fading card's glass shrinks away with it, and glass
     // scrolled out of the list is cut at the list's edge.
     c.Clip(D2D1::RectF(-1, 0, w + 1, listH));
-    for (size_t i = shown.size(); i-- > 0;) {
-        bool full = !stack || i == 0;
+    // Passed cards first (they go back under the new front), then the stack from the back.
+    std::vector<size_t> order;
+    for (size_t i = 0; i < shown.size(); ++i)
+        if (stack && float(i) < v.stackPos - 0.001f)
+            order.push_back(i);
+    for (size_t i = shown.size(); i-- > 0;)
+        if (!stack || float(i) >= v.stackPos - 0.001f)
+            order.push_back(i);
+    for (size_t i : order) {
+        bool full = !stack || v.cards[shown[i]->id].content > 0.01f;
         D2D1_RECT_F r = rects[i];
         if (alphas[i] <= 0.02f || r.bottom < 0 || r.top > listH)
             continue;
@@ -731,7 +877,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
         std::wstring h = hitAt(pt);
         // Hovering anywhere on a card shows its close button.
         if (h == L"stack")
-            h = L"card:0";
+            h = L"card:" + std::to_wstring(v.front);
         if (h != v.hover) {
             v.hover = h;
             v.surface->Invalidate();
@@ -751,7 +897,7 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
         if (!v.pressed.empty()) {
             // The glass under the card gives way, and a soft light spreads from the press.
             float s = v.surface->Scale();
-            v.rippleId = v.pressed == L"stack" ? L"card:0" : v.pressed;
+            v.rippleId = v.pressed == L"stack" ? L"card:" + std::to_wstring(v.front) : v.pressed;
             v.rippleX = float(pt.x) / s;
             v.rippleY = float(pt.y) / s;
             v.rippleMs = ClockMs();
@@ -772,22 +918,11 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
     }
     case WM_MOUSEWHEEL: {
         int delta = GET_WHEEL_DELTA_WPARAM(w);
-        if (mode == Mode::Popup) {
-            // Over the stack: the wheel turns it, one card per notch, to read
-            // the ones behind (down: the next older comes to the front).
-            v.wheel += delta;
-            int steps = v.wheel / WHEEL_DELTA;
-            v.wheel -= steps * WHEEL_DELTA;
-            if (popupIds_.size() > 1 && steps) {
-                for (int i = 0; i < std::abs(steps); ++i) {
-                    if (steps < 0)
-                        std::rotate(popupIds_.begin(), popupIds_.begin() + 1, popupIds_.end());
-                    else
-                        std::rotate(popupIds_.rbegin(), popupIds_.rbegin() + 1, popupIds_.rend());
-                }
-                Log(L"notify: stack turned (%llu in front)", popupIds_.front());
-                v.surface->Invalidate();
-            }
+        size_t shownCount = Shown(mode).size();
+        if (mode == Mode::Popup || (!expanded_ && shownCount > 1)) {
+            // Over a stack: the wheel goes through it, staying a stack
+            // (down: older cards come to the front).
+            PushStack(v, shownCount, delta);
             return true;
         }
         v.scrollTarget += float(delta) / WHEEL_DELTA * 80; // older cards are above: the wheel up brings them down
@@ -830,11 +965,11 @@ void Notifications::LogState() const
     RECT p = popup_.surface->Rect(), c = center_.surface->Rect();
     HWND fg = GetForegroundWindow();
     Log(L"notify: state count=%zu unread=%d popup=%d popupCards=%zu center=%d expanded=%d bodyHidden=%d quiet=%d "
-        L"popupRect=%ld,%ld,%ld,%ld centerRect=%ld,%ld,%ld,%ld fgPopup=%d fgCenter=%d first='%s' firstCount=%d radius=%.0f popupShapes=%zu centerShapes=%zu",
+        L"popupRect=%ld,%ld,%ld,%ld centerRect=%ld,%ld,%ld,%ld fgPopup=%d fgCenter=%d first='%s' firstCount=%d radius=%.0f popupShapes=%zu centerShapes=%zu popupFront=%d centerFront=%d",
         live.size(), Unread(), popup_.surface->Visible() ? 1 : 0, popupIds_.size(), center_.surface->Visible() ? 1 : 0, expanded_ ? 1 : 0,
         BodyHidden() ? 1 : 0, QuietState(), p.left, p.top, p.right, p.bottom, c.left, c.top, c.right, c.bottom, fg == popup_.surface->Hwnd() ? 1 : 0,
         fg == center_.surface->Hwnd() ? 1 : 0, live.empty() ? L"" : live[0]->title.c_str(), live.empty() ? 0 : live[0]->count, radius_, popup_.surface->Shapes(),
-        center_.surface->Shapes());
+        center_.surface->Shapes(), popup_.front, center_.front);
 }
 
 } // namespace atrium

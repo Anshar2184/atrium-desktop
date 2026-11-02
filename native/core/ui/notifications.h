@@ -91,11 +91,27 @@ private:
         float rippleX = 0, rippleY = 0;
         double rippleMs = 0;
         int regionTop = -1; // window px where the window's region starts (at rest), -1: none
+        // The stack's place: the card in front, in cards (0 the newest),
+        // fractional while it moves. The wheel pushes it (momentum, so a
+        // flick goes past several cards), then a spring settles it on a
+        // card - back from past either end too.
+        float stackPos = 0, stackVel = 0;
+        float stackGoal = -1;  // the card it settles on; -1: not chosen yet
+        int stackFrom = 0;     // the card in front when the wheel started: one notch moves at least one
+        bool stackMoving = false;
+        bool stacked = false;  // the cards are a stack (as last painted)
+        size_t count = 0;      // cards shown (as last painted)
+        int front = 0;         // the card in front (its text shows)
     };
 
     void Paint(Mode mode, Canvas& c);
     void PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha);
     float Ease(View& v, Canvas& c, const std::wstring& id, bool on, float dt);
+    void PushStack(View& v, size_t n, int wheelDelta); // the wheel over a stack
+    bool StepStack(View& v, size_t n, float dtMs);     // true while the stack moves
+    // A card at `index` of what `mode` shows was added (+1) or goes (-1):
+    // the card in front stays in front.
+    void ShiftStack(Mode mode, size_t index, int by);
     void Sweep(); // drops the cards whose closing animation has finished
     bool Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& result);
     void Click(Mode mode, const std::wstring& id);
