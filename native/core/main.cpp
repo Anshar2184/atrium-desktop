@@ -55,7 +55,7 @@ constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
     kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager,
-    kCmdWidget = 200 // + 0..4: add a desktop widget
+    kCmdWidget = 200 // + the index in WidgetChoices(): add a desktop widget
 };
 
 struct App {
@@ -438,9 +438,9 @@ void ShowMenu(POINT pt)
     HMENU widgets = nullptr;
     if (g_app.widgetsOn) {
         widgets = CreatePopupMenu();
-        const wchar_t* names[] = {L"时钟", L"世界时钟", L"日历", L"日历（月视图）", L"电池"};
-        for (int i = 0; i < 5; ++i)
-            AppendMenuW(widgets, MF_STRING, kCmdWidget + i, names[i]);
+        const auto& choices = WidgetChoices();
+        for (size_t i = 0; i < choices.size(); ++i)
+            AppendMenuW(widgets, MF_STRING, kCmdWidget + i, choices[i].name);
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(widgets), L"添加桌面小组件");
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -469,13 +469,9 @@ void ShowMenu(POINT pt)
         DestroyWindow(g_app.host);
         break;
     default:
-        if (cmd >= kCmdWidget && cmd < kCmdWidget + 5) {
-            const std::pair<WidgetKind, WidgetSize> kinds[] = {{WidgetKind::Clock, WidgetSize::Small},
-                                                               {WidgetKind::Clock, WidgetSize::Medium},
-                                                               {WidgetKind::Calendar, WidgetSize::Small},
-                                                               {WidgetKind::Calendar, WidgetSize::Medium},
-                                                               {WidgetKind::Battery, WidgetSize::Small}};
-            g_app.widgets->Add(kinds[cmd - kCmdWidget].first, kinds[cmd - kCmdWidget].second);
+        if (cmd >= kCmdWidget && cmd < kCmdWidget + WidgetChoices().size()) {
+            const WidgetChoice& choice = WidgetChoices()[cmd - kCmdWidget];
+            g_app.widgets->Add(choice.kind, choice.size);
         }
         break;
     }

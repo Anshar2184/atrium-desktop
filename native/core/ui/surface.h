@@ -103,9 +103,12 @@ public:
     // The iPhone's Wi-Fi symbol (wifi_glyph) centred on (cx, cy), `radius` DIP high; `lit` steps 0..3 in `c`, the rest faint.
     void WifiFan(float cx, float cy, float radius, int lit, D2D1_COLOR_F c);
     float TextWidth(const std::wstring& s, float size, DWRITE_FONT_WEIGHT w = DWRITE_FONT_WEIGHT_NORMAL);
+    // The caret before character `pos` of `s` laid out as Text(s, r, size, c, w, 0, true) lays it out (DIP).
+    D2D1_RECT_F Caret(const std::wstring& s, D2D1_RECT_F r, float size, DWRITE_FONT_WEIGHT w, size_t pos);
     // An icon by a stable cache key; `image` is only read the first time.
     void Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity = 1);
     void ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r);
+    void ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius);
     bool Cached(const std::wstring& key) const;
     // A press ripple: a soft disc growing from (x, y) inside the rounded
     // rectangle r, at progress t (0..1).
@@ -176,6 +179,8 @@ public:
     void Ripple(float x, float y);
     POINT ScreenToContent(POINT screen) const;
     POINT ContentToScreen(POINT content) const;
+    // Drops an image Canvas::Image cached under `key` (it is replaced by another).
+    void ForgetImage(const std::wstring& key) { bitmaps_.erase(key); }
 
 private:
     friend class Canvas;

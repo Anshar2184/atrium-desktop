@@ -3,7 +3,9 @@
   Atrium's desktop widgets: the layout read from widgets.json, their layer
   (just above the desktop, under every window; over it when every app is
   minimised), dragging one with the real mouse (it snaps to the grid and the
-  layout is saved), changing a size, adding and removing, and turning them off.
+  layout is saved), changing a size, adding and removing, a large (2 x 2)
+  calendar, typing into a note and into reminders with real clicks and keys
+  (saved in widgets.json), ticking a reminder off, and turning them off.
 
 .DESCRIPTION
   Moves the mouse, so it only runs after the user has been idle for 30 s.
@@ -22,6 +24,13 @@ public static class U {
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool alt);
+  [StructLayout(LayoutKind.Sequential)] public struct KI { public ushort vk, scan; public uint flags, time; public IntPtr extra; }
+  [StructLayout(LayoutKind.Explicit, Size = 40)] public struct IN { [FieldOffset(0)] public uint type; [FieldOffset(8)] public KI ki; }
+  [DllImport("user32.dll")] static extern uint SendInput(uint n, IN[] i, int size);
+  static void Send(ushort vk, ushort scan, uint flags) { var a = new IN[2]; a[0].type = 1; a[0].ki.vk = vk; a[0].ki.scan = scan; a[0].ki.flags = flags; a[1] = a[0]; a[1].ki.flags = flags | 2; SendInput(2, a, Marshal.SizeOf(typeof(IN))); }
+  // Characters as Unicode packets (past the input method), keys by their virtual key.
+  public static void Type(string s) { foreach (char c in s) { Send(0, c, 4); System.Threading.Thread.Sleep(30); } }
+  public static void Key(ushort vk) { Send(vk, 0, 0); System.Threading.Thread.Sleep(40); }
   [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref L l);
   [DllImport("kernel32.dll")] static extern uint GetTickCount();
   public static double Idle() { var l = new L(); l.s = 8; GetLastInputInfo(ref l); return (GetTickCount() - l.t) / 1000.0; }
@@ -58,6 +67,10 @@ function Rect($line) { (Field $line "rect") -split "," | ForEach-Object { [int]$
 function Layout { (Get-Content $wfile -Raw -Encoding UTF8 | ConvertFrom-Json).widgets }
 function Settings($widgets) {
     [IO.File]::WriteAllText($file, '{"notifyListener":false,"notifyWeChat":false,"notifyFeishu":false,"widgets":' + $widgets + ',"pins":[],"showRunning":false,"showClock":true}')
+}
+function Click($x, $y) {
+    [U]::SetCursorPos($x, $y) | Out-Null; Start-Sleep -Milliseconds 150
+    [U]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60; [U]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
 }
 
 try {
@@ -106,6 +119,38 @@ try {
     C widgets-do "remove:0"; Start-Sleep 0.8
     $st = @(State)
     Check "remove" ($st.Count -eq 3 -and @(Layout | Where-Object { $_.kind -eq "clock" }).Count -eq 0) "left: $(($st | Select-Object -Skip 1 | ForEach-Object { Field $_ 'kind' }) -join ',')"
+
+    # A large calendar: two cells by two.
+    C widgets-do "add:calendar:large"; Start-Sleep 0.8
+    $st = @(State)
+    $r = Rect $st[-1]
+    Check "size-large" ((Field $st[-1] "size") -eq "large" -and [math]::Abs(($r[2] - $r[0]) - ($r[3] - $r[1])) -le 2 -and ($r[3] - $r[1]) -gt 1.9 * ($r0[3] - $r0[1])) "calendar $(Field $st[-1] 'size') rect $($r -join ',')"
+    C widgets-do "remove:$($st.Count - 2)"; Start-Sleep 0.8
+
+    # A note: a real click, then keys (a line break, a correction); Esc ends it and it is saved.
+    C widgets-do "add:notes:small"; Start-Sleep 0.8
+    $st = @(State)
+    $r = Rect $st[-1]
+    $s = ($r[2] - $r[0]) / 164
+    Click ([int](($r[0] + $r[2]) / 2)) ([int](($r[1] + $r[3]) / 2)); Start-Sleep 0.5
+    [U]::Type("abc"); [U]::Key(0x0D); [U]::Type("dx"); [U]::Key(0x08); [U]::Type("e"); [U]::Key(0x1B); Start-Sleep 0.6
+    $note = @(Layout | Where-Object { $_.kind -eq "notes" })[0]
+    Check "note-typed" ($note.text -eq "abc`nde") "saved text: '$($note.text -replace "`n", '\n')'"
+
+    # Reminders: "new reminder", a name, Enter starts the next one (left empty: dropped), then tick it off.
+    C widgets-do "add:reminders:medium"; Start-Sleep 0.8
+    $st = @(State)
+    $r = Rect $st[-1]
+    $s = ($r[3] - $r[1]) / 164
+    Click ([int]($r[0] + 80 * $s)) ([int]($r[1] + 55 * $s)); Start-Sleep 0.5
+    [U]::Type("milk"); [U]::Key(0x0D); Start-Sleep 0.3; [U]::Key(0x1B); Start-Sleep 0.6
+    $rem = @(Layout | Where-Object { $_.kind -eq "reminders" })[0]
+    Check "reminder-typed" (@($rem.items).Count -eq 1 -and $rem.items[0].text -eq "milk" -and -not $rem.items[0].done) "saved: $(($rem.items | ForEach-Object { "$($_.text)/$($_.done)" }) -join ',')"
+    Click ([int]($r[0] + 23 * $s)) ([int]($r[1] + 55 * $s)); Start-Sleep 1.4
+    $rem = @(Layout | Where-Object { $_.kind -eq "reminders" })[0]
+    Check "reminder-ticked" (@($rem.items).Count -eq 1 -and $rem.items[0].done) "saved: $(($rem.items | ForEach-Object { "$($_.text)/$($_.done)" }) -join ',')"
+    C widgets-do "remove:$($st.Count - 2)"; Start-Sleep 0.5
+    C widgets-do "remove:$($st.Count - 3)"; Start-Sleep 0.8
     Start-Process $Core -ArgumentList "--exit" -Wait
     Start-Sleep 1
     Remove-Item Env:ATRIUM_WIDGETS_TEST

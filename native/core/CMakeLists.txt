@@ -48,6 +48,7 @@ add_executable(atrium_core WIN32
     ui/lock_screen.cpp
     ui/control_center.cpp
     ui/desktop_widgets.cpp
+    ui/widget_faces.cpp
     shell/notification_listener.cpp
     render/bar_painter.cpp
     render/capture.cpp

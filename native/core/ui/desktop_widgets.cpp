@@ -5,7 +5,11 @@
 #include "settings.h"
 
 #include <dwmapi.h>
+#include <imm.h>
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shobjidl.h>
+#include <wincodec.h>
 #include <windowsx.h>
 
 #include <winrt/Windows.Data.Json.h>
@@ -14,7 +18,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <map>
+#include <random>
+#include <thread>
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -24,42 +29,51 @@ namespace atrium {
 
 namespace {
 
-// macOS's widget grid: a small widget is a square, a medium one two squares wide.
-constexpr float kCell = 164, kGap = 16, kMargin = 24, kRadius = 22;
+constexpr float kMargin = 24;
 constexpr double kGlideMs = 240;
-constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4;
+constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4, kCaretTimer = 5, kSaveTimer = 6;
+constexpr UINT kCaretMs = 530, kSaveMs = 800;
+constexpr ULONGLONG kPhotoMs = 10 * 60 * 1000; // a new photo every ten minutes
 constexpr const wchar_t* kHostClass = L"AtriumWidgetsHost";
-constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1; // lParam Widget*: removed once its own message is done
+constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1;  // lParam Widget*: removed once its own message is done
 constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2; // a burst of window events, one restack
+constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;   // lParam PhotoRead*: a photo was read
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
 
-D2D1_COLOR_F Rgba(uint32_t rgb, float a) { return D2D1::ColorF(rgb, a); }
-D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 float Ease(float t)
 {
     t = std::clamp(t, 0.f, 1.f);
     return 1 - (1 - t) * (1 - t) * (1 - t);
 }
 
-const wchar_t* KindName(WidgetKind k) { return k == WidgetKind::Clock ? L"clock" : k == WidgetKind::Calendar ? L"calendar" : L"battery"; }
-const wchar_t* SizeName(WidgetSize s) { return s == WidgetSize::Small ? L"small" : L"medium"; }
+struct KindName {
+    WidgetKind kind;
+    const wchar_t* name;
+};
+const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},     {WidgetKind::Calendar, L"calendar"},   {WidgetKind::Battery, L"battery"},
+                           {WidgetKind::Digital, L"digital"}, {WidgetKind::System, L"system"},       {WidgetKind::Notes, L"notes"},
+                           {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"}};
+
+const wchar_t* NameOf(WidgetKind k)
+{
+    for (const KindName& n : kKinds)
+        if (n.kind == k)
+            return n.name;
+    return L"clock";
+}
 bool ParseKind(const std::wstring& s, WidgetKind& k)
 {
-    if (s == L"clock")
-        k = WidgetKind::Clock;
-    else if (s == L"calendar")
-        k = WidgetKind::Calendar;
-    else if (s == L"battery")
-        k = WidgetKind::Battery;
-    else
-        return false;
-    return true;
+    for (const KindName& n : kKinds)
+        if (s == n.name) {
+            k = n.kind;
+            return true;
+        }
+    return false;
 }
-WidgetSize ParseSize(const std::wstring& s) { return s == L"medium" ? WidgetSize::Medium : WidgetSize::Small; }
-bool Supports(WidgetKind k, WidgetSize s) { return s == WidgetSize::Small || k != WidgetKind::Battery; }
-int SpanOf(WidgetSize s) { return s == WidgetSize::Medium ? 2 : 1; }
-float WidthOf(WidgetSize s) { return float(SpanOf(s)) * kCell + float(SpanOf(s) - 1) * kGap; }
+const wchar_t* SizeName(WidgetSize s) { return s == WidgetSize::Small ? L"small" : s == WidgetSize::Medium ? L"medium" : L"large"; }
+WidgetSize ParseSize(const std::wstring& s) { return s == L"large" ? WidgetSize::Large : s == L"medium" ? WidgetSize::Medium : WidgetSize::Small; }
+bool Editable(WidgetKind k) { return k == WidgetKind::Notes || k == WidgetKind::Reminders; }
 
 std::wstring LayoutPath()
 {
@@ -99,88 +113,97 @@ std::wstring LocalCity()
     return end == std::wstring::npos ? d : d.substr(0, end);
 }
 
-// The world clock's cities (macOS shows four in a medium Clock widget).
-struct City {
-    const wchar_t* name;
-    const wchar_t* zone;
-};
-const City kCities[] = {{L"北京", L"China Standard Time"}, {L"东京", L"Tokyo Standard Time"}, {L"伦敦", L"GMT Standard Time"}, {L"纽约", L"Eastern Standard Time"}};
-
-bool ZoneInfo(const wchar_t* key, DYNAMIC_TIME_ZONE_INFORMATION& out)
+std::wstring PicturesFolder()
 {
-    static std::map<std::wstring, DYNAMIC_TIME_ZONE_INFORMATION> zones; // read once
-    if (zones.empty()) {
-        DYNAMIC_TIME_ZONE_INFORMATION d{};
-        for (DWORD i = 0; EnumDynamicTimeZoneInformation(i, &d) == ERROR_SUCCESS; ++i)
-            zones[d.TimeZoneKeyName] = d;
-    }
-    auto it = zones.find(key);
-    if (it == zones.end())
-        return false;
-    out = it->second;
-    return true;
+    PWSTR path = nullptr;
+    std::wstring out;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Pictures, 0, nullptr, &path)))
+        out = path;
+    CoTaskMemFree(path);
+    return out;
 }
 
-int64_t Minutes(const SYSTEMTIME& t)
+// The pictures of a folder and its subfolders (two levels, a few thousand at most).
+void ListPhotos(const std::wstring& dir, std::vector<std::wstring>& out, int depth = 0)
 {
-    FILETIME f{};
-    SystemTimeToFileTime(&t, &f);
-    return int64_t((ULARGE_INTEGER{f.dwLowDateTime, f.dwHighDateTime}.QuadPart) / 600000000ULL);
-}
-
-// The colours of a widget: the glass's ink, and macOS's accents.
-struct Pal {
-    D2D1_COLOR_F text, sub, faint, face, red, orange, green, track;
-};
-
-Pal GlassPal(const Theme& t)
-{
-    return {t.text, t.subtext, t.faint, Alpha(t.text, 0.10f), Rgba(0xFF453A, 0.98f), Rgba(0xFF9F0A, 0.98f), Rgba(0x30D158, 0.98f),
-            Alpha(t.text, 0.18f)};
-}
-
-const wchar_t* const kWeekLong[] = {L"星期一", L"星期二", L"星期三", L"星期四", L"星期五", L"星期六", L"星期日"};
-const wchar_t* const kWeekShort[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
-const wchar_t* const kMonths[] = {L"一月", L"二月", L"三月", L"四月", L"五月", L"六月",
-                                  L"七月", L"八月", L"九月", L"十月", L"十一月", L"十二月"};
-
-// An analogue face: hands as on macOS (a thin neck, then the blade), the
-// second hand in orange over the others. numbers: 1-12 inside the rim, else ticks.
-void ClockFace(Canvas& c, float cx, float cy, float R, const SYSTEMTIME& t, const Pal& p, D2D1_COLOR_F face, D2D1_COLOR_F ink, bool numbers,
-               const std::wstring& label, D2D1_COLOR_F labelInk)
-{
-    constexpr float kDeg = 3.14159265f / 180.f;
-    c.Circle(cx, cy, R, face);
-    for (int h = 1; h <= 12; ++h) {
-        float a = (float(h) * 30.f - 90.f) * kDeg;
-        if (numbers) {
-            float r = R * 0.78f, fs = R * 0.21f;
-            std::wstring n = std::to_wstring(h);
-            c.Text(n, D2D1::RectF(cx + r * std::cos(a) - fs, cy + r * std::sin(a) - fs * 0.72f, cx + r * std::cos(a) + fs, cy + r * std::sin(a) + fs * 0.72f), fs,
-                   ink, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-        } else {
-            float r0 = R * 0.80f, r1 = R * 0.92f;
-            c.Capsule(cx + r0 * std::cos(a), cy + r0 * std::sin(a), cx + r1 * std::cos(a), cy + r1 * std::sin(a), Alpha(ink, h % 3 ? 0.45f : 0.9f),
-                      std::max(1.f, R * 0.045f));
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        std::wstring name = fd.cFileName;
+        if (name == L"." || name == L".." || (fd.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)))
+            continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (depth < 2)
+                ListPhotos(dir + L"\\" + name, out, depth + 1);
+            continue;
         }
+        size_t dot = name.find_last_of(L'.');
+        if (dot == std::wstring::npos)
+            continue;
+        std::wstring ext = name.substr(dot);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+        for (const wchar_t* e : {L".jpg", L".jpeg", L".png", L".bmp", L".gif", L".webp", L".heic", L".tif", L".tiff"})
+            if (ext == e) {
+                out.push_back(dir + L"\\" + name);
+                break;
+            }
+    } while (out.size() < 5000 && FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+// A photo cropped to fill w x h px (centred) and turned upright, premultiplied BGRA.
+IconImage ReadPhoto(const std::wstring& path, UINT w, UINT h)
+{
+    IconImage out;
+    winrt::com_ptr<IWICImagingFactory> f;
+    winrt::com_ptr<IWICBitmapDecoder> decoder;
+    winrt::com_ptr<IWICBitmapFrameDecode> frame;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(f.put()))) ||
+        FAILED(f->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, decoder.put())) ||
+        FAILED(decoder->GetFrame(0, frame.put())))
+        return out;
+    winrt::com_ptr<IWICBitmapSource> src = frame;
+    // The camera's orientation (EXIF): phone pictures are often stored sideways.
+    WICBitmapTransformOptions turn = WICBitmapTransformRotate0;
+    winrt::com_ptr<IWICMetadataQueryReader> meta;
+    if (SUCCEEDED(frame->GetMetadataQueryReader(meta.put()))) {
+        PROPVARIANT v;
+        PropVariantInit(&v);
+        if (SUCCEEDED(meta->GetMetadataByName(L"System.Photo.Orientation", &v)) && v.vt == VT_UI2)
+            turn = v.uiVal == 3   ? WICBitmapTransformRotate180
+                   : v.uiVal == 6 ? WICBitmapTransformRotate90
+                   : v.uiVal == 8 ? WICBitmapTransformRotate270
+                                  : WICBitmapTransformRotate0;
+        PropVariantClear(&v);
     }
-    if (!label.empty())
-        c.Text(label, D2D1::RectF(cx - R, cy + R * 0.26f, cx + R, cy + R * 0.26f + R * 0.2f), R * 0.15f, labelInk, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-    float sec = float(t.wSecond), min = float(t.wMinute) + sec / 60.f, hour = float(t.wHour % 12) + min / 60.f;
-    auto hand = [&](float angle, float length, float width) {
-        float a = (angle - 90.f) * kDeg, neck = R * 0.16f;
-        float dx = std::cos(a), dy = std::sin(a);
-        c.Capsule(cx, cy, cx + dx * neck, cy + dy * neck, ink, std::max(1.2f, width * 0.36f));
-        c.Capsule(cx + dx * neck, cy + dy * neck, cx + dx * length, cy + dy * length, ink, width);
-    };
-    hand(hour * 30.f, R * 0.52f, std::max(2.5f, R * 0.075f));
-    hand(min * 6.f, R * 0.80f, std::max(2.5f, R * 0.075f));
-    c.Circle(cx, cy, std::max(2.2f, R * 0.055f), ink);
-    float a = (sec * 6.f - 90.f) * kDeg;
-    c.Capsule(cx - std::cos(a) * R * 0.18f, cy - std::sin(a) * R * 0.18f, cx + std::cos(a) * R * 0.86f, cy + std::sin(a) * R * 0.86f, p.orange,
-              std::max(1.f, R * 0.02f));
-    c.Circle(cx, cy, std::max(1.8f, R * 0.04f), p.orange);
-    c.Circle(cx, cy, std::max(0.8f, R * 0.016f), face);
+    if (turn != WICBitmapTransformRotate0) {
+        winrt::com_ptr<IWICBitmapFlipRotator> rot;
+        if (SUCCEEDED(f->CreateBitmapFlipRotator(rot.put())) && SUCCEEDED(rot->Initialize(src.get(), turn)))
+            src = rot;
+    }
+    UINT sw = 0, sh = 0;
+    if (FAILED(src->GetSize(&sw, &sh)) || !sw || !sh)
+        return out;
+    double k = std::max(double(w) / sw, double(h) / sh);
+    UINT cw = std::min(sw, UINT(std::lround(w / k))), ch = std::min(sh, UINT(std::lround(h / k)));
+    WICRect crop{INT((sw - cw) / 2), INT((sh - ch) / 2), INT(cw), INT(ch)};
+    winrt::com_ptr<IWICBitmapClipper> clip;
+    winrt::com_ptr<IWICBitmapScaler> scale;
+    winrt::com_ptr<IWICFormatConverter> conv;
+    if (FAILED(f->CreateBitmapClipper(clip.put())) || FAILED(clip->Initialize(src.get(), &crop)) || FAILED(f->CreateBitmapScaler(scale.put())) ||
+        FAILED(scale->Initialize(clip.get(), w, h, WICBitmapInterpolationModeHighQualityCubic)) || FAILED(f->CreateFormatConverter(conv.put())) ||
+        FAILED(conv->Initialize(scale.get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom)))
+        return out;
+    out.bgra.resize(size_t(w) * h * 4);
+    if (FAILED(conv->CopyPixels(nullptr, w * 4, UINT(out.bgra.size()), out.bgra.data()))) {
+        out.bgra.clear();
+        return out;
+    }
+    out.width = int(w);
+    out.height = int(h);
+    return out;
 }
 
 } // namespace
@@ -195,7 +218,38 @@ struct DesktopWidgets::Widget {
     RECT downRect{};
     RECT glideFrom{}, glideTo{};
     double glideMs = 0;
+    WidgetContent content;
+    std::vector<WidgetHit> hits; // of the last paint
+    ULONGLONG photoAt = 0;       // when the photo was last changed
+    unsigned photoGen = 0;       // the photo being read
 };
+
+namespace {
+struct PhotoRead {
+    void* widget;
+    unsigned gen;
+    std::wstring path;
+    IconImage image;
+};
+} // namespace
+
+const std::vector<WidgetChoice>& WidgetChoices()
+{
+    static const std::vector<WidgetChoice> choices = {
+        {WidgetKind::Clock, WidgetSize::Small, L"时钟"},
+        {WidgetKind::Clock, WidgetSize::Medium, L"世界时钟"},
+        {WidgetKind::Digital, WidgetSize::Small, L"数字时钟"},
+        {WidgetKind::Calendar, WidgetSize::Small, L"日历"},
+        {WidgetKind::Calendar, WidgetSize::Medium, L"日历（月视图）"},
+        {WidgetKind::Calendar, WidgetSize::Large, L"日历（农历月历）"},
+        {WidgetKind::Battery, WidgetSize::Small, L"电池"},
+        {WidgetKind::System, WidgetSize::Small, L"系统监视"},
+        {WidgetKind::Notes, WidgetSize::Small, L"备忘录"},
+        {WidgetKind::Reminders, WidgetSize::Medium, L"提醒事项"},
+        {WidgetKind::Photos, WidgetSize::Small, L"照片"},
+    };
+    return choices;
+}
 
 DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
 {
@@ -205,10 +259,11 @@ DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
     wc.hInstance = instance;
     wc.lpszClassName = kHostClass;
     RegisterClassExW(&wc);
-    // A hidden top-level window: timers, display and theme changes, the menu's owner.
+    // A hidden top-level window: timers, display changes, the menu's owner.
     host_ = CreateWindowExW(WS_EX_TOOLWINDOW, kHostClass, L"Atrium Widgets", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     SetWindowLongPtrW(host_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-    city_ = LocalCity();
+    world_.city = LocalCity();
+    world_.lunar = &lunar_;
     wchar_t test[8] = {};
     test_ = GetEnvironmentVariableW(L"ATRIUM_WIDGETS_TEST", test, 8) && test[0] == L'1';
 }
@@ -227,7 +282,8 @@ void DesktopWidgets::SetEnabled(bool on)
         return;
     enabled_ = on;
     if (on) {
-        status_ = QuerySystemStatus();
+        world_.status = QuerySystemStatus();
+        SampleSystem();
         Load();
         Build();
         hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, nullptr, OnWinEvent, 0, 0,
@@ -242,6 +298,9 @@ void DesktopWidgets::SetEnabled(bool on)
         hook_ = nullptr;
         KillTimer(host_, kTickTimer);
         KillTimer(host_, kSafetyTimer);
+        KillTimer(host_, kCaretTimer);
+        if (KillTimer(host_, kSaveTimer))
+            Save(); // typing not saved yet
         Clear();
         Log(L"widgets: off");
     }
@@ -272,33 +331,34 @@ float DesktopWidgets::Scale() const { return PopupScale(WorkArea()); }
 int DesktopWidgets::Cols() const
 {
     RECT wa = WorkArea();
-    return std::max(1, int((float(wa.right - wa.left) / Scale() - 2 * kMargin + kGap) / (kCell + kGap)));
+    return std::max(1, int((float(wa.right - wa.left) / Scale() - 2 * kMargin + kWidgetGap) / (kWidgetCell + kWidgetGap)));
 }
 
 int DesktopWidgets::Rows() const
 {
     RECT wa = WorkArea();
     // The bar floats over the bottom of the work area: leave it a row's worth of room.
-    return std::max(1, int((float(wa.bottom - wa.top) / Scale() - 2 * kMargin - 90 + kGap) / (kCell + kGap)));
+    return std::max(1, int((float(wa.bottom - wa.top) / Scale() - 2 * kMargin - 90 + kWidgetGap) / (kWidgetCell + kWidgetGap)));
 }
 
 RECT DesktopWidgets::CellRect(int col, int row, WidgetSize size) const
 {
     RECT wa = WorkArea();
     float s = Scale();
-    int x = wa.left + int(std::lround((kMargin + float(col) * (kCell + kGap)) * s));
-    int y = wa.top + int(std::lround((kMargin + float(row) * (kCell + kGap)) * s));
-    return RECT{x, y, x + int(std::lround(WidthOf(size) * s)), y + int(std::lround(kCell * s))};
+    int x = wa.left + int(std::lround((kMargin + float(col) * (kWidgetCell + kWidgetGap)) * s));
+    int y = wa.top + int(std::lround((kMargin + float(row) * (kWidgetCell + kWidgetGap)) * s));
+    return RECT{x, y, x + int(std::lround(WidgetWidth(size) * s)), y + int(std::lround(WidgetHeight(size) * s))};
 }
 
 bool DesktopWidgets::Fits(int col, int row, WidgetSize size, const Widget* except) const
 {
-    if (col < 0 || row < 0 || col + SpanOf(size) > Cols() || row >= Rows())
+    if (col < 0 || row < 0 || col + WidgetCols(size) > Cols() || row + WidgetRows(size) > Rows())
         return false;
     for (const auto& w : widgets_) {
         if (w.get() == except)
             continue;
-        bool apart = col + SpanOf(size) <= w->col || w->col + SpanOf(w->size) <= col || row != w->row;
+        bool apart = col + WidgetCols(size) <= w->col || w->col + WidgetCols(w->size) <= col || row + WidgetRows(size) <= w->row ||
+                     w->row + WidgetRows(w->size) <= row;
         if (!apart)
             return false;
     }
@@ -326,13 +386,14 @@ void DesktopWidgets::Load()
 {
     widgets_.clear();
     std::wstring text = ReadTextFile(LayoutPath());
-    struct Entry {
-        WidgetKind kind;
-        WidgetSize size;
-        int col, row;
-    };
-    std::vector<Entry> entries;
     bool read = false;
+    auto add = [&](WidgetKind k, WidgetSize s, int c, int r, WidgetContent content) {
+        if (!WidgetSupports(k, s))
+            s = WidgetSize::Small;
+        if (!Fits(c, r, s, nullptr) && !FreeCellNear(float(c), float(r), s, nullptr, c, r))
+            return; // no room left on this screen
+        Create(k, s, c, r).content = std::move(content);
+    };
     if (!text.empty()) {
         json::JsonObject o{nullptr};
         if (json::JsonObject::TryParse(text, o) && o.HasKey(L"widgets")) {
@@ -344,30 +405,28 @@ void DesktopWidgets::Load()
                 WidgetKind k;
                 if (!ParseKind(std::wstring(e.GetNamedString(L"kind", L"")), k))
                     continue;
-                WidgetSize s = ParseSize(std::wstring(e.GetNamedString(L"size", L"small")));
-                if (!Supports(k, s))
-                    s = WidgetSize::Small;
-                entries.push_back({k, s, int(e.GetNamedNumber(L"col", 0)), int(e.GetNamedNumber(L"row", 0))});
+                WidgetContent content;
+                content.text = e.GetNamedString(L"text", L"");
+                content.folder = e.GetNamedString(L"folder", L"");
+                if (e.HasKey(L"items") && e.GetNamedValue(L"items").ValueType() == json::JsonValueType::Array)
+                    for (const auto& iv : e.GetNamedArray(L"items")) {
+                        if (iv.ValueType() != json::JsonValueType::Object)
+                            continue;
+                        json::JsonObject io = iv.GetObject();
+                        content.items.push_back({std::wstring(io.GetNamedString(L"text", L"")), io.GetNamedBoolean(L"done", false)});
+                    }
+                add(k, ParseSize(std::wstring(e.GetNamedString(L"size", L"small"))), int(e.GetNamedNumber(L"col", 0)), int(e.GetNamedNumber(L"row", 0)),
+                    std::move(content));
             }
         } else {
             Log(L"widgets: %s is not valid, starting afresh", LayoutPath().c_str());
         }
     }
-    if (!read) // first run: a column of widgets at the top left, as macOS starts
-        entries = {{WidgetKind::Clock, WidgetSize::Small, 0, 0},
-                   {WidgetKind::Battery, WidgetSize::Small, 1, 0},
-                   {WidgetKind::Calendar, WidgetSize::Medium, 0, 1},
-                   {WidgetKind::Clock, WidgetSize::Medium, 0, 2}};
-    for (const Entry& e : entries) {
-        auto w = std::make_unique<Widget>();
-        w->kind = e.kind;
-        w->size = e.size;
-        int c = e.col, r = e.row;
-        if (!Fits(c, r, e.size, nullptr) && !FreeCellNear(float(c), float(r), e.size, nullptr, c, r))
-            continue; // no room left on this screen
-        w->col = c;
-        w->row = r;
-        widgets_.push_back(std::move(w));
+    if (!read) { // first run: a column of widgets at the top left, as macOS starts
+        add(WidgetKind::Clock, WidgetSize::Small, 0, 0, {});
+        add(WidgetKind::Battery, WidgetSize::Small, 1, 0, {});
+        add(WidgetKind::Calendar, WidgetSize::Medium, 0, 1, {});
+        add(WidgetKind::Clock, WidgetSize::Medium, 0, 2, {});
     }
 }
 
@@ -376,10 +435,27 @@ void DesktopWidgets::Save() const
     json::JsonArray list;
     for (const auto& w : widgets_) {
         json::JsonObject e;
-        e.SetNamedValue(L"kind", json::JsonValue::CreateStringValue(KindName(w->kind)));
+        e.SetNamedValue(L"kind", json::JsonValue::CreateStringValue(NameOf(w->kind)));
         e.SetNamedValue(L"size", json::JsonValue::CreateStringValue(SizeName(w->size)));
         e.SetNamedValue(L"col", json::JsonValue::CreateNumberValue(w->col));
         e.SetNamedValue(L"row", json::JsonValue::CreateNumberValue(w->row));
+        const WidgetContent& c = w->content;
+        if (w->kind == WidgetKind::Notes)
+            e.SetNamedValue(L"text", json::JsonValue::CreateStringValue(c.text));
+        if (w->kind == WidgetKind::Reminders) {
+            json::JsonArray items;
+            for (const Reminder& r : c.items) {
+                if (r.text.empty())
+                    continue; // one being typed
+                json::JsonObject io;
+                io.SetNamedValue(L"text", json::JsonValue::CreateStringValue(r.text));
+                io.SetNamedValue(L"done", json::JsonValue::CreateBooleanValue(r.done));
+                items.Append(io);
+            }
+            e.SetNamedValue(L"items", items);
+        }
+        if (w->kind == WidgetKind::Photos && !c.folder.empty())
+            e.SetNamedValue(L"folder", json::JsonValue::CreateStringValue(c.folder));
         list.Append(e);
     }
     json::JsonObject o;
@@ -387,6 +463,8 @@ void DesktopWidgets::Save() const
     if (!WriteTextFile(LayoutPath(), std::wstring(o.Stringify())))
         Log(L"widgets: could not save the layout");
 }
+
+void DesktopWidgets::SaveSoon() { SetTimer(host_, kSaveTimer, kSaveMs, nullptr); }
 
 // ---- windows -----------------------------------------------------------------
 
@@ -401,18 +479,26 @@ DesktopWidgets::Widget& DesktopWidgets::Create(WidgetKind kind, WidgetSize size,
     return *widgets_.back();
 }
 
+bool DesktopWidgets::Has(const Widget* w) const
+{
+    return std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& p) { return p.get() == w; });
+}
+
 void DesktopWidgets::Build()
 {
     for (auto& wp : widgets_) {
         Widget& w = *wp;
         if (w.surface)
             continue;
-        w.surface = std::make_unique<Surface>(instance_, L"Atrium Widget", false, 14.f);
+        // Notes and reminders take the keyboard: their windows can be activated.
+        w.surface = std::make_unique<Surface>(instance_, L"Atrium Widget", Editable(w.kind), 14.f);
         w.surface->SetDesktopLayer(true);
-        w.surface->SetRadius(kRadius);
+        w.surface->SetRadius(kWidgetRadius);
         w.surface->paint = [this, &w](Canvas& c) { Paint(w, c); };
         w.surface->message = [this, &w](UINT m, WPARAM wp2, LPARAM lp, LRESULT& r) { return Message(w, m, wp2, lp, r); };
         Place(w, false);
+        if (w.kind == WidgetKind::Photos)
+            LoadPhoto(w, true);
     }
 }
 
@@ -453,7 +539,7 @@ void DesktopWidgets::Glide()
         if (w->glideMs <= 0 || !w->surface)
             continue;
         float k = Ease(float((now - w->glideMs) / kGlideMs));
-        // Size changes too (a widget made medium or small).
+        // Size changes too (a widget made larger or smaller).
         auto lerp = [&](LONG a, LONG b) { return LONG(std::lround(float(a) + float(b - a) * k)); };
         RECT r{lerp(w->glideFrom.left, w->glideTo.left), lerp(w->glideFrom.top, w->glideTo.top), lerp(w->glideFrom.right, w->glideTo.right),
                lerp(w->glideFrom.bottom, w->glideTo.bottom)};
@@ -469,7 +555,7 @@ void DesktopWidgets::Glide()
 
 void DesktopWidgets::Add(WidgetKind kind, WidgetSize size)
 {
-    if (!Supports(kind, size))
+    if (!WidgetSupports(kind, size))
         size = WidgetSize::Small;
     int c = 0, r = 0;
     if (!FreeCellNear(0, 0, size, nullptr, c, r)) {
@@ -480,7 +566,7 @@ void DesktopWidgets::Add(WidgetKind kind, WidgetSize size)
     if (enabled_)
         Build();
     Save();
-    Log(L"widgets: added %s %s at %d,%d", KindName(kind), SizeName(size), c, r);
+    Log(L"widgets: added %s %s at %d,%d", NameOf(kind), SizeName(size), c, r);
 }
 
 void DesktopWidgets::Remove(Widget& w)
@@ -499,12 +585,12 @@ void DesktopWidgets::RemoveNow(Widget& w)
     if (gone->surface)
         gone->surface->Hide(false);
     Save();
-    Log(L"widgets: removed %s", KindName(gone->kind));
+    Log(L"widgets: removed %s", NameOf(gone->kind));
 }
 
 void DesktopWidgets::Resize(Widget& w, WidgetSize size)
 {
-    if (w.size == size || !Supports(w.kind, size))
+    if (w.size == size || !WidgetSupports(w.kind, size))
         return;
     int c = w.col, r = w.row;
     if (!Fits(c, r, size, &w) && !FreeCellNear(float(c), float(r), size, &w, c, r))
@@ -514,6 +600,8 @@ void DesktopWidgets::Resize(Widget& w, WidgetSize size)
     w.row = r;
     Place(w, true);
     w.surface->Invalidate();
+    if (w.kind == WidgetKind::Photos)
+        LoadPhoto(w, false); // the same photo, cropped for the new size
     Save();
 }
 
@@ -535,7 +623,8 @@ void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD, HWND, LONG obj, L
 }
 
 // Just above the desktop, under every window; over it when every app is
-// minimised (Win+D raises the desktop over windows at the bottom, D14).
+// minimised (Win+D raises the desktop over windows at the bottom, D14). A
+// note or reminders being typed into stays where its click put it.
 void DesktopWidgets::Restack()
 {
     if (!enabled_ || widgets_.empty())
@@ -601,7 +690,7 @@ void DesktopWidgets::Restack()
             above = nullptr; // no desktop window: keep them at the bottom of the windows
         HWND after = found ? (above ? above : HWND_TOP) : HWND_BOTTOM;
         for (auto& w : widgets_) {
-            if (!w->surface)
+            if (!w->surface || w->content.editing)
                 continue;
             // Placed after a window that is not topmost, a topmost one stops being topmost.
             SetWindowPos(w->surface->Hwnd(), after, 0, 0, 0, 0, flags);
@@ -617,12 +706,26 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     if (self) {
         switch (m) {
         case WM_TIMER:
-            if (w == kTickTimer)
+            if (w == kTickTimer) {
                 self->Tick();
-            else if (w == kSafetyTimer)
+            } else if (w == kSafetyTimer) {
                 self->Restack();
-            else if (w == kGlideTimer)
+            } else if (w == kGlideTimer) {
                 self->Glide();
+            } else if (w == kSaveTimer) {
+                KillTimer(h, kSaveTimer);
+                self->Save();
+            } else if (w == kCaretTimer) {
+                bool any = false;
+                for (auto& wd : self->widgets_)
+                    if (wd->content.editing) {
+                        wd->content.caretOn = !wd->content.caretOn;
+                        wd->surface->Invalidate();
+                        any = true;
+                    }
+                if (!any)
+                    KillTimer(h, kCaretTimer);
+            }
             return 0;
         case WM_WIDGET_RESTACK:
             self->restackPosted_ = false;
@@ -635,19 +738,33 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                     self->Place(*wd, false);
             return 0;
         case WM_SETTINGCHANGE:
-            if (w == SPI_SETWORKAREA && self->enabled_) {
+            if (w == SPI_SETWORKAREA && self->enabled_)
                 for (auto& wd : self->widgets_)
                     self->Place(*wd, false);
-            }
             return 0;
         case WM_WIDGET_REMOVE: {
             auto* gone = reinterpret_cast<Widget*>(l);
-            if (std::any_of(self->widgets_.begin(), self->widgets_.end(), [&](const auto& p) { return p.get() == gone; }))
+            if (self->Has(gone))
                 self->RemoveNow(*gone);
             return 0;
         }
+        case WM_WIDGET_PHOTO: {
+            std::unique_ptr<PhotoRead> read(reinterpret_cast<PhotoRead*>(l));
+            auto* wd = static_cast<Widget*>(read->widget);
+            if (!self->Has(wd) || read->gen != wd->photoGen || !wd->surface)
+                return 0; // removed, or a newer photo is on its way
+            WidgetContent& c = wd->content;
+            if (!c.imageKey.empty())
+                wd->surface->ForgetImage(c.imageKey);
+            c.photo = read->path;
+            c.image = read->image.empty() ? nullptr : std::make_shared<const IconImage>(std::move(read->image));
+            c.imageKey = L"photo:" + std::to_wstring(read->gen);
+            wd->photoAt = GetTickCount64();
+            wd->surface->Invalidate();
+            return 0;
+        }
         case WM_TIMECHANGE:
-            self->city_ = LocalCity();
+            self->world_.city = LocalCity();
             self->Tick();
             return 0;
         }
@@ -662,18 +779,112 @@ void DesktopWidgets::Tick()
     bool minute = t.wMinute != lastMinute_;
     lastMinute_ = t.wMinute;
     if (minute || t.wSecond % 30 == 0)
-        status_ = QuerySystemStatus();
-    for (auto& w : widgets_)
-        if (w->surface && (w->kind == WidgetKind::Clock || minute))
+        world_.status = QuerySystemStatus();
+    bool sample = t.wSecond % 2 == 0;
+    if (sample)
+        SampleSystem();
+    ULONGLONG now = GetTickCount64();
+    for (auto& w : widgets_) {
+        if (!w->surface)
+            continue;
+        if (w->kind == WidgetKind::Clock || minute || (sample && w->kind == WidgetKind::System))
             w->surface->Invalidate();
+        if (w->kind == WidgetKind::Photos && w->photoAt && now - w->photoAt > kPhotoMs)
+            LoadPhoto(*w, true);
+    }
+}
+
+void DesktopWidgets::SampleSystem()
+{
+    auto u64 = [](FILETIME f) { return (uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime; };
+    FILETIME idle, kernel, user;
+    if (GetSystemTimes(&idle, &kernel, &user)) {
+        uint64_t i = u64(idle), total = u64(kernel) + u64(user); // kernel time includes idle time
+        if (cpuTotal_ && total > cpuTotal_)
+            world_.cpu = std::clamp(1.f - float(double(i - cpuIdle_) / double(total - cpuTotal_)), 0.f, 1.f);
+        cpuIdle_ = i;
+        cpuTotal_ = total;
+    }
+    MEMORYSTATUSEX ms{sizeof(ms)};
+    if (GlobalMemoryStatusEx(&ms)) {
+        constexpr double kGb = 1024.0 * 1024 * 1024;
+        world_.memory = float(ms.dwMemoryLoad) / 100.f;
+        world_.memoryTotalGb = double(ms.ullTotalPhys) / kGb;
+        world_.memoryGb = double(ms.ullTotalPhys - ms.ullAvailPhys) / kGb;
+    }
+    wchar_t windows[MAX_PATH] = {};
+    GetWindowsDirectoryW(windows, MAX_PATH);
+    std::wstring root = std::wstring(windows).substr(0, 3); // "C:\"
+    ULARGE_INTEGER avail{}, total{}, free{};
+    if (GetDiskFreeSpaceExW(root.c_str(), &avail, &total, &free) && total.QuadPart) {
+        world_.disk = 1.f - float(double(free.QuadPart) / double(total.QuadPart));
+        world_.diskFreeGb = double(avail.QuadPart) / (1024.0 * 1024 * 1024);
+    }
+}
+
+// ---- photos ------------------------------------------------------------------
+
+void DesktopWidgets::PickFolder(Widget& w)
+{
+    winrt::com_ptr<IFileOpenDialog> dialog;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dialog.put()))))
+        return;
+    FILEOPENDIALOGOPTIONS o = 0;
+    dialog->GetOptions(&o);
+    dialog->SetOptions(o | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    dialog->SetTitle(L"选择照片文件夹");
+    Widget* wp = &w;
+    winrt::com_ptr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->Show(host_)) || FAILED(dialog->GetResult(item.put())) || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        return;
+    if (Has(wp)) { // the dialog ran its own message loop
+        wp->content.folder = path;
+        Save();
+        LoadPhoto(*wp, true);
+        Log(L"widgets: photos from a chosen folder");
+    }
+    CoTaskMemFree(path);
+}
+
+// another: a different picture of the folder; else the one shown, read again (a new size).
+void DesktopWidgets::LoadPhoto(Widget& w, bool another)
+{
+    if (!w.surface)
+        return;
+    std::wstring folder = w.content.folder.empty() ? PicturesFolder() : w.content.folder;
+    std::wstring current = w.content.photo;
+    float s = Scale();
+    UINT pw = UINT(std::lround(WidgetWidth(w.size) * s)), ph = UINT(std::lround(WidgetHeight(w.size) * s));
+    unsigned gen = w.photoGen = ++photoGen_;
+    w.photoAt = GetTickCount64(); // no second request while this one runs
+    HWND host = host_;
+    void* widget = &w;
+    std::thread([=] {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        std::wstring path = current;
+        if (another || path.empty()) {
+            std::vector<std::wstring> all;
+            ListPhotos(folder, all);
+            if (all.size() > 1)
+                all.erase(std::remove(all.begin(), all.end(), current), all.end());
+            path.clear();
+            if (!all.empty()) {
+                std::mt19937 rng{std::random_device{}()};
+                path = all[std::uniform_int_distribution<size_t>(0, all.size() - 1)(rng)];
+            }
+        }
+        auto* read = new PhotoRead{widget, gen, path, path.empty() ? IconImage{} : ReadPhoto(path, pw, ph)};
+        CoUninitialize();
+        if (!PostMessageW(host, WM_WIDGET_PHOTO, 0, reinterpret_cast<LPARAM>(read)))
+            delete read;
+    }).detach();
 }
 
 // ---- input -------------------------------------------------------------------
 
 bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r)
 {
-    (void)wp;
-    (void)lp;
     (void)r;
     switch (m) {
     case WM_LBUTTONDOWN:
@@ -692,6 +903,7 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
         if (!w.dragging && std::abs(dx) + std::abs(dy) > int(6 * Scale())) {
             w.dragging = true;
             w.glideMs = 0;
+            EndEdit(w);
             // Over the windows while it moves, as macOS lifts a dragged widget.
             SetWindowPos(w.surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
@@ -712,7 +924,8 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
             // Snaps to the nearest free place of the grid and glides there.
             RECT cur = w.surface->Rect(), wa = WorkArea();
             float s = Scale();
-            float col = (float(cur.left - wa.left) / s - kMargin) / (kCell + kGap), row = (float(cur.top - wa.top) / s - kMargin) / (kCell + kGap);
+            float col = (float(cur.left - wa.left) / s - kMargin) / (kWidgetCell + kWidgetGap);
+            float row = (float(cur.top - wa.top) / s - kMargin) / (kWidgetCell + kWidgetGap);
             int c = w.col, rr = w.row;
             if (FreeCellNear(col, row, w.size, &w, c, rr)) {
                 w.col = c;
@@ -721,9 +934,12 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
             Place(w, true);
             Save();
             Restack();
-            Log(L"widgets: %s moved to %d,%d", KindName(w.kind), w.col, w.row);
+            Log(L"widgets: %s moved to %d,%d", NameOf(w.kind), w.col, w.row);
         } else if (m == WM_LBUTTONUP) {
-            Activate(w);
+            if (Editable(w.kind))
+                Click(w, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+            else
+                Activate(w);
         }
         return true;
     }
@@ -733,6 +949,15 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
     case WM_LBUTTONDBLCLK:
     case WM_RBUTTONDOWN:
         return true;
+    case WM_CHAR:
+    case WM_KEYDOWN:
+        return w.content.editing && Key(w, m, wp);
+    case WM_KILLFOCUS:
+        EndEdit(w);
+        return false;
+    case WM_IME_STARTCOMPOSITION:
+        PlaceImeWindow(w);
+        return false; // the input method's own window
     }
     return false;
 }
@@ -744,63 +969,291 @@ void DesktopWidgets::Activate(Widget& w)
     POINT c = w.surface->ScreenToContent(p);
     float s = w.surface->Scale();
     w.surface->Ripple(float(c.x) / s, float(c.y) / s);
-    if (w.kind == WidgetKind::Clock)
-        ShellExecuteW(nullptr, L"open", L"ms-clock:", nullptr, nullptr, SW_SHOWNORMAL);
-    else if (w.kind == WidgetKind::Calendar && onCalendar)
-        onCalendar();
-    else if (w.kind == WidgetKind::Battery)
-        ShellExecuteW(nullptr, L"open", status_.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep", nullptr, nullptr, SW_SHOWNORMAL);
-    Log(L"widgets: %s opened", KindName(w.kind));
+    std::wstring open;
+    switch (w.kind) {
+    case WidgetKind::Clock:
+    case WidgetKind::Digital:
+        open = L"ms-clock:";
+        break;
+    case WidgetKind::Calendar:
+        if (onCalendar)
+            onCalendar();
+        break;
+    case WidgetKind::Battery:
+        open = world_.status.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep";
+        break;
+    case WidgetKind::System:
+        open = L"taskmgr.exe";
+        break;
+    case WidgetKind::Photos:
+        if (w.content.photo.empty())
+            PickFolder(w);
+        else
+            open = w.content.photo;
+        break;
+    default:
+        break;
+    }
+    if (!open.empty())
+        ShellExecuteW(nullptr, L"open", open.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    Log(L"widgets: %s opened", NameOf(w.kind));
+}
+
+void DesktopWidgets::Click(Widget& w, POINT content)
+{
+    if (w.kind == WidgetKind::Notes) {
+        StartEdit(w, -1);
+        return;
+    }
+    float s = w.surface->Scale();
+    D2D1_POINT_2F p = D2D1::Point2F(float(content.x) / s, float(content.y) / s);
+    std::wstring id;
+    for (const WidgetHit& h : w.hits)
+        if (h.id != L"caret" && p.x >= h.rect.left && p.x < h.rect.right && p.y >= h.rect.top && p.y < h.rect.bottom) {
+            id = h.id;
+            break;
+        }
+    WidgetContent& c = w.content;
+    if (id.rfind(L"toggle:", 0) == 0) {
+        size_t i = size_t(_wtoi(id.c_str() + 7));
+        if (c.editing && c.item == int(i))
+            EndEdit(w);
+        if (i < c.items.size() && !c.items[i].text.empty()) {
+            c.items[i].done = !c.items[i].done;
+            SaveSoon();
+        }
+        w.surface->Invalidate();
+    } else if (id.rfind(L"item:", 0) == 0) {
+        StartEdit(w, _wtoi(id.c_str() + 5));
+    } else if (id == L"add") {
+        EndEdit(w);
+        c.items.push_back({});
+        StartEdit(w, int(c.items.size()) - 1);
+    } else {
+        EndEdit(w);
+    }
+}
+
+void DesktopWidgets::StartEdit(Widget& w, int item)
+{
+    WidgetContent& c = w.content;
+    if (c.editing && c.item != item) {
+        // Another reminder: an empty one being left goes, which may move this one up.
+        if (w.kind == WidgetKind::Reminders && c.item >= 0 && c.item < item && c.items[size_t(c.item)].text.empty())
+            --item;
+        EndEdit(w);
+    }
+    if (w.kind == WidgetKind::Reminders && (item < 0 || item >= int(c.items.size())))
+        return;
+    c.editing = true;
+    c.item = item;
+    c.caret = w.kind == WidgetKind::Notes ? c.text.size() : c.items[size_t(item)].text.size();
+    c.caretOn = true;
+    SetTimer(host_, kCaretTimer, kCaretMs, nullptr);
+    if (GetForegroundWindow() != w.surface->Hwnd())
+        SetForegroundWindow(w.surface->Hwnd());
+    SetFocus(w.surface->Hwnd());
+    w.surface->Invalidate();
+}
+
+void DesktopWidgets::EndEdit(Widget& w)
+{
+    WidgetContent& c = w.content;
+    if (!c.editing)
+        return;
+    c.editing = false;
+    if (w.kind == WidgetKind::Reminders && c.item >= 0 && c.item < int(c.items.size()) && c.items[size_t(c.item)].text.empty())
+        c.items.erase(c.items.begin() + c.item); // nothing was typed
+    c.item = -1;
+    KillTimer(host_, kSaveTimer);
+    Save();
+    if (w.surface)
+        w.surface->Invalidate();
+    PostMessageW(host_, WM_WIDGET_RESTACK, 0, 0); // back under the windows
+}
+
+void DesktopWidgets::Insert(Widget& w, const std::wstring& s)
+{
+    WidgetContent& c = w.content;
+    std::wstring& text = w.kind == WidgetKind::Notes ? c.text : c.items[size_t(c.item)].text;
+    std::wstring add = s;
+    if (w.kind == WidgetKind::Reminders) // one line
+        std::replace_if(add.begin(), add.end(), [](wchar_t ch) { return ch == L'\r' || ch == L'\n'; }, L' ');
+    else
+        add.erase(std::remove(add.begin(), add.end(), L'\r'), add.end());
+    c.caret = std::min(c.caret, text.size());
+    text.insert(c.caret, add);
+    c.caret += add.size();
+}
+
+bool DesktopWidgets::Key(Widget& w, UINT m, WPARAM wp)
+{
+    WidgetContent& c = w.content;
+    if (w.kind == WidgetKind::Reminders && (c.item < 0 || c.item >= int(c.items.size())))
+        return false;
+    std::wstring& text = w.kind == WidgetKind::Notes ? c.text : c.items[size_t(c.item)].text;
+    size_t& at = c.caret;
+    at = std::min(at, text.size());
+    auto back = [&](size_t i) -> size_t { return i >= 2 && IS_LOW_SURROGATE(text[i - 1]) && IS_HIGH_SURROGATE(text[i - 2]) ? i - 2 : i ? i - 1 : 0; };
+    auto ahead = [&](size_t i) -> size_t {
+        return i + 1 < text.size() && IS_HIGH_SURROGATE(text[i]) && IS_LOW_SURROGATE(text[i + 1]) ? i + 2 : std::min(i + 1, text.size());
+    };
+    bool changed = false;
+    if (m == WM_KEYDOWN) {
+        switch (wp) {
+        case VK_LEFT:
+            at = back(at);
+            break;
+        case VK_RIGHT:
+            at = ahead(at);
+            break;
+        case VK_HOME: {
+            size_t nl = at ? text.rfind(L'\n', at - 1) : std::wstring::npos;
+            at = nl == std::wstring::npos ? 0 : nl + 1;
+            break;
+        }
+        case VK_END: {
+            size_t nl = text.find(L'\n', at);
+            at = nl == std::wstring::npos ? text.size() : nl;
+            break;
+        }
+        case VK_DELETE:
+            if (at < text.size()) {
+                text.erase(at, ahead(at) - at);
+                changed = true;
+            }
+            break;
+        default:
+            return false; // WM_CHAR follows for the rest
+        }
+    } else {
+        wchar_t ch = wchar_t(wp);
+        if (ch == 27) { // Esc
+            EndEdit(w);
+            return true;
+        }
+        if (ch == L'\r') {
+            if (w.kind == WidgetKind::Notes) {
+                Insert(w, L"\n");
+                changed = true;
+            } else if (text.empty()) {
+                EndEdit(w);
+                return true;
+            } else { // the next reminder, right below
+                int next = c.item + 1;
+                c.items.insert(c.items.begin() + next, Reminder{});
+                c.editing = false; // the one typed stays as it is
+                SaveSoon();
+                StartEdit(w, next);
+                return true;
+            }
+        } else if (ch == 8) { // Backspace
+            if (at) {
+                size_t from = back(at);
+                text.erase(from, at - from);
+                at = from;
+                changed = true;
+            }
+        } else if (ch == 22) { // Ctrl+V
+            if (OpenClipboard(w.surface->Hwnd())) {
+                if (HANDLE data = GetClipboardData(CF_UNICODETEXT))
+                    if (auto* p = static_cast<const wchar_t*>(GlobalLock(data))) {
+                        Insert(w, p);
+                        GlobalUnlock(data);
+                        changed = true;
+                    }
+                CloseClipboard();
+            }
+        } else if (ch >= 0x20 || ch == L'\t') {
+            Insert(w, std::wstring(1, ch));
+            changed = true;
+        } else {
+            return true; // other control keys
+        }
+    }
+    if (changed)
+        SaveSoon();
+    c.caretOn = true;
+    SetTimer(host_, kCaretTimer, kCaretMs, nullptr); // the caret stays lit while typing
+    w.surface->Invalidate();
+    return true;
+}
+
+// The input method's composition and candidates next to the caret.
+void DesktopWidgets::PlaceImeWindow(Widget& w)
+{
+    auto caret = std::find_if(w.hits.begin(), w.hits.end(), [](const WidgetHit& h) { return h.id == L"caret"; });
+    if (caret == w.hits.end() || !w.surface)
+        return;
+    float s = w.surface->Scale();
+    POINT p = w.surface->ContentToScreen(POINT{LONG(caret->rect.left * s), LONG(caret->rect.top * s)});
+    ScreenToClient(w.surface->Hwnd(), &p);
+    HIMC imc = ImmGetContext(w.surface->Hwnd());
+    if (!imc)
+        return;
+    COMPOSITIONFORM cf{CFS_POINT, p, {}};
+    ImmSetCompositionWindow(imc, &cf);
+    CANDIDATEFORM cand{0, CFS_CANDIDATEPOS, POINT{p.x, p.y + LONG((caret->rect.bottom - caret->rect.top) * s) + 4}, {}};
+    ImmSetCandidateWindow(imc, &cand);
+    ImmReleaseContext(w.surface->Hwnd(), imc);
 }
 
 void DesktopWidgets::Menu(Widget& w)
 {
-    enum { kSmall = 1, kMedium, kRemove, kAddClock, kAddWorld, kAddCalendar, kAddMonth, kAddBattery };
+    enum { kSmall = 1, kMedium, kLarge, kRemove, kFolder, kNextPhoto, kClearDone, kAdd = 100 };
     HMENU menu = CreatePopupMenu(), add = CreatePopupMenu();
     auto size = [&](UINT id, WidgetSize s, const wchar_t* label) {
-        UINT f = MF_STRING | (w.size == s ? MF_CHECKED : 0) | (Supports(w.kind, s) ? 0 : MF_GRAYED);
+        UINT f = MF_STRING | (w.size == s ? MF_CHECKED : 0) | (WidgetSupports(w.kind, s) ? 0 : MF_GRAYED);
         AppendMenuW(menu, f, id, label);
     };
     size(kSmall, WidgetSize::Small, L"小");
     size(kMedium, WidgetSize::Medium, L"中");
+    size(kLarge, WidgetSize::Large, L"大");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    if (w.kind == WidgetKind::Photos) {
+        AppendMenuW(menu, MF_STRING, kFolder, L"选择照片文件夹…");
+        AppendMenuW(menu, MF_STRING, kNextPhoto, L"换一张");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    }
+    if (w.kind == WidgetKind::Reminders) {
+        bool anyDone = std::any_of(w.content.items.begin(), w.content.items.end(), [](const Reminder& r) { return r.done; });
+        AppendMenuW(menu, MF_STRING | (anyDone ? 0 : MF_GRAYED), kClearDone, L"清除已完成");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    }
     AppendMenuW(menu, MF_STRING, kRemove, L"移除小组件");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(add, MF_STRING, kAddClock, L"时钟");
-    AppendMenuW(add, MF_STRING, kAddWorld, L"世界时钟");
-    AppendMenuW(add, MF_STRING, kAddCalendar, L"日历");
-    AppendMenuW(add, MF_STRING, kAddMonth, L"日历（月视图）");
-    AppendMenuW(add, MF_STRING, kAddBattery, L"电池");
+    const auto& choices = WidgetChoices();
+    for (size_t i = 0; i < choices.size(); ++i)
+        AppendMenuW(add, MF_STRING, kAdd + i, choices[i].name);
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(add), L"添加小组件");
     POINT p;
     GetCursorPos(&p);
     SetForegroundWindow(host_); // the menu closes on a click elsewhere
     int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, p.x, p.y, 0, host_, nullptr);
     DestroyMenu(menu); // and its submenu
+    if (cmd >= kAdd && cmd < kAdd + int(choices.size())) {
+        Add(choices[size_t(cmd - kAdd)].kind, choices[size_t(cmd - kAdd)].size);
+        return;
+    }
     switch (cmd) {
     case kSmall:
-        Resize(w, WidgetSize::Small);
-        break;
     case kMedium:
-        Resize(w, WidgetSize::Medium);
+    case kLarge:
+        Resize(w, cmd == kSmall ? WidgetSize::Small : cmd == kMedium ? WidgetSize::Medium : WidgetSize::Large);
+        break;
+    case kFolder:
+        PickFolder(w);
+        break;
+    case kNextPhoto:
+        LoadPhoto(w, true);
+        break;
+    case kClearDone:
+        std::erase_if(w.content.items, [](const Reminder& r) { return r.done; });
+        Save();
+        w.surface->Invalidate();
         break;
     case kRemove:
         Remove(w); // w is gone
-        break;
-    case kAddClock:
-        Add(WidgetKind::Clock, WidgetSize::Small);
-        break;
-    case kAddWorld:
-        Add(WidgetKind::Clock, WidgetSize::Medium);
-        break;
-    case kAddCalendar:
-        Add(WidgetKind::Calendar, WidgetSize::Small);
-        break;
-    case kAddMonth:
-        Add(WidgetKind::Calendar, WidgetSize::Medium);
-        break;
-    case kAddBattery:
-        Add(WidgetKind::Battery, WidgetSize::Small);
         break;
     }
 }
@@ -809,105 +1262,12 @@ void DesktopWidgets::Menu(Widget& w)
 
 void DesktopWidgets::Paint(Widget& w, Canvas& c)
 {
-    const Theme& t = c.theme;
-    const float W = WidthOf(w.size), H = kCell;
-    const D2D1_RECT_F card = D2D1::RectF(0, 0, W, H);
     if (c.panel)
-        c.Fill(card, kRadius, t.panel);
-    SYSTEMTIME now;
-    GetLocalTime(&now);
-
-    const Pal p = GlassPal(t);
-    {
-        const float pad = 14;
-        const D2D1_COLOR_F face = p.face;
-        if (w.kind == WidgetKind::Clock && w.size == WidgetSize::Small) {
-            ClockFace(c, W / 2, H / 2, H / 2 - 9, now, p, face, p.text, true, city_, p.sub);
-        } else if (w.kind == WidgetKind::Clock) {
-            // The world clock: four faces, dark where it is night.
-            SYSTEMTIME utc;
-            GetSystemTime(&utc);
-            const float colW = (W - 2 * pad) / 4, R = 31;
-            for (int i = 0; i < 4; ++i) {
-                DYNAMIC_TIME_ZONE_INFORMATION z{};
-                SYSTEMTIME ct = now;
-                if (ZoneInfo(kCities[i].zone, z))
-                    SystemTimeToTzSpecificLocalTimeEx(&z, &utc, &ct);
-                bool night = ct.wHour < 6 || ct.wHour >= 18;
-                float cx = pad + colW * (float(i) + 0.5f), cy = (H - 2 * R - 42) / 2 + R - 2;
-                // Night: a dark face with light ink, as on macOS.
-                D2D1_COLOR_F f = night ? Rgba(0x000000, 0.42f) : face, ink = night ? Rgba(0xFFFFFF, 0.96f) : p.text;
-                ClockFace(c, cx, cy, R, ct, p, f, ink, false, {}, ink);
-                int64_t diff = (Minutes(ct) - Minutes(now)) / 60;
-                int dayDiff = int((Minutes(ct) / 1440) - (Minutes(now) / 1440));
-                std::wstring when = dayDiff > 0 ? L"明天" : dayDiff < 0 ? L"昨天" : L"今天";
-                when += (diff >= 0 ? L" +" : L" ") + std::to_wstring(diff) + L"小时";
-                c.Text(kCities[i].name, D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 12.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-                c.Text(when, D2D1::RectF(cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
-            }
-        } else if (w.kind == WidgetKind::Calendar) {
-            // The day: the weekday in red, the date large, the lunar date (a festival in red).
-            const int wd = Weekday(now.wYear, now.wMonth, now.wDay);
-            const float leftW = w.size == WidgetSize::Small ? W - 2 * pad : 126;
-            c.Text(kWeekLong[wd], D2D1::RectF(pad + 2, pad, pad + leftW, pad + 20), 14, p.red, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            c.Text(std::to_wstring(now.wDay), D2D1::RectF(pad, pad + 16, pad + leftW, pad + 80), 54, p.text, DWRITE_FONT_WEIGHT_NORMAL);
-            bool festival = false;
-            std::wstring label = lunar_.DayLabel(now.wYear, now.wMonth, now.wDay, &festival);
-            std::wstring lunar = lunar_.MonthDay(now.wYear, now.wMonth, now.wDay);
-            c.Text(lunar.empty() ? std::wstring(kMonths[now.wMonth - 1]) : L"农历" + lunar, D2D1::RectF(pad + 2, H - pad - 40, pad + leftW, H - pad - 20), 12.5f,
-                   p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            c.Text(festival ? label : std::to_wstring(now.wYear) + L"年" + kMonths[now.wMonth - 1], D2D1::RectF(pad + 2, H - pad - 20, pad + leftW, H - pad),
-                   12, festival ? p.red : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
-            if (w.size == WidgetSize::Medium) {
-                // The month: weekday initials, the days, today in a red disc.
-                const float gx = pad + leftW + 6, gw = W - pad - gx, cw = gw / 7;
-                int first = 0;
-                DWORD fd = 0;
-                if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK | LOCALE_RETURN_NUMBER, reinterpret_cast<LPWSTR>(&fd), 2))
-                    first = int(fd % 7);
-                c.Text(kMonths[now.wMonth - 1], D2D1::RectF(gx + 4, pad - 1, gx + gw, pad + 17), 12.5f, p.red, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-                float y = pad + 20;
-                for (int i = 0; i < 7; ++i)
-                    c.Text(kWeekShort[(first + i) % 7], D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 14), 9.5f, p.sub,
-                           DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-                y += 16;
-                int lead = (Weekday(now.wYear, now.wMonth, 1) - first + 7) % 7, days = DaysIn(now.wYear, now.wMonth);
-                int rows = (lead + days + 6) / 7;
-                float rh = std::min(17.f, (H - pad - y) / float(rows));
-                for (int d = 1; d <= days; ++d) {
-                    int cell = lead + d - 1;
-                    float x0 = gx + float(cell % 7) * cw, y0 = y + float(cell / 7) * rh, cx = x0 + cw / 2, cy = y0 + rh / 2;
-                    bool today = d == now.wDay;
-                    if (today)
-                        c.Circle(cx, cy, rh / 2 + 0.5f, p.red);
-                    bool weekend = (first + cell % 7) % 7 >= 5;
-                    D2D1_COLOR_F ink = today ? Rgba(0xFFFFFF, 0.98f) : weekend ? p.sub : p.text;
-                    c.Text(std::to_wstring(d), D2D1::RectF(x0, cy - rh / 2, x0 + cw, cy + rh / 2), 10.5f, ink,
-                           today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-                }
-            }
-        } else {
-            // Batteries: a ring round the computer, the level under it.
-            const float cx = W / 2, cy = H / 2 - 12, R = 44;
-            c.Arc(cx, cy, R, -90, 270, p.track, 9);
-            if (status_.battery) {
-                int pct = std::clamp(status_.batteryPercent, 0, 100);
-                D2D1_COLOR_F level = pct <= 20 && !status_.charging ? p.red : p.green;
-                c.Arc(cx, cy, R, -90, -90 + 360.f * float(pct) / 100.f, level, 9);
-                c.Glyph(L"\uE7F8", D2D1::RectF(cx - 22, cy - 22, cx + 22, cy + 22), 24, p.text);
-                // The level, with a bolt before it while charging.
-                std::wstring n = std::to_wstring(pct) + L"%";
-                float tw = c.TextWidth(n, 19, DWRITE_FONT_WEIGHT_SEMI_BOLD), bolt = status_.charging ? 16.f : 0.f, x0 = (W - tw - bolt) / 2;
-                if (status_.charging)
-                    c.Glyph(L"\uE945", D2D1::RectF(x0 - 2, cy + R + 10, x0 + bolt, cy + R + 36), 13, level);
-                c.Text(n, D2D1::RectF(x0 + bolt, cy + R + 10, x0 + bolt + tw + 4, cy + R + 36), 19, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            } else {
-                c.Arc(cx, cy, R, -90, 270, p.green, 9);
-                c.Glyph(L"\uE83E", D2D1::RectF(cx - 22, cy - 22, cx + 22, cy + 22), 22, p.text);
-                c.Text(L"已接通电源", D2D1::RectF(0, cy + R + 12, W, cy + R + 34), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-            }
-        }
-    }
+        c.Fill(D2D1::RectF(0, 0, WidgetWidth(w.size), WidgetHeight(w.size)), kWidgetRadius, c.theme.panel);
+    GetLocalTime(&world_.now);
+    PaintWidget(c, w.kind, w.size, w.content, world_, w.hits);
+    if (w.content.editing)
+        PlaceImeWindow(w);
 }
 
 // ---- tests ---------------------------------------------------------------------
@@ -931,8 +1291,10 @@ void DesktopWidgets::LogState() const
                 }
             }
         }
-        Log(L"widgets: w%zu kind=%s size=%s cell=%d,%d visible=%d topmost=%d under=%s rect=%ld,%ld,%ld,%ld", i, KindName(w.kind), SizeName(w.size), w.col,
-            w.row, w.surface && w.surface->Visible() ? 1 : 0, topmost ? 1 : 0, under.empty() ? L"-" : under.c_str(), r.left, r.top, r.right, r.bottom);
+        Log(L"widgets: w%zu kind=%s size=%s cell=%d,%d visible=%d topmost=%d under=%s rect=%ld,%ld,%ld,%ld text=%zu items=%zu photo=%d", i,
+            NameOf(w.kind), SizeName(w.size), w.col, w.row, w.surface && w.surface->Visible() ? 1 : 0, topmost ? 1 : 0,
+            under.empty() ? L"-" : under.c_str(), r.left, r.top, r.right, r.bottom, w.content.text.size(), w.content.items.size(),
+            w.content.image ? 1 : 0);
     }
 }
 
@@ -952,13 +1314,21 @@ void DesktopWidgets::TestAction(const std::wstring& arg)
         WidgetKind k;
         if (ParseKind(part(1), k))
             Add(k, ParseSize(part(2)));
-    } else if (verb == L"remove" || verb == L"size") {
+    } else if (verb == L"remove" || verb == L"size" || verb == L"type") {
         size_t i = size_t(_wtoi(part(1).c_str()));
-        if (i < widgets_.size()) {
-            if (verb == L"remove")
-                Remove(*widgets_[i]);
-            else
-                Resize(*widgets_[i], ParseSize(part(2)));
+        if (i >= widgets_.size())
+            return;
+        Widget& w = *widgets_[i];
+        if (verb == L"remove") {
+            Remove(w);
+        } else if (verb == L"size") {
+            Resize(w, ParseSize(part(2)));
+        } else if (Editable(w.kind) && w.surface) {
+            if (w.kind == WidgetKind::Reminders)
+                w.content.items.push_back({});
+            StartEdit(w, w.kind == WidgetKind::Reminders ? int(w.content.items.size()) - 1 : -1);
+            Insert(w, part(2));
+            EndEdit(w);
         }
     } else if (verb == L"restack") {
         Restack();

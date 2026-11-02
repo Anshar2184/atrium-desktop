@@ -388,6 +388,34 @@ bool Canvas::Cached(const std::wstring& key) const
     return it != s_.bitmaps_.end() && it->second;
 }
 
+D2D1_RECT_F Canvas::Caret(const std::wstring& s, D2D1_RECT_F r, float size, DWRITE_FONT_WEIGHT w, size_t pos)
+{
+    D2D1_RECT_F fallback = D2D1::RectF(r.left, r.top, r.left + 1.5f, r.top + size * 1.33f);
+    IDWriteTextFormat* f = Format(size * scale, w, false, 0, true);
+    // A zero-width space after the text: a caret after a final line break sits on the new line.
+    std::wstring text = s + L"\u200B";
+    winrt::com_ptr<IDWriteTextLayout> layout;
+    if (!f || FAILED(s_.dwrite_->CreateTextLayout(text.c_str(), UINT32(text.size()), f, (r.right - r.left) * scale, 1e6f, layout.put())))
+        return fallback;
+    float x = 0, y = 0;
+    DWRITE_HIT_TEST_METRICS m{};
+    if (FAILED(layout->HitTestTextPosition(UINT32(std::min(pos, s.size())), FALSE, &x, &y, &m)))
+        return fallback;
+    return D2D1::RectF(r.left + x / scale, r.top + y / scale, r.left + x / scale + 1.5f, r.top + (y + m.height) / scale);
+}
+
+void Canvas::ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius)
+{
+    winrt::com_ptr<ID2D1Factory> f;
+    d2d_->GetFactory(f.put());
+    winrt::com_ptr<ID2D1RoundedRectangleGeometry> g;
+    if (FAILED(f->CreateRoundedRectangleGeometry(D2D1::RoundedRect(Px(r), radius * scale, radius * scale), g.put())))
+        return;
+    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
+    Image(key, image, r);
+    d2d_->PopLayer();
+}
+
 void Canvas::ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r)
 {
     winrt::com_ptr<ID2D1Factory> f;
