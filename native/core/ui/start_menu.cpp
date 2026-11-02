@@ -246,6 +246,8 @@ std::vector<CatalogApp> StartMenu::Results() const
     return out;
 }
 
+int StartMenu::TileIconPx(float scale) { return int(std::lround(kIcon * scale * 1.1f)); }
+
 const std::vector<CatalogApp>& StartMenu::Shown() const { return query_.empty() ? pins_ : results_; }
 
 int StartMenu::Pages() const { return std::max(1, int((pins_.size() + kPerPage - 1) / kPerPage)); }
@@ -357,7 +359,7 @@ void StartMenu::PaintPins(Canvas& c, const Theme& t)
         c.Text(msg, D2D1::RectF(kSearchX, kGridTop + 60, w - kSearchX, kGridTop + 90), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
         return;
     }
-    const int tilePx = int(std::lround(kIcon * c.scale * 1.1f));
+    const int tilePx = TileIconPx(c.scale);
     static const IconImage kNone;
     c.Clip(D2D1::RectF(0, kListTop - 4, w, kGridTop + kRows * kCellH + 4));
     for (size_t i = 0; i < pins_.size(); ++i) {

@@ -91,8 +91,13 @@ std::wstring ExeDir()
 void OpenSettings()
 {
     std::wstring dir = ExeDir();
-    for (const wchar_t* rel : {L"\\Settings\\Atrium.Settings.exe", L"\\Atrium.Settings.exe"}) {
-        std::wstring exe = dir + rel;
+    std::vector<std::wstring> candidates = {dir + L"\\Settings\\Atrium.Settings.exe", dir + L"\\Atrium.Settings.exe"};
+    // A development build (native\build\win-x64\Release): the packaged settings app of the same repository.
+    for (std::wstring up = dir; up.size() > 3;) {
+        up = up.substr(0, up.find_last_of(L'\\'));
+        candidates.push_back(up + L"\\dist\\Atrium\\Settings\\Atrium.Settings.exe");
+    }
+    for (const std::wstring& exe : candidates) {
         if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
             continue;
         // The settings app keeps a single instance itself and activates it.
@@ -920,6 +925,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     });
     g_app.catalog = std::make_unique<AppCatalog>(g_app.host, WM_CATALOG);
     g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
+    {
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+        g_app.catalog->PrefetchStartIcons(StartMenu::TileIconPx(PopupScale(mi.rcWork)));
+    }
     g_app.start->onSystem = OpenSystem;
     g_app.notes = std::make_unique<Notifications>(instance);
     g_app.tray = std::make_unique<TrayModel>(g_app.host, WM_TRAY_ICONS);

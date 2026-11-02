@@ -32,6 +32,7 @@ public:
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Refresh(); // an icon or the catalog changed
+    static int TileIconPx(float scale); // the pins' icon size (AppCatalog::PrefetchStartIcons)
     HWND Hwnd() const { return surface_.Hwnd(); }
     // Corner radius (DIP), the bar's; the panel uses it, the capsule is round like the bar.
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }

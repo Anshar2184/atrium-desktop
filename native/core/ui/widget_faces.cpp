@@ -13,13 +13,13 @@ D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b,
 
 // The colours of a widget: the glass's ink, and macOS's accents.
 struct Pal {
-    D2D1_COLOR_F text, sub, faint, face, red, orange, green, track;
+    D2D1_COLOR_F text, sub, faint, face, red, orange, green, track, blue; // blue: the calendar's accent
 };
 
 Pal GlassPal(const Theme& t)
 {
     return {t.text, t.subtext, t.faint, Alpha(t.text, 0.10f), Rgba(0xFF453A, 0.98f), Rgba(0xFF9F0A, 0.98f), Rgba(0x30D158, 0.98f),
-            Alpha(t.text, 0.18f)};
+            Alpha(t.text, 0.18f), Rgba(0x0A84FF, 0.98f)};
 }
 
 const wchar_t* const kWeekLong[] = {L"星期一", L"星期二", L"星期三", L"星期四", L"星期五", L"星期六", L"星期日"};
@@ -155,7 +155,7 @@ void PaintDigital(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p
     const float leftW = size == WidgetSize::Small ? W - 2 * kPad : 150;
     c.Text(w.city.empty() ? L"本地" : w.city, D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 18), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(HourMinute(w.now), D2D1::RectF(kPad, kPad + 22, kPad + leftW, kPad + 84), 50, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(kWeekLong[wd], D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 13, p.red, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(kWeekLong[wd], D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 13, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(std::to_wstring(w.now.wMonth) + L"月" + std::to_wstring(w.now.wDay) + L"日", D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 13,
            p.text, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
@@ -182,7 +182,7 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
     const int first = FirstWeekday();
     const int lead = (Weekday(now.wYear, now.wMonth, 1) - first + 7) % 7, days = DaysIn(now.wYear, now.wMonth);
     if (size == WidgetSize::Large) {
-        c.Text(kMonths[now.wMonth - 1], D2D1::RectF(kPad + 4, kPad, W / 2, kPad + 22), 16, p.red, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(kMonths[now.wMonth - 1], D2D1::RectF(kPad + 4, kPad, W / 2, kPad + 22), 16, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         std::wstring lunarToday = w.lunar ? w.lunar->MonthDay(now.wYear, now.wMonth, now.wDay) : std::wstring();
         c.Text(lunarToday.empty() ? std::to_wstring(now.wYear) + L"年" : std::to_wstring(now.wYear) + L"年 · 农历" + lunarToday,
                D2D1::RectF(W / 2 - 40, kPad, W - kPad - 4, kPad + 22), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 2);
@@ -199,20 +199,20 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
             float x0 = gx + float(cell % 7) * cw, y0 = y + float(cell / 7) * rh, cx = x0 + cw / 2;
             bool today = d == now.wDay, weekend = (first + cell % 7) % 7 >= 5;
             if (today)
-                c.Fill(D2D1::RectF(cx - 18, y0 + 1, cx + 18, y0 + rh - 1), 10, p.red);
+                c.Fill(D2D1::RectF(cx - 18, y0 + 1, cx + 18, y0 + rh - 1), 10, p.blue);
             D2D1_COLOR_F ink = today ? Rgba(0xFFFFFF, 0.98f) : weekend ? p.sub : p.text;
-            c.Text(std::to_wstring(d), D2D1::RectF(x0, y0 + 2, x0 + cw, y0 + rh * 0.58f), 14, ink, today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            c.Text(std::to_wstring(d), D2D1::RectF(x0, y0, x0 + cw, y0 + rh * 0.56f), 14, ink, today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD,
                    1);
             bool festival = false;
             std::wstring label = w.lunar ? w.lunar->DayLabel(now.wYear, now.wMonth, WORD(d), &festival) : std::wstring();
-            c.Text(label, D2D1::RectF(x0, y0 + rh * 0.52f, x0 + cw, y0 + rh - 2), 9, today ? Alpha(Rgba(0xFFFFFF, 0.98f), 0.85f) : festival ? p.red : p.sub,
+            c.Text(label, D2D1::RectF(x0, y0 + rh * 0.48f, x0 + cw, y0 + rh - 5), 9, today ? Alpha(Rgba(0xFFFFFF, 0.98f), 0.85f) : festival ? p.blue : p.sub,
                    DWRITE_FONT_WEIGHT_NORMAL, 1);
         }
         return;
     }
     const int wd = Weekday(now.wYear, now.wMonth, now.wDay);
     const float leftW = size == WidgetSize::Small ? W - 2 * kPad : 126;
-    c.Text(kWeekLong[wd], D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 20), 14, p.red, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(kWeekLong[wd], D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 20), 14, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(std::to_wstring(now.wDay), D2D1::RectF(kPad, kPad + 16, kPad + leftW, kPad + 80), 54, p.text, DWRITE_FONT_WEIGHT_NORMAL);
     bool festival = false;
     std::wstring label = w.lunar ? w.lunar->DayLabel(now.wYear, now.wMonth, now.wDay, &festival) : std::wstring();
@@ -220,12 +220,12 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
     c.Text(lunar.empty() ? std::wstring(kMonths[now.wMonth - 1]) : L"农历" + lunar, D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 12.5f,
            p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(festival ? label : std::to_wstring(now.wYear) + L"年" + kMonths[now.wMonth - 1], D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 12,
-           festival ? p.red : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
+           festival ? p.blue : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
         return;
     // The month: weekday initials, the days, today in a red disc.
     const float gx = kPad + leftW + 6, gw = W - kPad - gx, cw = gw / 7;
-    c.Text(kMonths[now.wMonth - 1], D2D1::RectF(gx + 4, kPad - 1, gx + gw, kPad + 17), 12.5f, p.red, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(kMonths[now.wMonth - 1], D2D1::RectF(gx + 4, kPad - 1, gx + gw, kPad + 17), 12.5f, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     float y = kPad + 20;
     for (int i = 0; i < 7; ++i)
         c.Text(kWeekShort[(first + i) % 7], D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 14), 9.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
@@ -237,10 +237,13 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
         float x0 = gx + float(cell % 7) * cw, y0 = y + float(cell / 7) * rh, cx = x0 + cw / 2, cy = y0 + rh / 2;
         bool today = d == now.wDay;
         if (today)
-            c.Circle(cx, cy, rh / 2 + 0.5f, p.red);
+            c.Circle(cx, cy, rh / 2 + 0.5f, p.blue);
         bool weekend = (first + cell % 7) % 7 >= 5;
         D2D1_COLOR_F ink = today ? Rgba(0xFFFFFF, 0.98f) : weekend ? p.sub : p.text;
-        c.Text(std::to_wstring(d), D2D1::RectF(x0, cy - rh / 2, x0 + cw, cy + rh / 2), 10.5f, ink, today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        // Digits sit high in their line box: lifted so they centre in the disc.
+        const float lift = 10.5f * 0.08f;
+        c.Text(std::to_wstring(d), D2D1::RectF(x0, cy - rh / 2 - lift, x0 + cw, cy + rh / 2 - lift), 10.5f, ink,
+               today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     }
 }
 

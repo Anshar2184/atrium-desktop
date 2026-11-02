@@ -39,6 +39,9 @@ public:
     // Pinned to the Windows start menu (not the taskbar: those are the bar's pins).
     std::vector<CatalogApp> StartPins() const;
     IconImage Icon(const std::wstring& id, int px); // empty until loaded
+    // The start pins' icons at `px` are read after every refresh, so the start
+    // menu's first opening shows them at once (requests for icons on screen go first).
+    void PrefetchStartIcons(int px);
 
     static bool Launch(const CatalogApp& app);
     static PinnedApp PinFor(const CatalogApp& app);
@@ -56,6 +59,8 @@ private:
     std::vector<std::pair<std::wstring, std::wstring>> layout_; // key (packagedAppId | desktopAppLink), value
     FILETIME layoutTime_{};
     bool loaded_ = false, refresh_ = false, stop_ = false;
+    int prefetchPx_ = 0;
+    void QueuePrefetch(); // under mutex_
     std::deque<std::pair<std::wstring, int>> iconJobs_;
     std::map<std::pair<std::wstring, int>, IconImage> icons_;
     std::map<std::pair<std::wstring, int>, bool> requested_;

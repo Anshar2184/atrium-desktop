@@ -163,7 +163,5 @@ atrium-desktop 的对话 `01a19124-4b29-7172-a13a-3f5b0122f0c1`（cwd 为本仓�
 
 ### 仓库外资料（换机器交接需一并提供）
 
-- `D:\Projects\atrium-validation\2026-11-01\`、`2026-11-01-round2\`（GPT 的验证报告与探针源码）
-- `D:\Projects\atrium-validation\2026-11-02-lockscreen-research\REPORT.md`（锁屏预研）
-- `D:\Projects\atrium-validation\2026-11-02-capture\`（截图兼容的探针结果）
-- `%LOCALAPPDATA%\atrium-tools\`（本地脚本、测试日志、截图、Codex 桥接）
+- `D:\Projects\atrium-validation\`：只保留报告（v0.9.2 清理掉了探针源码与结果）——`2026-11-01\` 的可行性与 QQ/微信适配报告、`2026-11-01-round2\REPORT.md`、`2026-11-02-lockscreen-research\REPORT.md`
+- `%LOCALAPPDATA%\atrium-tools\`（本地脚本、.NET SDK、gh、Codex 桥接、测试照片 `test-photos`；测试日志写在这里，可随时删）

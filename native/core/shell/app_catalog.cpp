@@ -306,6 +306,27 @@ std::vector<CatalogApp> AppCatalog::StartPins() const
     return startPins_;
 }
 
+void AppCatalog::PrefetchStartIcons(int px)
+{
+    std::lock_guard g(mutex_);
+    prefetchPx_ = px;
+    QueuePrefetch();
+}
+
+void AppCatalog::QueuePrefetch()
+{
+    if (prefetchPx_ <= 0)
+        return;
+    for (const CatalogApp& app : startPins_) {
+        auto key = std::make_pair(app.id, prefetchPx_);
+        if (icons_.count(key) || requested_[key])
+            continue;
+        requested_[key] = true;
+        iconJobs_.push_front(key); // after the icons asked for on screen
+    }
+    cv_.notify_all();
+}
+
 IconImage AppCatalog::Icon(const std::wstring& id, int px)
 {
     std::lock_guard g(mutex_);
@@ -332,13 +353,14 @@ void AppCatalog::Worker()
             cv_.wait(g, [&] { return stop_ || refresh_ || !iconJobs_.empty(); });
             if (stop_)
                 break;
-            if (refresh_) {
-                refresh = true;
-                refresh_ = false;
-            } else {
-                // Newest requests first: they are what is on screen now.
+            if (!iconJobs_.empty()) {
+                // Icons before a refresh (it takes about a second); newest
+                // requests first: they are what is on screen now.
                 job = iconJobs_.back();
                 iconJobs_.pop_back();
+            } else {
+                refresh = true;
+                refresh_ = false;
             }
         }
         if (refresh) {
@@ -380,6 +402,7 @@ void AppCatalog::Worker()
                 apps_ = std::move(apps);
                 startPins_ = std::move(pins);
                 loaded_ = true;
+                QueuePrefetch();
             }
             PostMessageW(notify_, msg_, 0, 0);
             continue;
