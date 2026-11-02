@@ -52,7 +52,8 @@ std::map<DWORD, std::wstring> FeishuProcesses()
 }
 
 // Feishu's popups on screen: visible, untitled Chromium windows of at most
-// 520 x 260 DIP (its main window and other dialogs are larger or titled).
+// 520 x 260 DIP (its main window and other dialogs are larger or titled) in
+// the corner of the work area.
 std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& procs)
 {
     struct Ctx {
@@ -74,7 +75,13 @@ std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& 
             if (s <= 0)
                 s = 1;
             float w = float(r.right - r.left) / s, hh = float(r.bottom - r.top) / s;
-            if (wcscmp(cls, L"Chrome_WidgetWin_1") == 0 && w >= 160 && w <= 520 && hh >= 40 && hh <= 260)
+            // A message popup sits in the work area's bottom-right corner; Feishu's
+            // other small untitled windows (the text-selection toolbar, the update
+            // notice) are elsewhere.
+            MONITORINFO mi{sizeof(mi)};
+            GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+            bool corner = float(mi.rcWork.right - r.right) / s <= 48 && float(mi.rcWork.bottom - r.bottom) / s <= 48;
+            if (wcscmp(cls, L"Chrome_WidgetWin_1") == 0 && w >= 160 && w <= 520 && hh >= 40 && hh <= 260 && corner)
                 c->out.push_back({h, pid});
             return TRUE;
         },
