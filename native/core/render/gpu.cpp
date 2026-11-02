@@ -68,6 +68,27 @@ Gpu Gpu::ForMonitor(HMONITOR monitor)
     if (auto f4 = factory.try_as<IDXGIFactory4>(); f4 && ScanoutAdapter(monitor, luid)) {
         winrt::com_ptr<IDXGIAdapter1> scanout;
         if (SUCCEEDED(f4->EnumAdapterByLuid(luid, IID_PPV_ARGS(scanout.put())))) {
+            // The same GPU may be listed twice (hybrid laptops); the entry DXGI
+            // lists the monitor's output under is the one Desktop Duplication can use.
+            DXGI_ADAPTER_DESC1 sd{};
+            scanout->GetDesc1(&sd);
+            winrt::com_ptr<IDXGIAdapter1> twin;
+            for (UINT a = 0; factory->EnumAdapters1(a, twin.put()) == S_OK; ++a, twin = nullptr) {
+                DXGI_ADAPTER_DESC1 td{};
+                twin->GetDesc1(&td);
+                if (td.VendorId != sd.VendorId || td.DeviceId != sd.DeviceId)
+                    continue;
+                bool lists = false;
+                winrt::com_ptr<IDXGIOutput> o;
+                for (UINT i = 0; !lists && twin->EnumOutputs(i, o.put()) == S_OK; ++i, o = nullptr) {
+                    DXGI_OUTPUT_DESC d{};
+                    lists = SUCCEEDED(o->GetDesc(&d)) && d.Monitor == monitor;
+                }
+                if (lists) {
+                    scanout = twin;
+                    break;
+                }
+            }
             Gpu g = Create(factory, scanout);
             Log(L"gpu: %s scans out the bar's monitor", g.adapterName.c_str());
             return g;

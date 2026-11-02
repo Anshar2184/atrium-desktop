@@ -86,7 +86,9 @@ void Notifications::SetOptions(double timeoutSeconds, bool hideBody)
 {
     timeout_ = std::clamp(timeoutSeconds, 3.0, 30.0);
     hideBody_ = hideBody;
-    // (The cards are always kept out of screen capture: the glass under them samples the screen.)
+    // With their text hidden, the cards stay out of screenshots too.
+    popup_.surface->SetPrivate(hideBody);
+    center_.surface->SetPrivate(hideBody);
     popup_.surface->Invalidate();
     center_.surface->Invalidate();
 }

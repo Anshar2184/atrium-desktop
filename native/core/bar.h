@@ -140,6 +140,7 @@ private:
     void Raise();
 
     bool debugCapturable_ = false;
+    void ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread
     std::atomic<bool> refreeze_{false};
     bool debugLayout_ = false;
     HWND visual_ = nullptr;
@@ -202,6 +203,9 @@ private:
     HANDLE wake_ = nullptr;  // snapshot changed
     HANDLE quit_ = nullptr;
     HANDLE frame_ = nullptr; // a capture frame arrived
+    HANDLE captureAck_ = nullptr; // the UI thread changed the windows' capture exclusion
+    std::atomic<bool> captureVisible_{false}; // Atrium's windows show in screenshots (render thread)
+    bool duplicationFailed_ = false;            // Desktop Duplication cannot run here: Windows.Graphics.Capture
     std::thread render_;
 };
 

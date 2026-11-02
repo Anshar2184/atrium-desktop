@@ -114,14 +114,14 @@ All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc
 | v0.4 motion, one material, stacking | ✅ magnification, launch bounce, press ripple, popups on the bar's glass: 7 checks; back on top after a topmost window covers it, hidden for full-screen apps, kept for maximized windows, below a revealed Windows taskbar: 5 checks; all v0.3 tests still pass |
 | v0.3 taskbar, start menu and notifications | ✅ coexistence mode; real mouse and keyboard tests: taskbar 11, start menu 11, notifications 14 checks pass; settings end to end 14 and protocol 7 checks pass |
 | v0.2 glass taskbar and settings | ✅ with a backdrop changing every frame, present p95 0.8 ms, about 4 % of one core, 144 MB |
-| Live glass | ✅ WGC capture with self-exclusion + D3D11; iGPU frame work p95 2.4 ms, content lag p95 1 frame |
+| Live glass | ✅ backdrop from DXGI Desktop Duplication (Atrium's windows excluded from it alone), WGC when unavailable; D3D11; iGPU frame work p95 2.4 ms, content lag p95 1 frame |
 | Self-capture echo | ✅ exact comparison with the last presented backdrop; slow gradients, 1 px cursors and low-contrast scrolling text are never lost |
 | Click-through | ✅ click-through visual window + region-shaped input window; shadows and transparent corners pass clicks through |
 | Taskbar takeover and recovery | ✅ takeover protocol v2 + native guard, with a real AppBar: 15 fault scenarios (kill, hang, startup stall, both processes dying, lock timeout, restore not taking effect…) all restore the user's original settings (single monitor; a real Explorer restart is untested) |
 | Native entry points | ✅ Start, Search, Quick Settings and Notification Center work while the Explorer taskbar is hidden |
 | Third-party tray icons | ⚠️ forwarding bridge verified on normal and failure paths; Explorer restarts and real-app compatibility not yet tested |
 | Desktop widgets | ✅ v0.9: clock, world clock, calendar (with Chinese lunar dates), batteries, after macOS (full colour while the desktop is in front, monochrome glass while an app is), drag to a snapping grid, right-click to resize, remove or add; above the desktop and under every window, on top with Win+D (single monitor) |
-| Glass in screenshots | ⚠️ built-in screenshot by default; rebuilding the backdrop from per-window captures works dynamically but still needs synthesized window shadows |
+| Screenshots and recordings | ✅ v0.9.1: the system screenshot and tools using WGC or GDI capture the bar, popups and widgets (D36); recorders using DXGI Desktop Duplication still do not; on hybrid laptops after one restart of Atrium |
 | Notifications | ✅ Atrium's own cards (queue, merge, timeout, unread, full-screen suppression, hidden text); ⚠️ mirroring Windows notifications is experimental and off by default: an unpackaged process can read and poll them, but the system banners still appear as well |
 
 **Not yet verified**: multiple monitors, HDR, high refresh rates, Explorer restarts, sleep/resume, long-running stability and stable (non-Insider) Windows 11 builds.

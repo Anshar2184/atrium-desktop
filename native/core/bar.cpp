@@ -4,6 +4,7 @@
 #include "log.h"
 #include "render/capture.h"
 #include "render/glass_renderer.h"
+#include "ui/surface.h"
 
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -23,6 +24,8 @@
 namespace atrium {
 
 namespace {
+
+constexpr UINT WM_BAR_CAPTURE = WM_APP + 0x70; // wParam 1: Atrium may show in screenshots (render thread -> UI thread)
 
 constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
@@ -269,13 +272,14 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, bool debugLayout) : debugCapt
     SetWindowLongPtrW(input_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Bar::InputProc));
     SetWindowLongPtrW(visual_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     SetWindowLongPtrW(visual_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Bar::VisualProc));
-    if (debugCapturable_) {
-        Log(L"bar: --debug-capturable, backdrop frozen after the first frame");
-    } else {
-        if (!SetWindowDisplayAffinity(visual_, WDA_EXCLUDEFROMCAPTURE))
-            Log(L"bar: WDA_EXCLUDEFROMCAPTURE failed (%lu); the glass would capture itself", GetLastError());
-        SetWindowDisplayAffinity(input_, WDA_EXCLUDEFROMCAPTURE);
-    }
+    // Out of every capture until the render thread has a backdrop that
+    // leaves them out by itself (Desktop Duplication).
+    captureAck_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    captureVisible_ = debugCapturable_;
+    if (debugCapturable_)
+        Log(L"bar: --debug-capturable, Atrium shows in screenshots (with Windows.Graphics.Capture, the backdrop freezes after the first frame)");
+    SetCaptureExclusion(visual_, captureVisible_);
+    SetCaptureExclusion(input_, captureVisible_);
 
     INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_WIN95_CLASSES};
     InitCommonControlsEx(&icc);
@@ -289,8 +293,7 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable, bool debugLayout) : debugCapt
     ti.uId = 1;
     ti.lpszText = const_cast<wchar_t*>(L"");
     SendMessageW(tooltip_, TTM_ADDTOOLW, 0, LPARAM(&ti));
-    if (!debugCapturable_)
-        SetWindowDisplayAffinity(tooltip_, WDA_EXCLUDEFROMCAPTURE); // it may overlap the glass
+    SetCaptureExclusion(tooltip_, captureVisible_); // it may overlap the glass
 
     // Drag and drop needs OLE on this (STA) thread; balanced in the destructor.
     oleReady_ = SUCCEEDED(OleInitialize(nullptr));
@@ -332,6 +335,7 @@ Bar::~Bar()
     CloseHandle(wake_);
     CloseHandle(quit_);
     CloseHandle(frame_);
+    CloseHandle(captureAck_);
     if (oleReady_)
         OleUninitialize();
 }
@@ -341,6 +345,16 @@ LRESULT CALLBACK Bar::VisualProc(HWND h, UINT m, WPARAM w, LPARAM l)
     auto* self = reinterpret_cast<Bar*>(GetWindowLongPtrW(h, GWLP_USERDATA));
     if (m == WM_DPICHANGED && self) {
         self->Relayout();
+        return 0;
+    }
+    if (m == WM_BAR_CAPTURE && self) {
+        // From the render thread: whether Atrium's windows may show in screenshots.
+        bool visible = w != 0;
+        SetCaptureExclusion(self->visual_, visible);
+        SetCaptureExclusion(self->input_, visible);
+        SetCaptureExclusion(self->tooltip_, visible);
+        Surface::SetCaptureVisible(visible);
+        SetEvent(self->captureAck_);
         return 0;
     }
     if (m == WM_CLOSE && self) {
@@ -1290,6 +1304,21 @@ void Bar::Publish()
     SetEvent(wake_);
 }
 
+void Bar::ShowOwnWindowsToCapture(bool visible)
+{
+    if (debugCapturable_)
+        visible = true;
+    if (visible == captureVisible_)
+        return;
+    // The windows belong to the UI thread; it answers once they are changed.
+    ResetEvent(captureAck_);
+    PostMessageW(visual_, WM_BAR_CAPTURE, visible ? 1 : 0, 0);
+    if (WaitForSingleObject(captureAck_, 1000) != WAIT_OBJECT_0)
+        Log(L"render: the UI thread did not confirm the capture exclusion in time");
+    captureVisible_ = visible;
+    Log(L"render: Atrium %s screenshots", visible ? L"shows in" : L"is kept out of");
+}
+
 void Bar::RenderThread()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
@@ -1324,7 +1353,41 @@ bool Bar::RenderSession()
     }
 
     Gpu gpu = Gpu::ForMonitor(snap.hmonitor);
-    MonitorCapture capture(gpu, snap.hmonitor, frame_);
+    // The backdrop: Desktop Duplication, which leaves Atrium's windows out by
+    // itself (so screenshots may show them); else Windows.Graphics.Capture
+    // with Atrium kept out of every capture.
+    std::unique_ptr<BackdropSource> capture;
+    wchar_t forced[8] = {};
+    if (GetEnvironmentVariableW(L"ATRIUM_CAPTURE", forced, 8) && _wcsicmp(forced, L"wgc") == 0)
+        duplicationFailed_ = true; // ATRIUM_CAPTURE=wgc: the old way (comparisons)
+    if (!duplicationFailed_) {
+        HRESULT why = S_OK;
+        bool elsewhere = false;
+        for (int tries = 0;; ++tries) {
+            capture = DuplicationCapture::Create(gpu, snap.hmonitor, frame_, why, elsewhere);
+            if (capture || !DuplicationCapture::Temporary(why))
+                break;
+            if (tries == 0)
+                Log(L"render: desktop duplication unavailable for now (0x%08X), trying again every second", static_cast<unsigned>(why));
+            if (WaitForSingleObject(quit_, 1000) != WAIT_TIMEOUT)
+                return false;
+        }
+        if (!capture && elsewhere)
+            PreferPowerSavingGpu();
+        if (!capture) {
+            duplicationFailed_ = true;
+            Log(L"render: desktop duplication unavailable (0x%08X); Windows.Graphics.Capture, Atrium kept out of screenshots",
+                static_cast<unsigned>(why));
+        }
+    }
+    if (!capture) {
+        ShowOwnWindowsToCapture(false); // before the first frame, or the glass would sample itself
+        capture = std::make_unique<MonitorCapture>(gpu, snap.hmonitor, frame_);
+    } else {
+        ShowOwnWindowsToCapture(true);
+    }
+    // --debug-capturable with Windows.Graphics.Capture: a frozen backdrop (later frames contain the glass).
+    const bool freeze = debugCapturable_ && !capture->KeepsOwnWindowsOut();
     GlassRenderer renderer(gpu, visual_, snap.window.right - snap.window.left, snap.window.bottom - snap.window.top);
     BarPainter painter(renderer.D2D(), renderer.DWrite());
 
@@ -1527,15 +1590,18 @@ bool Bar::RenderSession()
             std::lock_guard g(lock_);
             snap = snapshot_;
         }
-        auto frame = capture.TryLatest();
+        ID3D11Texture2D* frame = capture->Acquire();
+        if (capture->Lost())
+            return true; // a new source (display mode change, secure desktop)
         if (snap.hmonitor != MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY))
             return true; // primary monitor changed: new device and capture
         if (refreeze_.exchange(false))
             frozen = nullptr;
         if (!snap.visible) {
             bool lost = false;
-            winrt::com_ptr<ID3D11Texture2D> hidden = frame ? MonitorCapture::TextureOf(frame) : nullptr;
-            if (debugCapturable_ && hidden) { // the popups show in screenshots: they must not sample themselves
+            winrt::com_ptr<ID3D11Texture2D> hidden;
+            hidden.copy_from(frame);
+            if (freeze && hidden) { // the popups show in screenshots: they must not sample themselves
                 if (!frozen) {
                     D3D11_TEXTURE2D_DESC d{};
                     hidden->GetDesc(&d);
@@ -1547,8 +1613,8 @@ bool Bar::RenderSession()
                 hidden = frozen;
             }
             panelsMoving = renderPanels(snap, hidden.get(), lost);
-            if (frame)
-                frame.Close();
+            hidden = nullptr;
+            capture->Release();
             if (lost)
                 return true;
             animating = false;
@@ -1560,9 +1626,9 @@ bool Bar::RenderSession()
         // mode a private copy of the first one (later frames contain the glass).
         winrt::com_ptr<ID3D11Texture2D> source;
         if (frame) {
-            source = MonitorCapture::TextureOf(frame);
+            source.copy_from(frame);
             ++frames;
-            if (debugCapturable_) {
+            if (freeze) {
                 if (!frozen) {
                     D3D11_TEXTURE2D_DESC d{};
                     source->GetDesc(&d);
@@ -1588,8 +1654,7 @@ bool Bar::RenderSession()
             }
         }
         source = nullptr;
-        if (frame)
-            frame.Close();
+        capture->Release();
 
         bool changed = !renderer.HasPresented();
         if (auto rb = renderer.Poll()) {

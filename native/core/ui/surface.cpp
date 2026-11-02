@@ -1,6 +1,7 @@
 #include "ui/surface.h"
 
 #include "clock.h"
+#include "render/capture.h"
 #include "log.h"
 #include "render/glass_renderer.h"
 
@@ -124,6 +125,8 @@ float MonitorScale(RECT r)
 
 GlassHost* Surface::host_ = nullptr;
 bool Surface::capturable_ = false;
+bool Surface::captureVisible_ = false;
+std::vector<Surface*> Surface::all_;
 
 void Theme::SetGlass(uint32_t tint, double transparency)
 {
@@ -494,14 +497,17 @@ Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, flo
     DWORD ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP | (activatable ? 0 : WS_EX_NOACTIVATE);
     hwnd_ = CreateWindowExW(ex, kClass, title, WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, this);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-    // The glass below the content samples the screen: the window must not be in it.
-    if (!capturable_ && !SetWindowDisplayAffinity(hwnd_, WDA_EXCLUDEFROMCAPTURE))
-        Log(L"surface: WDA_EXCLUDEFROMCAPTURE failed (%lu); the glass would show this popup", GetLastError());
+    // The glass below the content samples the screen: the window must not be
+    // in what it samples (Desktop Duplication always leaves it out; other
+    // captures only while the bar uses Windows.Graphics.Capture).
+    all_.push_back(this);
+    ApplyCaptureExclusion();
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dwrite_.put()));
 }
 
 Surface::~Surface()
 {
+    all_.erase(std::remove(all_.begin(), all_.end(), this), all_.end());
     if (hwnd_) {
         if (host_) {
             GlassPanel p;
@@ -515,6 +521,23 @@ Surface::~Surface()
 
 void Surface::SetGlassHost(GlassHost* host) { host_ = host; }
 void Surface::SetCapturable(bool capturable) { capturable_ = capturable; }
+
+void Surface::ApplyCaptureExclusion() { SetCaptureExclusion(hwnd_, (capturable_ || captureVisible_) && !private_); }
+
+void Surface::SetCaptureVisible(bool visible)
+{
+    captureVisible_ = visible;
+    for (Surface* s : all_)
+        s->ApplyCaptureExclusion();
+}
+
+void Surface::SetPrivate(bool on)
+{
+    if (on == private_)
+        return;
+    private_ = on;
+    ApplyCaptureExclusion();
+}
 
 int Surface::InsetPx() const { return int(std::lround(insetDip_ * scale_)); }
 

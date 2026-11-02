@@ -142,6 +142,11 @@ public:
     // The bar draws the glass layers; development screenshots keep popups capturable.
     static void SetGlassHost(GlassHost* host);
     static void SetCapturable(bool capturable);
+    // Whether popups may show in screenshots: true while the bar's backdrop
+    // (Desktop Duplication) leaves them out by itself. UI thread.
+    static void SetCaptureVisible(bool visible);
+    // Never in screenshots (notification cards with their text hidden).
+    void SetPrivate(bool on);
 
     // Shows the content at `rect` (screen px), popping out of `anchor` (a
     // screen point); activatable surfaces take the foreground.
@@ -205,6 +210,10 @@ private:
     double rippleMs_ = 0;
     static GlassHost* host_;
     static bool capturable_;
+    static bool captureVisible_;
+    static std::vector<Surface*> all_;
+    bool private_ = false;
+    void ApplyCaptureExclusion();
     int bufW_ = 0, bufH_ = 0;
     // One D3D11/D2D/DirectComposition device for all popups (a device per
     // window costs tens of MB and dozens of driver threads); per window only
