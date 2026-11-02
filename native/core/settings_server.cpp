@@ -207,6 +207,15 @@ std::string SettingsServer::Handle(const std::string& request)
         return Reply(L"error", L"malformed request");
     std::wstring op(o.GetNamedString(L"op", L""));
 
+    if (op == L"add-widget") {
+        // Not a settings change (no txn_: the UI thread may be waiting for it in Modify).
+        std::wstring kind(o.GetNamedString(L"kind", L"")), size(o.GetNamedString(L"size", L"small"));
+        DWORD_PTR added = 0;
+        SendMessageTimeoutW(host_, WM_ATRIUM_ADD_WIDGET, reinterpret_cast<WPARAM>(&kind), reinterpret_cast<LPARAM>(&size), SMTO_ABORTIFHUNG, 3000,
+                            &added);
+        return added ? Reply(L"ok") : Reply(L"error", L"no room for another widget");
+    }
+
     std::lock_guard t(txn_);
     Settings saved, current;
     {

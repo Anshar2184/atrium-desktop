@@ -111,6 +111,14 @@ internal sealed class CoreClient : IDisposable
 
     public Task<string?> CancelAsync() => Send("cancel", null);
 
+    // Puts a desktop widget in the first free place ("clock", "medium"); null on success.
+    public async Task<string?> AddWidgetAsync(string kind, string size)
+    {
+        var r = await RequestAsync(new JsonObject { ["op"] = "add-widget", ["kind"] = kind, ["size"] = size });
+        if (r == null) return "Atrium 未运行";
+        return r["op"]?.GetValue<string>() == "ok" ? null : r["message"]?.GetValue<string>() ?? "error";
+    }
+
     // Null on success, otherwise an error message.
     private async Task<string?> Send(string op, BarSettings? s)
     {

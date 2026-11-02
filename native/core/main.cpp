@@ -18,6 +18,7 @@
 #include "ui/calendar_panel.h"
 #include "ui/control_center.h"
 #include "ui/desktop_widgets.h"
+#include "ui/glass_menu.h"
 #include "ui/notifications.h"
 #include "ui/start_menu.h"
 #include "ui/tray_panel.h"
@@ -56,7 +57,7 @@ constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
     kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager,
-    kCmdWidget = 200 // + the index in WidgetChoices(): add a desktop widget
+    kCmdWidgets
 };
 
 struct App {
@@ -78,6 +79,7 @@ struct App {
     std::unique_ptr<CalendarPanel> calendar;
     std::unique_ptr<DesktopWidgets> widgets;
     std::unique_ptr<SystemChrome> chrome;
+    std::unique_ptr<GlassMenu> menu;
     bool widgetsOn = false;
     int brightness = -1; // the built-in screen's, from GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS
     HPOWERNOTIFY brightnessNotify = nullptr;
@@ -98,7 +100,8 @@ std::wstring ExeDir()
     return p.substr(0, p.find_last_of(L'\\'));
 }
 
-void OpenSettings()
+// page: the settings app opens on it ("widgets"); an open window just comes to the front.
+void OpenSettings(const wchar_t* page = nullptr)
 {
     std::wstring dir = ExeDir();
     std::vector<std::wstring> candidates = {dir + L"\\Settings\\Atrium.Settings.exe", dir + L"\\Atrium.Settings.exe"};
@@ -111,7 +114,7 @@ void OpenSettings()
         if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
             continue;
         // The settings app keeps a single instance itself and activates it.
-        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32)
+        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), page ? (std::wstring(L"--page ") + page).c_str() : nullptr, nullptr, SW_SHOWNORMAL)) > 32)
             return;
     }
     Log(L"settings: Atrium.Settings.exe not found next to %s", dir.c_str());
@@ -442,51 +445,34 @@ void ToggleStart(RECT)
 
 void ShowMenu(POINT pt)
 {
-    HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, kCmdSettings, L"外观设置…");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kCmdDesktop, L"显示桌面");
-    AppendMenuW(menu, MF_STRING, kCmdTaskManager, L"任务管理器");
-    HMENU widgets = nullptr;
-    if (g_app.widgetsOn) {
-        widgets = CreatePopupMenu();
-        const auto& choices = WidgetChoices();
-        for (size_t i = 0; i < choices.size(); ++i)
-            AppendMenuW(widgets, MF_STRING, kCmdWidget + i, choices[i].name);
-        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(widgets), L"添加桌面小组件");
-    }
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kCmdToggle, g_app.bar->Visible() ? L"隐藏玻璃栏" : L"显示玻璃栏");
-    AppendMenuW(menu, MF_STRING, kCmdExit, L"退出 Atrium");
-    SetMenuDefaultItem(menu, kCmdSettings, FALSE);
-    // Required so the menu closes when the user clicks elsewhere.
-    SetForegroundWindow(g_app.host);
-    UINT cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, pt.x, pt.y, g_app.host, nullptr);
-    DestroyMenu(menu);
-    PostMessageW(g_app.host, WM_NULL, 0, 0);
-    switch (cmd) {
-    case kCmdSettings:
-        OpenSettings();
-        break;
-    case kCmdToggle:
-        g_app.bar->SetVisible(!g_app.bar->Visible());
-        break;
-    case kCmdDesktop:
-        SendWinShortcut('D');
-        break;
-    case kCmdTaskManager:
-        ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
-        break;
-    case kCmdExit:
-        DestroyWindow(g_app.host);
-        break;
-    default:
-        if (cmd >= kCmdWidget && cmd < kCmdWidget + WidgetChoices().size()) {
-            const WidgetChoice& choice = WidgetChoices()[cmd - kCmdWidget];
-            g_app.widgets->Add(choice.kind, choice.size);
+    std::vector<MenuEntry> entries = {{L"外观设置…", kCmdSettings}, {}, {L"显示桌面", kCmdDesktop}, {L"任务管理器", kCmdTaskManager}};
+    if (g_app.widgetsOn)
+        entries.push_back({L"添加小组件…", kCmdWidgets});
+    entries.push_back({});
+    entries.push_back({g_app.bar->Visible() ? L"隐藏玻璃栏" : L"显示玻璃栏", kCmdToggle});
+    entries.push_back({L"退出 Atrium", kCmdExit});
+    g_app.menu->Open(std::move(entries), pt, MenuPlace::Above, [](int cmd) {
+        switch (cmd) {
+        case kCmdSettings:
+            OpenSettings();
+            break;
+        case kCmdWidgets:
+            OpenSettings(L"widgets");
+            break;
+        case kCmdToggle:
+            g_app.bar->SetVisible(!g_app.bar->Visible());
+            break;
+        case kCmdDesktop:
+            SendWinShortcut('D');
+            break;
+        case kCmdTaskManager:
+            ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case kCmdExit:
+            DestroyWindow(g_app.host);
+            break;
         }
-        break;
-    }
+    });
 }
 
 // The tray icon of a notice's sender: its program's file name or the start of
@@ -607,106 +593,72 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
         return;
-    HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, it->name.c_str());
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kCmdNewWindow, it->windows.empty() ? L"打开" : L"打开新窗口");
+    std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
+    entries.push_back({it->windows.empty() ? L"打开" : L"打开新窗口", kCmdNewWindow});
     std::wstring location = g_app.tasks->FileLocation(key);
     if (!location.empty())
-        AppendMenuW(menu, MF_STRING, kCmdOpenLocation, L"打开文件所在的位置");
-    AppendMenuW(menu, MF_STRING, it->pinned ? kCmdUnpin : kCmdPin, it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium");
+        entries.push_back({L"打开文件所在的位置", kCmdOpenLocation});
+    entries.push_back({it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium", int(it->pinned ? kCmdUnpin : kCmdPin)});
     if (!it->windows.empty())
-        AppendMenuW(menu, MF_STRING, kCmdClose, it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kCmdSettings, L"外观设置…");
-    SetForegroundWindow(g_app.host);
-    UINT cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_CENTERALIGN, pt.x, pt.y, g_app.host, nullptr);
-    DestroyMenu(menu);
-    PostMessageW(g_app.host, WM_NULL, 0, 0);
-    switch (cmd) {
-    case kCmdNewWindow:
-        g_app.tasks->Launch(key);
-        break;
-    case kCmdPin: {
-        PinnedApp pin = g_app.tasks->PinFor(key);
-        g_app.server->Modify([&](Settings& s) {
-            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
-            pins.push_back(pin);
-            s.pins = std::move(pins);
-        });
-        break;
-    }
-    case kCmdUnpin:
-        g_app.server->Modify([&](Settings& s) {
-            auto pins = s.pins.value_or(std::vector<PinnedApp>{});
-            if (it->pinIndex >= 0 && it->pinIndex < int(pins.size()))
-                pins.erase(pins.begin() + it->pinIndex);
-            s.pins = std::move(pins);
-        });
-        break;
-    case kCmdClose:
-        g_app.tasks->CloseAll(key);
-        break;
-    case kCmdOpenLocation:
-        if (PIDLIST_ABSOLUTE id = ILCreateFromPathW(location.c_str())) {
-            SHOpenFolderAndSelectItems(id, 0, nullptr, 0);
-            ILFree(id);
+        entries.push_back({it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口", kCmdClose});
+    entries.push_back({});
+    entries.push_back({L"外观设置…", kCmdSettings});
+    int pinIndex = it->pinIndex;
+    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex](int cmd) {
+        switch (cmd) {
+        case kCmdNewWindow:
+            g_app.tasks->Launch(key);
+            break;
+        case kCmdPin: {
+            PinnedApp pin = g_app.tasks->PinFor(key);
+            g_app.server->Modify([&](Settings& s) {
+                auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+                pins.push_back(pin);
+                s.pins = std::move(pins);
+            });
+            break;
         }
-        break;
-    case kCmdSettings:
-        OpenSettings();
-        break;
-    }
-}
-
-// 32-bit premultiplied DIB for a menu item image.
-HBITMAP MenuBitmap(const IconImage& img)
-{
-    if (img.empty())
-        return nullptr;
-    BITMAPINFO bi{};
-    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
-    bi.bmiHeader.biWidth = img.width;
-    bi.bmiHeader.biHeight = -img.height;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    void* bits = nullptr;
-    HBITMAP bmp = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (bmp && bits)
-        memcpy(bits, img.bgra.data(), img.bgra.size());
-    return bmp;
+        case kCmdUnpin:
+            g_app.server->Modify([&](Settings& s) {
+                auto pins = s.pins.value_or(std::vector<PinnedApp>{});
+                if (pinIndex >= 0 && pinIndex < int(pins.size()))
+                    pins.erase(pins.begin() + pinIndex);
+                s.pins = std::move(pins);
+            });
+            break;
+        case kCmdClose:
+            g_app.tasks->CloseAll(key);
+            break;
+        case kCmdOpenLocation:
+            if (PIDLIST_ABSOLUTE id = ILCreateFromPathW(location.c_str())) {
+                SHOpenFolderAndSelectItems(id, 0, nullptr, 0);
+                ILFree(id);
+            }
+            break;
+        case kCmdSettings:
+            OpenSettings();
+            break;
+        }
+    });
 }
 
 // The overflow entry: the apps that did not fit, as a menu above the entry.
 void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
 {
     std::vector<TaskItem> items = g_app.tasks->Snapshot();
-    HMENU menu = CreatePopupMenu();
-    std::vector<HBITMAP> bitmaps;
-    int px = GetSystemMetrics(SM_CXSMICON);
+    std::vector<MenuEntry> entries;
+    const int px = int(std::lround(16 * PopupScale(anchor)));
     for (size_t i = 0; i < keys.size(); ++i) {
         auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == keys[i]; });
         std::wstring name = it != items.end() ? it->name : keys[i];
         if (it != items.end() && !it->windows.empty())
             name += it->windows.size() > 1 ? L"  \u00B7 " + std::to_wstring(it->windows.size()) : L"  \u00B7";
-        MENUITEMINFOW mi{sizeof(mi)};
-        mi.fMask = MIIM_ID | MIIM_STRING | MIIM_BITMAP;
-        mi.wID = UINT(1000 + i);
-        mi.dwTypeData = name.data();
-        mi.hbmpItem = MenuBitmap(g_app.tasks->Icon(keys[i], px));
-        if (mi.hbmpItem)
-            bitmaps.push_back(mi.hbmpItem);
-        InsertMenuItemW(menu, UINT(i), TRUE, &mi);
+        entries.push_back({name, int(1000 + i), false, false, false, g_app.tasks->Icon(keys[i], px)});
     }
-    SetForegroundWindow(g_app.host);
-    UINT cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_CENTERALIGN, (anchor.left + anchor.right) / 2,
-                                anchor.top - 8, g_app.host, nullptr);
-    DestroyMenu(menu);
-    for (HBITMAP b : bitmaps)
-        DeleteObject(b);
-    PostMessageW(g_app.host, WM_NULL, 0, 0);
-    if (cmd >= 1000 && cmd < 1000 + keys.size())
-        g_app.tasks->Activate(keys[cmd - 1000]);
+    g_app.menu->Open(std::move(entries), POINT{(anchor.left + anchor.right) / 2, anchor.top}, MenuPlace::AboveCentered, [keys](int cmd) {
+        if (cmd >= 1000 && cmd < 1000 + int(keys.size()))
+            g_app.tasks->Activate(keys[size_t(cmd - 1000)]);
+    });
 }
 
 // An app dropped at visible position `to` (in the list without it). Pinned
@@ -868,6 +820,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         break;
+    case WM_ATRIUM_ADD_WIDGET:
+        return g_app.widgetsOn && g_app.widgets->AddNamed(*reinterpret_cast<const std::wstring*>(w), *reinterpret_cast<const std::wstring*>(l)) ? 1 : 0;
     case WM_ATRIUM_SETTINGS:
         ApplySettings(g_app.server->Current());
         return 0;
@@ -967,6 +921,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // The bar's render thread draws the popups' glass from its capture.
     Surface::SetGlassHost(g_app.bar.get());
     Surface::SetCapturable(capturable);
+    g_app.menu = std::make_unique<GlassMenu>(instance);
     g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
         g_app.bar->SetItems(g_app.tasks->Snapshot());
         if (g_app.start)
@@ -980,6 +935,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         g_app.catalog->PrefetchStartIcons(StartMenu::TileIconPx(PopupScale(mi.rcWork)));
     }
     g_app.start->onSystem = OpenSystem;
+    g_app.start->menu = g_app.menu.get();
     g_app.notes = std::make_unique<Notifications>(instance);
     g_app.tray = std::make_unique<TrayModel>(g_app.host, WM_TRAY_ICONS);
     g_app.trayPanel = std::make_unique<TrayPanel>(instance, *g_app.tray);
@@ -988,6 +944,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.control->onChanged = UpdateStatus;
     g_app.calendar = std::make_unique<CalendarPanel>(instance);
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
+    g_app.widgets->menu = g_app.menu.get();
+    g_app.widgets->onAddWidgets = [] { OpenSettings(L"widgets"); };
     g_app.widgets->onCalendar = [] {
         if (!g_app.calendar->Visible())
             ToggleCalendar();
@@ -1060,6 +1018,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.trayPanel.reset();
     g_app.tray.reset();
     g_app.start.reset();
+    g_app.menu.reset();
     Surface::SetGlassHost(nullptr);
     g_app.catalog.reset();
     g_app.tasks.reset();

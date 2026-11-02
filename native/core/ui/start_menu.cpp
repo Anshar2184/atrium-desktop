@@ -655,17 +655,27 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
     if (i >= list.size())
         return;
     CatalogApp app = list[i];
-    HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, 1, L"打开");
-    AppendMenuW(menu, MF_STRING, 2, L"固定到程序坞");
+    if (!menu)
+        return;
     menuOpen_ = true;
-    UINT cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, surface_.Hwnd(), nullptr);
-    menuOpen_ = false;
-    DestroyMenu(menu);
-    if (cmd == 1)
-        Launch(app);
-    else if (cmd == 2 && onPin)
-        onPin(AppCatalog::PinFor(app));
+    menu->Open({{L"打开", 1}, {L"固定到程序坞", 2}}, screen, MenuPlace::Below,
+               [this, app](int cmd) {
+                   if (cmd == 1)
+                       Launch(app);
+                   else if (cmd == 2 && onPin)
+                       onPin(AppCatalog::PinFor(app));
+               },
+               [this] {
+                   menuOpen_ = false;
+                   if (!surface_.Visible())
+                       return;
+                   // Back to the start menu, unless the click that closed the menu went to another window.
+                   HWND fg = GetForegroundWindow();
+                   if (!fg || fg == surface_.Hwnd() || fg == menu->Hwnd())
+                       SetForegroundWindow(surface_.Hwnd());
+                   else
+                       Close(false);
+               });
     surface_.Invalidate();
 }
 

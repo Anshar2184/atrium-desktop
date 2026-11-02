@@ -7,3 +7,5 @@
 *.csproj text eol=lf
 *.png binary
 *.bmp binary
+*.otf binary
+*.ico binary

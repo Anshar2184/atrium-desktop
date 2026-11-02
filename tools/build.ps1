@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Builds Atrium and assembles a portable folder: dist/Atrium/.
 
@@ -6,6 +6,7 @@
   native (CMake, MSVC) -> settings (dotnet publish, self-contained WinUI 3) -> dist.
   Layout:
     dist/Atrium/Atrium.Core.exe
+    dist/Atrium/Settings/Fonts/ (MiSans, D40; the core reads it from there)
     dist/Atrium/Settings/Atrium.Settings.exe (+ runtime)
   -Zip also writes dist/Atrium-<version>-win-x64.zip.
 #>

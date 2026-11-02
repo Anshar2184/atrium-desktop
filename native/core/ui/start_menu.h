@@ -11,6 +11,7 @@
 #include "shell/app_catalog.h"
 #include "shell/system_status.h"
 #include "shell/task_model.h"
+#include "ui/glass_menu.h"
 #include "ui/surface.h"
 
 #include <functional>
@@ -47,6 +48,7 @@ public:
 
     std::function<void(const PinnedApp&)> onPin;            // pin to the bar (the dock)
     std::function<void(const std::wstring& what)> onSystem; // "network", "volume", "battery", "tray", "account"
+    GlassMenu* menu = nullptr;                               // a tile's menu (main's)
 
 private:
     struct Hit {

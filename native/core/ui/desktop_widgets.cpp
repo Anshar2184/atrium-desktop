@@ -228,24 +228,6 @@ struct PhotoRead {
 };
 } // namespace
 
-const std::vector<WidgetChoice>& WidgetChoices()
-{
-    static const std::vector<WidgetChoice> choices = {
-        {WidgetKind::Clock, WidgetSize::Small, L"时钟"},
-        {WidgetKind::Clock, WidgetSize::Medium, L"世界时钟"},
-        {WidgetKind::Digital, WidgetSize::Small, L"数字时钟"},
-        {WidgetKind::Calendar, WidgetSize::Small, L"日历"},
-        {WidgetKind::Calendar, WidgetSize::Medium, L"日历（月视图）"},
-        {WidgetKind::Calendar, WidgetSize::Large, L"日历（农历月历）"},
-        {WidgetKind::Battery, WidgetSize::Small, L"电池"},
-        {WidgetKind::System, WidgetSize::Small, L"系统监视"},
-        {WidgetKind::Notes, WidgetSize::Small, L"备忘录"},
-        {WidgetKind::Reminders, WidgetSize::Medium, L"提醒事项"},
-        {WidgetKind::Photos, WidgetSize::Small, L"照片"},
-    };
-    return choices;
-}
-
 DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
 {
     g_widgets = this;
@@ -281,16 +263,22 @@ void DesktopWidgets::SetEnabled(bool on)
         SampleSystem();
         Load();
         Build();
-        hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, nullptr, OnWinEvent, 0, 0,
-                                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        const DWORD flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
+        hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, nullptr, OnWinEvent, 0, 0, flags);
+        // A window that appears without taking the foreground, or uncloaks
+        // after it did (WinUI), must also send raised widgets back down.
+        showHook_ = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, nullptr, OnWinEvent, 0, 0, flags);
+        uncloakHook_ = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, OnWinEvent, 0, 0, flags);
         SetTimer(host_, kTickTimer, 1000, nullptr);
         SetTimer(host_, kSafetyTimer, 3000, nullptr);
         Restack();
         Log(L"widgets: on (%zu)", widgets_.size());
     } else {
-        if (hook_)
-            UnhookWinEvent(hook_);
-        hook_ = nullptr;
+        for (HWINEVENTHOOK* h : {&hook_, &showHook_, &uncloakHook_}) {
+            if (*h)
+                UnhookWinEvent(*h);
+            *h = nullptr;
+        }
         KillTimer(host_, kTickTimer);
         KillTimer(host_, kSafetyTimer);
         KillTimer(host_, kCaretTimer);
@@ -554,20 +542,27 @@ void DesktopWidgets::Glide()
         KillTimer(host_, kGlideTimer);
 }
 
-void DesktopWidgets::Add(WidgetKind kind, WidgetSize size)
+bool DesktopWidgets::Add(WidgetKind kind, WidgetSize size)
 {
     if (!WidgetSupports(kind, size))
         size = WidgetSize::Small;
     int c = 0, r = 0;
     if (!FreeCellNear(0, 0, size, nullptr, c, r)) {
         Log(L"widgets: no room for another");
-        return;
+        return false;
     }
     Create(kind, size, c, r);
     if (enabled_)
         Build();
     Save();
     Log(L"widgets: added %s %s at %d,%d", NameOf(kind), SizeName(size), c, r);
+    return true;
+}
+
+bool DesktopWidgets::AddNamed(const std::wstring& kind, const std::wstring& size)
+{
+    WidgetKind k;
+    return ParseKind(kind, k) && Add(k, ParseSize(size));
 }
 
 void DesktopWidgets::Remove(Widget& w)
@@ -615,9 +610,16 @@ bool DesktopWidgets::IsOurs(HWND h) const
 
 // ---- the layer -----------------------------------------------------------------
 
-void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD, HWND, LONG obj, LONG, DWORD, DWORD)
+void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD event, HWND h, LONG obj, LONG child, DWORD, DWORD)
 {
-    if (g_widgets && obj == OBJID_WINDOW && !g_widgets->restackPosted_) {
+    if (!g_widgets || obj != OBJID_WINDOW || child != CHILDID_SELF)
+        return;
+    // Shown or uncloaked windows matter only to widgets over the desktop, and
+    // only top-level ones (menus, tooltips and child windows show all the time).
+    bool appeared = event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED;
+    if (appeared && (!g_widgets->raised_ || !h || GetAncestor(h, GA_ROOT) != h))
+        return;
+    if (!g_widgets->restackPosted_) {
         g_widgets->restackPosted_ = true; // a burst of events, one restack right after it
         PostMessageW(g_widgets->host_, WM_WIDGET_RESTACK, 0, 0);
     }
@@ -1201,62 +1203,61 @@ void DesktopWidgets::PlaceImeWindow(Widget& w)
 
 void DesktopWidgets::Menu(Widget& w)
 {
-    enum { kSmall = 1, kMedium, kLarge, kRemove, kFolder, kNextPhoto, kClearDone, kAdd = 100 };
-    HMENU menu = CreatePopupMenu(), add = CreatePopupMenu();
-    auto size = [&](UINT id, WidgetSize s, const wchar_t* label) {
-        UINT f = MF_STRING | (w.size == s ? MF_CHECKED : 0) | (WidgetSupports(w.kind, s) ? 0 : MF_GRAYED);
-        AppendMenuW(menu, f, id, label);
-    };
+    if (!menu)
+        return;
+    enum { kSmall = 1, kMedium, kLarge, kRemove, kFolder, kNextPhoto, kClearDone, kAdd };
+    std::vector<MenuEntry> entries;
+    auto size = [&](int id, WidgetSize s, const wchar_t* label) { entries.push_back({label, id, w.size == s, !WidgetSupports(w.kind, s)}); };
     size(kSmall, WidgetSize::Small, L"小");
     size(kMedium, WidgetSize::Medium, L"中");
     size(kLarge, WidgetSize::Large, L"大");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    entries.push_back({});
     if (w.kind == WidgetKind::Photos) {
-        AppendMenuW(menu, MF_STRING, kFolder, L"选择照片文件夹…");
-        AppendMenuW(menu, MF_STRING, kNextPhoto, L"换一张");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        entries.push_back({L"选择照片文件夹…", kFolder});
+        entries.push_back({L"换一张", kNextPhoto});
+        entries.push_back({});
     }
     if (w.kind == WidgetKind::Reminders) {
         bool anyDone = std::any_of(w.content.items.begin(), w.content.items.end(), [](const Reminder& r) { return r.done; });
-        AppendMenuW(menu, MF_STRING | (anyDone ? 0 : MF_GRAYED), kClearDone, L"清除已完成");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        entries.push_back({L"清除已完成", kClearDone, false, !anyDone});
+        entries.push_back({});
     }
-    AppendMenuW(menu, MF_STRING, kRemove, L"移除小组件");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    const auto& choices = WidgetChoices();
-    for (size_t i = 0; i < choices.size(); ++i)
-        AppendMenuW(add, MF_STRING, kAdd + i, choices[i].name);
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(add), L"添加小组件");
+    entries.push_back({L"移除小组件", kRemove});
+    entries.push_back({L"添加小组件…", kAdd});
     POINT p;
     GetCursorPos(&p);
-    SetForegroundWindow(host_); // the menu closes on a click elsewhere
-    int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, p.x, p.y, 0, host_, nullptr);
-    DestroyMenu(menu); // and its submenu
-    if (cmd >= kAdd && cmd < kAdd + int(choices.size())) {
-        Add(choices[size_t(cmd - kAdd)].kind, choices[size_t(cmd - kAdd)].size);
-        return;
-    }
-    switch (cmd) {
-    case kSmall:
-    case kMedium:
-    case kLarge:
-        Resize(w, cmd == kSmall ? WidgetSize::Small : cmd == kMedium ? WidgetSize::Medium : WidgetSize::Large);
-        break;
-    case kFolder:
-        PickFolder(w);
-        break;
-    case kNextPhoto:
-        LoadPhoto(w, true);
-        break;
-    case kClearDone:
-        std::erase_if(w.content.items, [](const Reminder& r) { return r.done; });
-        Save();
-        w.surface->Invalidate();
-        break;
-    case kRemove:
-        Remove(w); // w is gone
-        break;
-    }
+    Widget* target = &w;
+    menu->Open(std::move(entries), p, MenuPlace::Below, [this, target](int cmd) {
+        if (cmd == kAdd) {
+            if (onAddWidgets)
+                onAddWidgets();
+            return;
+        }
+        if (!Has(target))
+            return; // gone while the menu was open
+        Widget& w = *target;
+        switch (cmd) {
+        case kSmall:
+        case kMedium:
+        case kLarge:
+            Resize(w, cmd == kSmall ? WidgetSize::Small : cmd == kMedium ? WidgetSize::Medium : WidgetSize::Large);
+            break;
+        case kFolder:
+            PickFolder(w);
+            break;
+        case kNextPhoto:
+            LoadPhoto(w, true);
+            break;
+        case kClearDone:
+            std::erase_if(w.content.items, [](const Reminder& r) { return r.done; });
+            Save();
+            w.surface->Invalidate();
+            break;
+        case kRemove:
+            Remove(w); // w is gone
+            break;
+        }
+    });
 }
 
 // ---- painting ------------------------------------------------------------------
@@ -1312,9 +1313,7 @@ void DesktopWidgets::TestAction(const std::wstring& arg)
     };
     std::wstring verb = part(0);
     if (verb == L"add") {
-        WidgetKind k;
-        if (ParseKind(part(1), k))
-            Add(k, ParseSize(part(2)));
+        AddNamed(part(1), part(2));
     } else if (verb == L"remove" || verb == L"size" || verb == L"type") {
         size_t i = size_t(_wtoi(part(1).c_str()));
         if (i >= widgets_.size())

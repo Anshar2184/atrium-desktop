@@ -1,6 +1,7 @@
 #include "shell/feishu_source.h"
 
 #include "log.h"
+#include "shell/uia_client.h"
 
 #include <tlhelp32.h>
 #include <uiautomation.h>
@@ -124,14 +125,13 @@ FeishuSource::~FeishuSource()
 void FeishuSource::Run()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
-    winrt::com_ptr<IUIAutomation> uia;
     winrt::com_ptr<IUIAutomationCondition> text;
-    if (SUCCEEDED(CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put())))) {
-        VARIANT v;
+    winrt::com_ptr<IUIAutomation> uia = CreateUia(stop_, wake_, L"feishu", [&](IUIAutomation* u) {
+        VARIANT v{};
         v.vt = VT_I4;
         v.lVal = UIA_TextControlTypeId;
-        uia->CreatePropertyCondition(UIA_ControlTypePropertyId, v, text.put());
-    }
+        return u->CreatePropertyCondition(UIA_ControlTypePropertyId, v, text.put());
+    });
     // Popups already handled, by window and text (a popup may be reused for the next message).
     std::map<HWND, std::wstring> seen;
     bool baseline = false, running = false;

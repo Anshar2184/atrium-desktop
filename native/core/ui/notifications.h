@@ -99,6 +99,7 @@ private:
         float stackGoal = -1;  // the card it settles on; -1: not chosen yet
         int stackFrom = 0;     // the card in front when the wheel started: one notch moves at least one
         bool stackMoving = false;
+        ULONGLONG stackFollow = 0; // the last fine wheel step (a touchpad): the stack follows it, then settles
         bool stacked = false;  // the cards are a stack (as last painted)
         size_t count = 0;      // cards shown (as last painted)
         int front = 0;         // the card in front (its text shows)

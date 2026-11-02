@@ -27,6 +27,9 @@ constexpr double kLeaveMs = 340, kRippleMs = 520;
 // gives at most kStackOverrun of speed, so it bounces back a little.
 constexpr float kStackPush = 6.5f, kStackFriction = 5.5f, kStackCoast = 2.5f, kStackSpring = 110, kStackOverrun = 8;
 constexpr float kStackLift = 24; // DIP a passed card rises over the stack's peeking edges as it goes
+// A touchpad (steps finer than a notch) turns the stack by hand: one notch's
+// worth is one card, and it settles on the nearest card this long after the last step.
+constexpr ULONGLONG kStackFollowMs = 90;
 
 // Moves v towards target at `rate` per second; true while still moving.
 bool Glide(float& v, float target, float dt, float rate, float eps)
@@ -461,6 +464,19 @@ void Notifications::PushStack(View& v, size_t n, int wheelDelta)
     if (n < 2)
         return;
     const float last = float(n - 1);
+    if (std::abs(wheelDelta) < WHEEL_DELTA) {
+        float step = -float(wheelDelta) / WHEEL_DELTA;
+        if (v.stackPos + step < 0 || v.stackPos + step > last)
+            step *= 0.35f; // past the end it gives only a little
+        v.stackPos = std::clamp(v.stackPos + step, -0.3f, last + 0.3f);
+        v.stackVel = 0;
+        v.stackGoal = -1;
+        v.stackMoving = true;
+        v.stackFollow = GetTickCount64();
+        v.surface->Invalidate();
+        return;
+    }
+    v.stackFollow = 0;
     if (!v.stackMoving || v.stackGoal >= 0)
         v.stackFrom = int(std::lround(std::clamp(v.stackPos, 0.f, last)));
     float push = -float(wheelDelta) / WHEEL_DELTA * kStackPush;
@@ -480,6 +496,12 @@ bool Notifications::StepStack(View& v, size_t n, float dtMs)
         return false;
     const float last = float(n ? n - 1 : 0);
     const float t = std::clamp(dtMs, 0.f, 50.f) / 1000.f;
+    if (v.stackFollow) {
+        if (GetTickCount64() - v.stackFollow < kStackFollowMs)
+            return true; // still under the fingers
+        v.stackFollow = 0;
+        v.stackGoal = std::clamp(std::round(v.stackPos), 0.f, last);
+    }
     const bool out = v.stackPos < 0 || v.stackPos > last;
     if (v.stackGoal < 0 && !out && std::fabs(v.stackVel) > kStackCoast) {
         // Coasting: the wheel's push dies away.
@@ -529,6 +551,7 @@ void Notifications::ShiftStack(Mode mode, size_t index, int by)
             v.stackVel = 0;
             v.stackGoal = 0;
             v.stackMoving = true;
+            v.stackFollow = 0;
         }
     } else if (int(index) < front) {
         v.stackPos -= 1; // a newer card went: the one in front stays
@@ -691,13 +714,20 @@ void Notifications::Paint(Mode mode, Canvas& c)
     // piece of glass; a fading card's glass shrinks away with it, and glass
     // scrolled out of the list is cut at the list's edge.
     c.Clip(D2D1::RectF(-1, 0, w + 1, listH));
-    // Passed cards first (they go back under the new front), then the stack from the back.
+    // A passed card is in front of the stack for the first half of its way
+    // (its text still shows) and under it for the second (it goes back under
+    // the new front); the stack itself from the back. Drawn the other way, a
+    // card turned slowly would show under the glass of the one behind it.
     std::vector<size_t> order;
+    auto passed = [&](size_t i, bool under) { return stack && float(i) < v.stackPos - 0.001f && (v.stackPos - float(i) >= 0.5f) == under; };
     for (size_t i = 0; i < shown.size(); ++i)
-        if (stack && float(i) < v.stackPos - 0.001f)
+        if (passed(i, true))
             order.push_back(i);
     for (size_t i = shown.size(); i-- > 0;)
         if (!stack || float(i) >= v.stackPos - 0.001f)
+            order.push_back(i);
+    for (size_t i = shown.size(); i-- > 0;)
+        if (passed(i, false))
             order.push_back(i);
     for (size_t i : order) {
         bool full = !stack || v.cards[shown[i]->id].content > 0.01f;

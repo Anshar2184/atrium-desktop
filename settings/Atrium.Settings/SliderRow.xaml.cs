@@ -2,37 +2,33 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
 
 namespace Atrium.Settings;
 
-// One adjustable parameter: illustration, title, big value, plain-language description, slider.
-public sealed partial class SliderCard : UserControl
+// One adjustable parameter: name, value (with a word for it), slider, description.
+public sealed partial class SliderRow : UserControl
 {
     private Func<double, string>? _hint;
-    private Action<double>? _glyph;
     private string _unit = "";
     private double _min, _max;
 
     public event Action<double>? UserValueChanged;
     public event Action<bool>? Engaged;
 
-    public SliderCard()
+    public SliderRow()
     {
         InitializeComponent();
         GotFocus += (_, _) => SetEngaged(true);
         LostFocus += (_, _) => SetEngaged(false);
     }
 
-    public void Configure(string title, string description, double min, double max, double step, string unit,
-        string minCaption, string maxCaption, Func<double, string> hint, FrameworkElement glyph, Action<double> glyphUpdate)
+    public void Configure(string title, string description, double min, double max, double step, string unit, Func<double, string> hint)
     {
-        _unit = unit; _min = min; _max = max; _hint = hint; _glyph = glyphUpdate;
+        _unit = unit; _min = min; _max = max; _hint = hint;
         TitleText.Text = title;
         DescriptionText.Text = description;
         DescriptionText.Visibility = description.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        MinCaption.Text = minCaption;
-        MaxCaption.Text = maxCaption;
-        GlyphHost.Child = glyph;
         Track.Minimum = min; Track.Maximum = max; Track.StepFrequency = step;
         AutomationProperties.SetName(Track, title);
     }
@@ -48,10 +44,10 @@ public sealed partial class SliderCard : UserControl
 
     private void Refresh(double v)
     {
+        string hint = _hint?.Invoke(v) ?? "";
+        HintRun.Text = hint.Length > 0 ? hint + "   " : "";
         ValueRun.Text = Math.Round(v).ToString(System.Globalization.CultureInfo.InvariantCulture);
         UnitRun.Text = _unit.Length > 0 ? " " + _unit : "";
-        HintText.Text = _hint?.Invoke(v) ?? "";
-        _glyph?.Invoke(_max > _min ? (v - _min) / (_max - _min) : 0);
     }
 
     private void OnTrackChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -60,9 +56,10 @@ public sealed partial class SliderCard : UserControl
         UserValueChanged?.Invoke(e.NewValue);
     }
 
+    // The row being adjusted is lit a little (the hero shows that parameter).
     private void SetEngaged(bool on)
     {
-        Ring.Opacity = on ? 1 : 0;
+        Surface.Background = on ? Tokens.Brush("HoverBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         Engaged?.Invoke(on);
     }
 }

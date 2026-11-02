@@ -124,13 +124,13 @@ try {
     Check "autowidth-saved" ($saved.autoWidth -eq $false) "settings.json autoWidth=$($saved.autoWidth)"
 
     # Notifications: hidden text on, a longer popup time, saved.
-    Navigate $win "内容"
+    Navigate $win "通知"
     $c = New-Object Windows.Automation.AndCondition(
         (New-Object Windows.Automation.PropertyCondition($A::NameProperty, "隐藏通知正文")),
         (New-Object Windows.Automation.PropertyCondition($A::IsTogglePatternAvailableProperty, $true)))
     $toggle = $win.FindFirst([Windows.Automation.TreeScope]::Descendants, $c)
     $toggle.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
-    SetSlider $win "通知停留时间" 12
+    SetSlider $win "停留时间" 12
     Invoke $win "保存"
     Start-Sleep 1
     $saved = Get-Content $file -Raw | ConvertFrom-Json
@@ -138,7 +138,7 @@ try {
     Check "notify-applied" ((NewLog) -match "pipe: commit saved") "the core received the commit"
 
     # Pins list: remove the first pin and save.
-    Navigate $win "固定的应用"
+    Navigate $win "程序坞"
     $removes = RemoveButtons $win
     if ($removes.Count -gt 0) {
         $before = $removes.Count

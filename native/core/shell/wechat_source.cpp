@@ -1,6 +1,7 @@
 #include "shell/wechat_source.h"
 
 #include "log.h"
+#include "shell/uia_client.h"
 
 #include <tlhelp32.h>
 #include <uiautomation.h>
@@ -146,15 +147,15 @@ WeChatSource::~WeChatSource()
 void WeChatSource::Run()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
-    winrt::com_ptr<IUIAutomation> uia;
     winrt::com_ptr<IUIAutomationCondition> cells;
-    if (SUCCEEDED(CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put())))) {
-        VARIANT v;
+    winrt::com_ptr<IUIAutomation> uia = CreateUia(stop_, wake_, L"wechat", [&](IUIAutomation* u) {
+        VARIANT v{};
         v.vt = VT_BSTR;
         v.bstrVal = SysAllocString(L"mmui::ChatSessionCell");
-        uia->CreatePropertyCondition(UIA_ClassNamePropertyId, v, cells.put());
+        HRESULT hr = u->CreatePropertyCondition(UIA_ClassNamePropertyId, v, cells.put());
         VariantClear(&v);
-    }
+        return hr;
+    });
     std::map<std::wstring, int> unread; // chat row id -> unread count last seen
     bool baseline = false;
     int state = -1; // 0 no WeChat, 1 no list, 2 reading (logged on change)

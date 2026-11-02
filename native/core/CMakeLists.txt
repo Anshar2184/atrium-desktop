@@ -48,6 +48,7 @@ add_executable(atrium_core WIN32
     ui/calendar_panel.cpp
     ui/control_center.cpp
     ui/desktop_widgets.cpp
+    ui/glass_menu.cpp
     ui/widget_faces.cpp
     shell/notification_listener.cpp
     render/bar_painter.cpp
@@ -55,6 +56,7 @@ add_executable(atrium_core WIN32
     render/desktop_backdrop.cpp
     render/glass_renderer.cpp
     render/glass_panel.cpp
+    render/ui_font.cpp
     render/gpu.cpp
     render/wifi_glyph.cpp
     core.rc
@@ -63,6 +65,13 @@ add_executable(atrium_core WIN32
 # build/win-x64/<Config>/Atrium.Core.exe
 set_target_properties(atrium_core PROPERTIES OUTPUT_NAME "Atrium.Core" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 target_include_directories(atrium_core PRIVATE ${shader_out})
+# The interface face (D40) next to the exe, as in the package.
+set(ui_fonts MiSans-Medium.otf MiSans-Demibold.otf MiSans-Semibold.otf)
+list(TRANSFORM ui_fonts PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/fonts/)
+add_custom_command(TARGET atrium_core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:atrium_core>/Fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ui_fonts} $<TARGET_FILE_DIR:atrium_core>/Fonts
+    VERBATIM)
 # C++/WinRT headers come with the Windows SDK.
 target_compile_options(atrium_core PRIVATE /bigobj)
 target_compile_definitions(atrium_core PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

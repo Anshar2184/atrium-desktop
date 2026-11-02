@@ -1,6 +1,7 @@
 #include "bar_painter.h"
 
 #include "round_stroke.h"
+#include "ui_font.h"
 #include "wifi_glyph.h"
 #include "../log.h"
 #include "../motion.h"
@@ -43,10 +44,13 @@ BarPainter::BarPainter(ID2D1DeviceContext2* d2d, IDWriteFactory3* dwrite)
 
 IDWriteTextFormat* BarPainter::Format(float px, DWRITE_FONT_WEIGHT weight, const wchar_t* family)
 {
-    auto key = std::make_tuple(int(std::lround(px * 4)), int(weight), std::wstring(family));
+    auto key = std::make_tuple(int(std::lround(px * 4)), int(weight), std::wstring(family ? family : L""));
     auto& f = formats_[key];
     if (!f) {
-        dwrite_->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put());
+        if (family)
+            dwrite_->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put());
+        else
+            UiTextFormat(dwrite_.get(), px, weight, f.put());
         if (f) {
             f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -401,9 +405,9 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
                 return;
             float o = std::max(1.0f, s * 0.6f);
             brush->SetColor(halo);
-            d2d->DrawText(str.c_str(), UINT32(str.size()), f, D2D1::RectF(scene.clock.left, y0 + o, scene.clock.right, y1 + o), brush.get());
+            DrawUiText(d2d, dwrite_.get(), str, f, D2D1::RectF(scene.clock.left, y0 + o, scene.clock.right, y1 + o), brush.get());
             brush->SetColor(ink);
-            d2d->DrawText(str.c_str(), UINT32(str.size()), f, D2D1::RectF(scene.clock.left, y0, scene.clock.right, y1), brush.get());
+            DrawUiText(d2d, dwrite_.get(), str, f, D2D1::RectF(scene.clock.left, y0, scene.clock.right, y1), brush.get());
         };
         text(time, Format(scene.timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD), top, top + lineT);
         text(date, Format(scene.datePx, DWRITE_FONT_WEIGHT_NORMAL), top + lineT, top + lineT + lineD);
@@ -489,7 +493,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         std::wstring n = it.badge > 9 ? L"9+" : std::to_wstring(it.badge);
         if (IDWriteTextFormat* f = Format(d * 0.62f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
             brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
-            d2d->DrawText(n.c_str(), UINT32(n.size()), f, D2D1::RectF(bxr - d, by - d / 2, bxr + d, by + d / 2), brush);
+            DrawUiText(d2d, dwrite_.get(), n, f, D2D1::RectF(bxr - d, by - d / 2, bxr + d, by + d / 2), brush);
         }
     }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());

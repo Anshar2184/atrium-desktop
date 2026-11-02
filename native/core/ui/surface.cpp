@@ -5,6 +5,7 @@
 #include "log.h"
 #include "render/glass_renderer.h"
 #include "render/round_stroke.h"
+#include "render/ui_font.h"
 #include "render/wifi_glyph.h"
 
 #include <dwmapi.h>
@@ -264,13 +265,21 @@ void Canvas::Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLO
     d2d_->DrawGeometry(g.get(), Brush(c), width * scale, RoundStroke(d2d_));
 }
 
+// Small text over glass is a step heavier: below 12.5 DIP a regular reads as a medium (D40).
+static DWRITE_FONT_WEIGHT GlassWeight(float sizeDip, DWRITE_FONT_WEIGHT w)
+{
+    return sizeDip <= 12.5f && w <= DWRITE_FONT_WEIGHT_NORMAL ? DWRITE_FONT_WEIGHT_MEDIUM : w;
+}
+
 IDWriteTextFormat* Canvas::Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, int align, bool wrap)
 {
     auto key = std::make_tuple(int(std::lround(px * 8)), int(w), glyph, align, wrap);
     auto& f = s_.formats_[key];
     if (!f) {
-        s_.dwrite_->CreateTextFormat(glyph ? L"Segoe Fluent Icons" : L"Segoe UI Variable Text", nullptr, w, DWRITE_FONT_STYLE_NORMAL,
-                                     DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put());
+        if (glyph)
+            s_.dwrite_->CreateTextFormat(L"Segoe Fluent Icons", nullptr, w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put());
+        else
+            UiTextFormat(s_.dwrite_.get(), px, w, f.put());
         if (!f)
             return nullptr;
         f->SetTextAlignment(align == 1 ? DWRITE_TEXT_ALIGNMENT_CENTER : align == 2 ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -322,15 +331,15 @@ void Canvas::Text(const std::wstring& s, D2D1_RECT_F r, float size, D2D1_COLOR_F
         return;
     D2D1_COLOR_F haloInk;
     c = InkAt(r, c, haloInk);
-    if (IDWriteTextFormat* f = Format(size * scale, w, false, align, wrap)) {
+    if (IDWriteTextFormat* f = Format(size * scale, GlassWeight(size, w), false, align, wrap)) {
         D2D1_RECT_F p = Px(r);
         if (halo && haloInk.a > 0) { // the bar's halo: a soft copy just below the ink
             float o = std::max(1.0f, scale * 0.6f);
             D2D1_COLOR_F hc = haloInk;
             hc.a *= c.a;
-            d2d_->DrawText(s.c_str(), UINT32(s.size()), f, D2D1::RectF(p.left, p.top + o, p.right, p.bottom + o), Brush(hc), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            DrawUiText(d2d_, s_.dwrite_.get(), s, f, D2D1::RectF(p.left, p.top + o, p.right, p.bottom + o), Brush(hc), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
-        d2d_->DrawText(s.c_str(), UINT32(s.size()), f, p, Brush(c), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        DrawUiText(d2d_, s_.dwrite_.get(), s, f, p, Brush(c), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 }
 
@@ -363,9 +372,9 @@ void Canvas::Glyph(const std::wstring& g, D2D1_RECT_F r, float size, D2D1_COLOR_
 
 float Canvas::TextWidth(const std::wstring& s, float size, DWRITE_FONT_WEIGHT w)
 {
-    IDWriteTextFormat* f = Format(size * scale, w, false, 0, false);
+    IDWriteTextFormat* f = Format(size * scale, GlassWeight(size, w), false, 0, false);
     winrt::com_ptr<IDWriteTextLayout> layout;
-    if (!f || FAILED(s_.dwrite_->CreateTextLayout(s.c_str(), UINT32(s.size()), f, 100000, 1000, layout.put())))
+    if (!f || FAILED(UiTextLayout(s_.dwrite_.get(), s, f, 100000, 1000, layout.put())))
         return 0;
     DWRITE_TEXT_METRICS m{};
     layout->GetMetrics(&m);
@@ -395,11 +404,11 @@ bool Canvas::Cached(const std::wstring& key) const
 D2D1_RECT_F Canvas::Caret(const std::wstring& s, D2D1_RECT_F r, float size, DWRITE_FONT_WEIGHT w, size_t pos)
 {
     D2D1_RECT_F fallback = D2D1::RectF(r.left, r.top, r.left + 1.5f, r.top + size * 1.33f);
-    IDWriteTextFormat* f = Format(size * scale, w, false, 0, true);
+    IDWriteTextFormat* f = Format(size * scale, GlassWeight(size, w), false, 0, true);
     // A zero-width space after the text: a caret after a final line break sits on the new line.
     std::wstring text = s + L"\u200B";
     winrt::com_ptr<IDWriteTextLayout> layout;
-    if (!f || FAILED(s_.dwrite_->CreateTextLayout(text.c_str(), UINT32(text.size()), f, (r.right - r.left) * scale, 1e6f, layout.put())))
+    if (!f || FAILED(UiTextLayout(s_.dwrite_.get(), text, f, (r.right - r.left) * scale, 1e6f, layout.put())))
         return fallback;
     float x = 0, y = 0;
     DWRITE_HIT_TEST_METRICS m{};

@@ -196,8 +196,9 @@ try {
     Start-Sleep 2
     $more = ItemRect "#more"
     Click $more
-    $menu = [U]::FindWindow("#32768", [NullString]::Value)
-    Check "overflow-entry" ($menu -ne [IntPtr]::Zero) "a 300 DIP bar shows the overflow entry; clicking it lists the hidden apps in a menu"
+    Start-Sleep 0.5
+    $menu = [U]::FindWindow("AtriumSurface", "Atrium Menu")
+    Check "overflow-entry" ($menu -ne [IntPtr]::Zero -and ((Get-Content $logFile -Encoding UTF8 | Select-Object -Skip $script:logStart) -join "`n") -match "menu: opened") "a 300 DIP bar shows the overflow entry; clicking it lists the hidden apps in a glass menu"
     [U]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [U]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
     Start-Sleep 0.3
 }

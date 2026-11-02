@@ -4,6 +4,38 @@ using Windows.Foundation;
 
 namespace Atrium.Settings;
 
+// Design tokens from App.xaml, in the app's current theme.
+public static class Tokens
+{
+    public static Microsoft.UI.Xaml.Media.Brush Brush(string key)
+    {
+        var res = Application.Current.Resources;
+        if (res.TryGetValue(key, out var v) && v is Microsoft.UI.Xaml.Media.Brush b) return b;
+        var theme = Application.Current.RequestedTheme == ApplicationTheme.Dark ? "Dark" : "Light";
+        if (res.ThemeDictionaries.TryGetValue(theme, out var d) && d is ResourceDictionary rd && rd.TryGetValue(key, out var t)
+            && t is Microsoft.UI.Xaml.Media.Brush tb) return tb;
+        return new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+    }
+}
+
+// A sidebar entry: a glyph and a name, in the item's ink (white when chosen).
+public sealed class NavLabel : StackPanel
+{
+    private readonly FontIcon _icon = new() { FontSize = 16, Width = 22 };
+    private readonly TextBlock _text = new() { FontSize = 15, VerticalAlignment = VerticalAlignment.Center };
+
+    public NavLabel()
+    {
+        Orientation = Orientation.Horizontal;
+        Spacing = 12;
+        Children.Add(_icon);
+        Children.Add(_text);
+    }
+
+    public string Glyph { get => _icon.Glyph; set => _icon.Glyph = value; }
+    public string Text { get => _text.Text; set => _text.Text = value; }
+}
+
 // A wrapping grid of equal-width cells: as many columns as fit MinCellWidth (1 when narrow,
 // 2 when wide), each row as tall as its tallest card. Unlike a virtualising ItemsRepeater every
 // card stays in the visual tree, so UI Automation can always find its controls.

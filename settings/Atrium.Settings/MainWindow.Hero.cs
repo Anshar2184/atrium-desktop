@@ -92,10 +92,10 @@ public sealed partial class MainWindow
         }
         _sep = new Rectangle { Width = 1, Fill = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)) };
         HeroCanvas.Children.Add(_sep);
-        _time = ClockText("10:24", FontWeights.SemiBold);
-        _date = ClockText("2026/10/31", FontWeights.Normal);
-        _lpTime = ClockText("10:24", FontWeights.SemiBold);
-        _lpDate = ClockText("2026/10/31", FontWeights.Normal);
+        _time = ClockText("10:24", true);
+        _date = ClockText("2026/10/31", false);
+        _lpTime = ClockText("10:24", true);
+        _lpDate = ClockText("2026/10/31", false);
         HeroCanvas.Children.Add(_time);
         HeroCanvas.Children.Add(_date);
         LoupeCanvas.Children.Add(_lpTime);
@@ -108,9 +108,10 @@ public sealed partial class MainWindow
         Task.Run(() => { RenderSwatch(liquid, SwatchLiquid); RenderSwatch(frosted, SwatchFrosted); });
     }
 
-    private static TextBlock ClockText(string text, Windows.UI.Text.FontWeight weight) =>
-        new() { Text = text, FontWeight = weight, TextAlignment = TextAlignment.Center, IsHitTestVisible = false, IsTextScaleFactorEnabled = false,
-                FontFamily = new FontFamily("Segoe UI Variable Text") };
+    // The bar's clock face (D40): Semibold for the time, Medium for the date.
+    private static TextBlock ClockText(string text, bool strong) =>
+        new() { Text = text, TextAlignment = TextAlignment.Center, IsHitTestVisible = false, IsTextScaleFactorEnabled = false,
+                FontFamily = (FontFamily)Application.Current.Resources[strong ? "TitleFont" : "TextFont"] };
 
     private static Color RgbColor(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
@@ -279,7 +280,7 @@ public sealed partial class MainWindow
             var chip = new Border
             {
                 Background = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)), CornerRadius = new CornerRadius(6), Padding = new Thickness(7, 2, 7, 3),
-                Child = new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromArgb(255, 22, 24, 29)) },
+                Child = new TextBlock { Text = text, FontSize = 11, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(255, 22, 24, 29)) },
                 IsHitTestVisible = false,
             };
             Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment((TextBlock)chip.Child, FontNumeralAlignment.Tabular);

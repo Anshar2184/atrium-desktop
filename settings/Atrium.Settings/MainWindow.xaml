@@ -7,729 +7,570 @@
     Title="Atrium 设置">
 
     <Window.SystemBackdrop>
-        <MicaBackdrop Kind="BaseAlt" />
+        <MicaBackdrop Kind="Base" />
     </Window.SystemBackdrop>
 
+    <!-- A sidebar on the window's material, the page on a quiet grey; groups of rows on white cards (DESIGN.md §8). -->
     <Grid x:Name="RootGrid">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="40" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="272" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <!-- Custom title bar -->
-        <Grid x:Name="AppTitleBar" Padding="16,0,0,0">
-            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                <Image Source="ms-appx:///Assets/atrium.ico" Width="16" Height="16" />
-                <TextBlock Text="Atrium 设置" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+        <!-- Title bar: a drag area over the window's top -->
+        <Grid x:Name="AppTitleBar" Grid.ColumnSpan="2" Height="44" VerticalAlignment="Top" Background="Transparent" Canvas.ZIndex="1" />
+
+        <!-- ============ Sidebar ============ -->
+        <Grid Padding="14,52,14,18">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Orientation="Horizontal" Spacing="12" Margin="10,0,0,26">
+                <Image Source="ms-appx:///Assets/atrium-256.png" Width="44" Height="44" />
+                <StackPanel VerticalAlignment="Center" Spacing="1">
+                    <TextBlock Text="Atrium" Style="{StaticResource TitleStyle}" />
+                    <TextBlock Text="设置" FontSize="13" Foreground="{ThemeResource InkSecondaryBrush}" />
+                </StackPanel>
+            </StackPanel>
+
+            <ListView x:Name="Nav" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnNavChanged"
+                      AutomationProperties.Name="导航" VerticalAlignment="Top" ItemContainerStyle="{StaticResource NavItemStyle}">
+                <ListViewItem AutomationProperties.Name="材质"><local:NavLabel Glyph="&#xE790;" Text="材质" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="形状"><local:NavLabel Glyph="&#xE7C9;" Text="形状" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="程序坞"><local:NavLabel Glyph="&#xE718;" Text="程序坞" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="通知"><local:NavLabel Glyph="&#xEA8F;" Text="通知" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="小组件"><local:NavLabel Glyph="&#xE8A9;" Text="小组件" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="系统"><local:NavLabel Glyph="&#xE770;" Text="系统" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="设计规范" Margin="0,18,0,2"><local:NavLabel Glyph="&#xE8D2;" Text="设计规范" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="关于"><local:NavLabel Glyph="&#xE946;" Text="关于" /></ListViewItem>
+            </ListView>
+
+            <StackPanel Grid.Row="2" Spacing="10" Margin="10,0,6,0">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse x:Name="StatusDot" Width="8" Height="8" VerticalAlignment="Top" Margin="0,6,0,0" />
+                    <StackPanel Grid.Column="1" Spacing="2">
+                        <TextBlock x:Name="StatusTitle" Text="Atrium 未运行" FontSize="13" FontFamily="{StaticResource EmphasisFont}" />
+                        <TextBlock x:Name="StatusMessage" Style="{StaticResource FootnoteStyle}" />
+                    </StackPanel>
+                </Grid>
+                <Button x:Name="StartCoreButton" Content="启动 Atrium" Click="OnStartCore" Visibility="Collapsed" HorizontalAlignment="Stretch" />
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="240" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+        <!-- ============ Content ============ -->
+        <Grid Grid.Column="1" Background="{ThemeResource PageBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-            <!-- ============ Sidebar ============ -->
-            <Grid Padding="12,4,12,16">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            <Border Height="44" />
 
-                <StackPanel Orientation="Horizontal" Spacing="12" Margin="8,12,0,24">
-                    <local:Mark Width="40" Height="40" />
-                    <StackPanel VerticalAlignment="Center" Spacing="1">
-                        <TextBlock Text="Atrium" FontFamily="{StaticResource DisplayFont}" FontSize="22" FontWeight="SemiBold"
-                                   CharacterSpacing="-10" />
-                        <TextBlock Text="DESKTOP" Style="{StaticResource SectionLabelStyle}" />
+            <StackPanel x:Name="Header" Grid.Row="1" MaxWidth="880" Margin="48,4,48,0" Spacing="6">
+                <TextBlock x:Name="HeaderTitle" Style="{StaticResource LargeTitleStyle}" />
+                <TextBlock x:Name="HeaderSubtitle" Style="{StaticResource SubtitleStyle}" />
+            </StackPanel>
+
+            <!-- Hero specimen: the glass bar, rendered live over an artwork (material and shape) -->
+            <Border x:Name="HeroFrame" Grid.Row="2" Height="216" MaxWidth="880" Margin="48,22,48,6" CornerRadius="20"
+                    Background="#FF20242E" SizeChanged="OnHeroSizeChanged">
+                <Grid>
+                    <Canvas x:Name="HeroCanvas" />
+                    <Border x:Name="SpecimenPill" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="14,14,0,0"
+                            CornerRadius="12" Padding="3" BorderThickness="1" Background="#6B000000" BorderBrush="#2EFFFFFF">
+                        <StackPanel Orientation="Horizontal" Spacing="2">
+                            <ToggleButton x:Name="SpecSunset" Content="日落" Style="{StaticResource SegToggleStyle}" Click="OnSpecimenClick" Tag="0"
+                                          AutomationProperties.Name="日落" IsChecked="True" />
+                            <ToggleButton x:Name="SpecNight" Content="夜色" Style="{StaticResource SegToggleStyle}" Click="OnSpecimenClick" Tag="1"
+                                          AutomationProperties.Name="夜色" />
+                            <ToggleButton x:Name="SpecStripes" Content="条纹" Style="{StaticResource SegToggleStyle}" Click="OnSpecimenClick" Tag="2"
+                                          AutomationProperties.Name="条纹" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock x:Name="ScaleCaption" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="16,0,0,12"
+                               FontSize="12" Foreground="#99FFFFFF" IsHitTestVisible="False" />
+                    <Border x:Name="Loupe" Width="176" Height="112" HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="0,14,14,0" CornerRadius="14" BorderThickness="2" BorderBrush="#B3FFFFFF" Background="#FF20242E">
+                        <Grid>
+                            <Canvas x:Name="LoupeCanvas" />
+                            <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8" CornerRadius="6" Padding="6,2,6,3" Background="#80000000">
+                                <TextBlock Text="3× 放大" FontSize="11" Foreground="#E6FFFFFF" />
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <Border CornerRadius="20" BorderThickness="1" BorderBrush="#26FFFFFF" IsHitTestVisible="False" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3">
+                <!-- ======== 01 Material ======== -->
+                <ScrollViewer x:Name="PageMaterial">
+                    <StackPanel MaxWidth="880" Margin="48,22,48,120" Spacing="30">
+                        <StackPanel>
+                            <TextBlock Text="预设" Style="{StaticResource SectionStyle}" />
+                            <Grid ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <RadioButton x:Name="PresetLiquid" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="liquid"
+                                             AutomationProperties.Name="液态玻璃" Checked="OnPresetChecked">
+                                    <StackPanel Spacing="10">
+                                        <Border x:Name="SwatchLiquid" Height="76" CornerRadius="8" Background="#FF20242E" />
+                                        <StackPanel Spacing="1" Margin="4,0,4,2">
+                                            <TextBlock Text="液态玻璃" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="边缘折射，轻度模糊" Style="{StaticResource FootnoteStyle}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton x:Name="PresetFrosted" Grid.Column="1" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="frosted"
+                                             AutomationProperties.Name="磨砂玻璃" Checked="OnPresetChecked">
+                                    <StackPanel Spacing="10">
+                                        <Border x:Name="SwatchFrosted" Height="76" CornerRadius="8" Background="#FF20242E" />
+                                        <StackPanel Spacing="1" Margin="4,0,4,2">
+                                            <TextBlock Text="磨砂玻璃" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="强模糊，几乎没有折射" Style="{StaticResource FootnoteStyle}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton x:Name="PresetCustom" Grid.Column="2" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="custom"
+                                             AutomationProperties.Name="自定义" Checked="OnPresetChecked">
+                                    <StackPanel Spacing="10">
+                                        <Border x:Name="SwatchCustom" Height="76" CornerRadius="8" Background="#FF20242E" />
+                                        <StackPanel Spacing="1" Margin="4,0,4,2">
+                                            <TextBlock Text="自定义" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="修改任一参数后即为自定义" Style="{StaticResource FootnoteStyle}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </RadioButton>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <TextBlock Text="玻璃" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel x:Name="MaterialRows" />
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <TextBlock Text="染色" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <Grid Style="{StaticResource RowStyle}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Spacing="3">
+                                        <TextBlock Text="玻璃的颜色" Style="{StaticResource RowTitleStyle}" />
+                                        <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                   Text="混入多少由“透明度”决定。白色最干净，石墨色像一块烟灰玻璃。" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <StackPanel x:Name="TintSwatches" Orientation="Horizontal" Spacing="2" />
+                                        <Button x:Name="TintButton" Style="{StaticResource IconButtonStyle}" Width="36" Height="36" CornerRadius="18"
+                                                AutomationProperties.Name="自定义颜色" ToolTipService.ToolTip="自定义颜色">
+                                            <Grid Width="26" Height="26">
+                                                <Ellipse x:Name="TintSwatch" Stroke="{ThemeResource CardStrokeBrush}" StrokeThickness="1" />
+                                                <FontIcon Glyph="&#xE710;" FontSize="11" Foreground="{ThemeResource InkSecondaryBrush}" />
+                                            </Grid>
+                                            <Button.Flyout>
+                                                <Flyout Placement="BottomEdgeAlignedRight">
+                                                    <StackPanel Spacing="8">
+                                                        <TextBlock x:Name="TintHex" Style="{StaticResource ValueStyle}" TextAlignment="Left" />
+                                                        <ColorPicker x:Name="TintPicker" IsAlphaEnabled="False" IsMoreButtonVisible="True"
+                                                                     ColorChanged="OnTintChanged" />
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+
+                        <Button Content="恢复默认外观" Click="OnDefaults" HorizontalAlignment="Left" />
                     </StackPanel>
-                </StackPanel>
+                </ScrollViewer>
 
-                <ListView x:Name="Nav" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnNavChanged"
-                          AutomationProperties.Name="导航" VerticalAlignment="Top">
-                    <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="材质">
-                        <Grid Padding="12,0,12,0" ColumnSpacing="14">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE790;" FontSize="16" />
-                            <TextBlock Grid.Column="1" Text="材质" VerticalAlignment="Center" />
-                        </Grid>
-                    </ListViewItem>
-                    <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="形状">
-                        <Grid Padding="12,0,12,0" ColumnSpacing="14">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE7C9;" FontSize="16" />
-                            <TextBlock Grid.Column="1" Text="形状" VerticalAlignment="Center" />
-                        </Grid>
-                    </ListViewItem>
-                    <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="固定的应用">
-                        <Grid Padding="12,0,12,0" ColumnSpacing="14">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE718;" FontSize="16" />
-                            <TextBlock Grid.Column="1" Text="固定的应用" VerticalAlignment="Center" />
-                        </Grid>
-                    </ListViewItem>
-                    <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="内容">
-                        <Grid Padding="12,0,12,0" ColumnSpacing="14">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE8FD;" FontSize="16" />
-                            <TextBlock Grid.Column="1" Text="内容" VerticalAlignment="Center" />
-                        </Grid>
-                    </ListViewItem>
-                    <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="设计规范">
-                        <Grid Padding="12,0,12,0" ColumnSpacing="14">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE8D2;" FontSize="16" />
-                            <TextBlock Grid.Column="1" Text="设计规范" VerticalAlignment="Center" />
-                        </Grid>
-                    </ListViewItem>
-                    <ListViewItem Style="{StaticResource NavItemStyle}" AutomationProperties.Name="关于">
-                        <Grid Padding="12,0,12,0" ColumnSpacing="14">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE946;" FontSize="16" />
-                            <TextBlock Grid.Column="1" Text="关于" VerticalAlignment="Center" />
-                        </Grid>
-                    </ListViewItem>
-                </ListView>
+                <!-- ======== 02 Shape ======== -->
+                <ScrollViewer x:Name="PageShape" Visibility="Collapsed">
+                    <StackPanel MaxWidth="880" Margin="48,22,48,120" Spacing="30">
+                        <StackPanel>
+                            <TextBlock Text="尺寸" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}"><StackPanel x:Name="ShapeSizeRows" /></Border>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="宽度" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel x:Name="ShapeWidthRows">
+                                    <Grid x:Name="AutoWidthCard" Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="自动宽度" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="玻璃栏随内容伸缩，像一枚贴合物品的胶囊；关闭后固定为“最大宽度”。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="AutoWidthSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="自动宽度" Toggled="OnAutoWidthToggled" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="位置与动效" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}"><StackPanel x:Name="ShapeMotionRows" /></Border>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
 
-                <Border Grid.Row="2" Style="{StaticResource CardSurfaceStyle}" Padding="14,12,14,12">
-                    <StackPanel Spacing="10">
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Ellipse x:Name="StatusDot" Width="8" Height="8" VerticalAlignment="Top" Margin="0,5,0,0" />
-                            <StackPanel Grid.Column="1" Spacing="2">
-                                <TextBlock x:Name="StatusTitle" Text="Atrium 未运行" FontSize="13" FontWeight="SemiBold" />
-                                <TextBlock x:Name="StatusMessage" Style="{StaticResource CardDescriptionStyle}" FontSize="11" LineHeight="15" />
-                            </StackPanel>
-                        </Grid>
-                        <Button x:Name="StartCoreButton" Content="启动 Atrium" Click="OnStartCore" Visibility="Collapsed"
-                                HorizontalAlignment="Stretch" />
+                <!-- ======== 03 Dock ======== -->
+                <ScrollViewer x:Name="PageDock" Visibility="Collapsed">
+                    <StackPanel MaxWidth="880" Margin="48,22,48,120" Spacing="30">
+                        <StackPanel>
+                            <TextBlock Text="栏上显示" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel>
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="时钟和日期" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}" Text="在栏的右端，使用系统的时间与日期格式。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="ClockSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="显示时钟和日期" Toggled="OnClockToggled" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="正在运行的应用" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}" Text="固定的应用之后，显示未固定但正在运行的应用，下方带一个小圆点。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="RunningSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="显示正在运行的应用" Toggled="OnRunningToggled" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="文字颜色" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}" Text="自动：按玻璃下方背景的明暗选择。" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentTrackStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="TextAuto" GroupName="ink" Content="自动" Tag="auto" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
+                                                <RadioButton x:Name="TextLight" GroupName="ink" Content="浅色" Tag="light" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
+                                                <RadioButton x:Name="TextDark" GroupName="ink" Content="深色" Tag="dark" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <Grid Margin="0,0,0,10">
+                                <TextBlock Text="固定的应用" Style="{StaticResource SectionStyle}" Margin="18,0,0,0" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                    <TextBlock x:Name="PinCount" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center" Margin="0,0,6,0"
+                                               Typography.NumeralAlignment="Tabular" />
+                                    <Button x:Name="ImportPinsButton" Content="导入系统任务栏固定项" Click="OnImportPins" />
+                                    <Button x:Name="AddPinButton" Content="添加应用…" Click="OnAddPin" Style="{StaticResource PrimaryButtonStyle}" />
+                                </StackPanel>
+                            </Grid>
+                            <Border Style="{StaticResource GroupStyle}">
+                                <Grid>
+                                    <ListView x:Name="PinsList" SelectionMode="None" CanReorderItems="True" CanDragItems="True" AllowDrop="True"
+                                              ItemContainerStyle="{StaticResource PinItemStyle}" DragItemsCompleted="OnPinsDragCompleted"
+                                              AutomationProperties.Name="固定的应用" Padding="0,4,0,4">
+                                        <ListView.ItemsPanel>
+                                            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+                                        </ListView.ItemsPanel>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:PinVm">
+                                                <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <FontIcon Glyph="&#xE76F;" FontSize="14" VerticalAlignment="Center" Foreground="{ThemeResource InkTertiaryBrush}" />
+                                                    <Grid Grid.Column="1" Width="40" Height="40" VerticalAlignment="Center">
+                                                        <FontIcon Glyph="&#xECAA;" FontSize="20" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}"
+                                                                  Foreground="{ThemeResource InkSecondaryBrush}" />
+                                                        <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
+                                                    </Grid>
+                                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
+                                                        <TextBlock Text="{x:Bind Title}" Style="{StaticResource RowTitleStyle}" />
+                                                        <TextBlock Text="{x:Bind Detail}" Style="{StaticResource FootnoteStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                                                        <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveUp}" IsEnabled="{x:Bind CanUp, Mode=OneWay}"
+                                                                AutomationProperties.Name="{x:Bind UpName}" ToolTipService.ToolTip="上移">
+                                                            <FontIcon Glyph="&#xE70E;" FontSize="13" />
+                                                        </Button>
+                                                        <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveDown}" IsEnabled="{x:Bind CanDown, Mode=OneWay}"
+                                                                AutomationProperties.Name="{x:Bind DownName}" ToolTipService.ToolTip="下移">
+                                                            <FontIcon Glyph="&#xE70D;" FontSize="13" />
+                                                        </Button>
+                                                        <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind Remove}"
+                                                                AutomationProperties.Name="{x:Bind RemoveName}" ToolTipService.ToolTip="移除">
+                                                            <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                        </Button>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                    <StackPanel x:Name="PinsEmpty" Visibility="Collapsed" Padding="24,36,24,36" Spacing="6" HorizontalAlignment="Center">
+                                        <TextBlock Text="还没有固定的应用" Style="{StaticResource TitleStyle}" HorizontalAlignment="Center" />
+                                        <TextBlock Text="点“添加应用…”选择一个程序，或一键导入 Windows 任务栏上已固定的应用。"
+                                                   Style="{StaticResource RowNoteStyle}" TextAlignment="Center" MaxWidth="360" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <TextBlock Text="拖动行可以排序，顺序就是它们在玻璃栏上的先后。" Style="{StaticResource FootnoteStyle}" Margin="18,8,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ======== 04 Notifications ======== -->
+                <ScrollViewer x:Name="PageNotify" Visibility="Collapsed">
+                    <StackPanel MaxWidth="880" Margin="48,22,48,120" Spacing="30">
+                        <StackPanel>
+                            <TextBlock Text="弹出" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel x:Name="NotifyRows">
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="隐藏通知正文" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="卡片只显示应用和标题；通知窗口同时不会出现在截图和屏幕共享里。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="HideBodySwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="隐藏通知正文" Toggled="OnHideBodyToggled" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="来源" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel>
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="Windows 通知" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="QQ 等发出系统通知的应用。需要在 Windows 隐私设置中允许访问通知。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="ListenerSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="显示 Windows 通知" Toggled="OnListenerToggled" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="微信" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="只读微信窗口里的会话列表，有新的未读消息时显示卡片；免打扰的会话不提醒。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="WeChatSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="显示微信消息" Toggled="OnWeChatToggled" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="飞书" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="只读飞书弹窗里的文字，同时显示为卡片；点击卡片打开飞书。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="FeishuSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="显示飞书消息" Toggled="OnFeishuToggled" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ======== 05 Widgets ======== -->
+                <ScrollViewer x:Name="PageWidgets" Visibility="Collapsed">
+                    <StackPanel MaxWidth="880" Margin="48,22,48,120" Spacing="30">
+                        <StackPanel>
+                            <TextBlock Text="桌面" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel>
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="桌面小组件" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="放在桌面上、所有窗口之下。拖动可移动，右键可改变大小或移除。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="WidgetsSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="桌面小组件" Toggled="OnWidgetsToggled" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="玻璃映出" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="实时桌面跟随动态壁纸与幻灯片；静态壁纸直接读取图片，开销最低。" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentTrackStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="BackdropDesktop" GroupName="backdrop" Content="实时桌面" Tag="desktop" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
+                                                <RadioButton x:Name="BackdropWallpaper" GroupName="backdrop" Content="静态壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="添加小组件" Style="{StaticResource SectionStyle}" />
+                            <local:ResponsiveGrid x:Name="WidgetGallery" MinCellWidth="190" Gap="14" />
+                            <TextBlock x:Name="WidgetHint" Style="{StaticResource FootnoteStyle}" Margin="18,10,0,0"
+                                       Text="点按一个小组件，把它放到桌面上第一个空位。" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ======== 06 System ======== -->
+                <ScrollViewer x:Name="PageSystem" Visibility="Collapsed">
+                    <StackPanel MaxWidth="880" Margin="48,22,48,120" Spacing="30">
+                        <StackPanel>
+                            <TextBlock Text="Windows" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel>
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="隐藏系统任务栏" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="只留下 Atrium 栏。关闭开关或退出 Atrium 时恢复；Win 键等系统快捷键照常可用。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="HideTaskbarSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="隐藏系统任务栏" Toggled="OnHideTaskbarToggled" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                                            <TextBlock Text="隐藏系统通知横幅" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}"
+                                                       Text="打开 Windows 的“请勿打扰”；通知照常显示为 Atrium 卡片。关闭开关或退出时恢复。" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="HideBannersSwitch" Grid.Column="1" Style="{StaticResource SwitchStyle}"
+                                                      AutomationProperties.Name="隐藏系统通知横幅" Toggled="OnHideBannersToggled" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ======== 07 Design: built in code (MainWindow.Design.cs) the first time it is shown ======== -->
+                <ScrollViewer x:Name="PageDesign" Visibility="Collapsed">
+                    <StackPanel x:Name="DesignStack" MaxWidth="880" Margin="48,22,48,120" Spacing="32" />
+                </ScrollViewer>
+
+                <!-- ======== 08 About ======== -->
+                <ScrollViewer x:Name="PageAbout" Visibility="Collapsed">
+                    <StackPanel MaxWidth="880" Margin="48,22,48,120" Spacing="30">
+                        <Border Style="{StaticResource GroupStyle}" Padding="28,28,28,26">
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Image Source="ms-appx:///Assets/atrium-256.png" Width="104" Height="104" VerticalAlignment="Top" />
+                                <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="Atrium Desktop" Style="{StaticResource LargeTitleStyle}" />
+                                    <TextBlock x:Name="VersionText" Style="{StaticResource RowNoteStyle}" Typography.NumeralAlignment="Tabular" />
+                                    <TextBlock Style="{StaticResource RowNoteStyle}" Margin="0,6,0,0"
+                                               Text="一条悬浮在桌面底部的玻璃程序坞：边缘实时折射、柔和高光，与系统任务栏共存。" />
+                                    <HyperlinkButton NavigateUri="https://github.com/wynter-yaxley/atrium-desktop" Margin="-12,4,0,0"
+                                                     Content="github.com/wynter-yaxley/atrium-desktop" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <StackPanel>
+                            <TextBlock Text="工作原理" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <StackPanel>
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="只画玻璃背后的那一块" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}" Text="捕获栏背后的屏幕画面，由 GPU 着色器实时折射、模糊，再贴回桌面。" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="与系统任务栏共存" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}" Text="不替换资源管理器，不向系统进程注入代码；意外退出后，下次启动会撤销它对系统做过的改动。" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource SeparatorStyle}" />
+                                    <Grid Style="{StaticResource RowStyle}">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="先预览，再保存" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Style="{StaticResource RowNoteStyle}" Text="调节时玻璃栏实时变化；点“保存”才写入文件，关闭窗口会撤销未保存的预览。" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <TextBlock Text="设置文件" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource GroupStyle}">
+                                <Grid Style="{StaticResource RowStyle}">
+                                    <TextBlock x:Name="PathText" Style="{StaticResource RowNoteStyle}" IsTextSelectionEnabled="True" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+
+                        <TextBlock Style="{StaticResource FootnoteStyle}" Margin="18,0,0,0"
+                                   Text="界面字体：MiSans（小米科技）。MIT License · 开源，可自由使用与修改。" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Errors: a quiet banner over the page's top -->
+                <InfoBar x:Name="Status" IsOpen="False" IsClosable="True" MaxWidth="880" Margin="48,8,48,0" VerticalAlignment="Top" />
+
+                <!-- Unsaved changes: a floating capsule at the bottom, only while there are any -->
+                <Border x:Name="SaveBar" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,28"
+                        CornerRadius="24" Padding="18,8,8,8" BorderThickness="1"
+                        Background="{ThemeResource FloatBrush}" BorderBrush="{ThemeResource FloatStrokeBrush}"
+                        Opacity="0" IsHitTestVisible="False">
+                    <Border.Shadow>
+                        <ThemeShadow />
+                    </Border.Shadow>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Ellipse x:Name="DirtyDot" Width="8" Height="8" VerticalAlignment="Center" Fill="#FFFF9F0A" />
+                        <TextBlock x:Name="DirtyText" Text="未保存的修改" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <Button x:Name="RevertButton" Content="撤销修改" Click="OnRevert" IsEnabled="False" CornerRadius="16" />
+                        <Button x:Name="SaveButton" Content="保存" Click="OnSave" IsEnabled="False" Style="{StaticResource PrimaryButtonStyle}" CornerRadius="16" />
                     </StackPanel>
                 </Border>
             </Grid>
-
-            <!-- ============ Content ============ -->
-            <Border Grid.Column="1" CornerRadius="16,0,0,0" BorderThickness="1,1,0,0"
-                    Background="{ThemeResource LayerFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <!-- Page header: overline, title, subtitle -->
-                    <StackPanel x:Name="Header" MaxWidth="960" Margin="40,28,40,0" Spacing="4">
-                        <StackPanel.OpacityTransition><ScalarTransition Duration="0:0:0.25" /></StackPanel.OpacityTransition>
-                        <TextBlock x:Name="HeaderOverline" Style="{StaticResource OverlineStyle}" />
-                        <TextBlock x:Name="HeaderTitle" Style="{StaticResource PageTitleStyle}" />
-                        <TextBlock x:Name="HeaderSubtitle" Style="{StaticResource PageSubtitleStyle}" />
-                    </StackPanel>
-
-                    <!-- Hero specimen: the glass bar, rendered live over an artwork -->
-                    <Border x:Name="HeroFrame" Grid.Row="1" Height="208" MaxWidth="960" Margin="40,20,40,0" CornerRadius="16"
-                            Background="#FF20242E" SizeChanged="OnHeroSizeChanged">
-                        <Grid>
-                            <Canvas x:Name="HeroCanvas" />
-
-                            <Border x:Name="SpecimenPill" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12,12,0,0"
-                                    CornerRadius="12" Padding="3" BorderThickness="1" Background="#6B000000" BorderBrush="#2EFFFFFF">
-                                <StackPanel Orientation="Horizontal" Spacing="2">
-                                    <ToggleButton x:Name="SpecSunset" Content="日落" Style="{StaticResource SegToggleStyle}" Click="OnSpecimenClick" Tag="0"
-                                                  AutomationProperties.Name="日落" IsChecked="True" />
-                                    <ToggleButton x:Name="SpecNight" Content="夜色" Style="{StaticResource SegToggleStyle}" Click="OnSpecimenClick" Tag="1"
-                                                  AutomationProperties.Name="夜色" />
-                                    <ToggleButton x:Name="SpecStripes" Content="条纹" Style="{StaticResource SegToggleStyle}" Click="OnSpecimenClick" Tag="2"
-                                                  AutomationProperties.Name="条纹" />
-                                </StackPanel>
-                            </Border>
-
-                            <TextBlock x:Name="ScaleCaption" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="14,0,0,10"
-                                       FontSize="11" Foreground="#99FFFFFF" IsHitTestVisible="False" />
-
-                            <Border x:Name="Loupe" Width="176" Height="112" HorizontalAlignment="Right" VerticalAlignment="Top"
-                                    Margin="0,12,12,0" CornerRadius="14" BorderThickness="2" BorderBrush="#B3FFFFFF"
-                                    Background="#FF20242E">
-                                <Grid>
-                                    <Canvas x:Name="LoupeCanvas" />
-                                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8" CornerRadius="6" Padding="6,2,6,3"
-                                            Background="#80000000">
-                                        <TextBlock Text="3× 放大" FontSize="11" Foreground="#E6FFFFFF" />
-                                    </Border>
-                                </Grid>
-                            </Border>
-
-                            <Border CornerRadius="16" BorderThickness="1" BorderBrush="#26FFFFFF" IsHitTestVisible="False" />
-                        </Grid>
-                    </Border>
-
-                    <!-- Pages -->
-                    <Grid Grid.Row="2">
-                        <!-- 01 Material -->
-                        <ScrollViewer x:Name="PageMaterial">
-                            <StackPanel MaxWidth="960" Margin="40,24,40,32" Spacing="12">
-                                <TextBlock Text="预设" Style="{StaticResource SectionLabelStyle}" />
-                                <Grid ColumnSpacing="16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <RadioButton x:Name="PresetLiquid" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="liquid"
-                                                 AutomationProperties.Name="液态玻璃" Checked="OnPresetChecked">
-                                        <StackPanel Spacing="12">
-                                            <Border x:Name="SwatchLiquid" Height="72" CornerRadius="8" Background="#FF20242E" />
-                                            <StackPanel Spacing="2">
-                                                <TextBlock Text="液态玻璃" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Text="边缘折射，轻度模糊" Style="{StaticResource CardDescriptionStyle}" />
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </RadioButton>
-                                    <RadioButton x:Name="PresetFrosted" Grid.Column="1" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="frosted"
-                                                 AutomationProperties.Name="磨砂玻璃" Checked="OnPresetChecked">
-                                        <StackPanel Spacing="12">
-                                            <Border x:Name="SwatchFrosted" Height="72" CornerRadius="8" Background="#FF20242E" />
-                                            <StackPanel Spacing="2">
-                                                <TextBlock Text="磨砂玻璃" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Text="强模糊，几乎没有折射" Style="{StaticResource CardDescriptionStyle}" />
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </RadioButton>
-                                    <RadioButton x:Name="PresetCustom" Grid.Column="2" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="custom"
-                                                 AutomationProperties.Name="自定义" Checked="OnPresetChecked">
-                                        <StackPanel Spacing="12">
-                                            <Border x:Name="SwatchCustom" Height="72" CornerRadius="8" Background="#FF20242E" />
-                                            <StackPanel Spacing="2">
-                                                <TextBlock Text="自定义" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Text="修改任一参数后即为自定义" Style="{StaticResource CardDescriptionStyle}" />
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </RadioButton>
-                                </Grid>
-
-                                <TextBlock Text="调节" Style="{StaticResource SectionLabelStyle}" Margin="0,12,0,0" />
-                                <local:ResponsiveGrid x:Name="MaterialGrid" MinCellWidth="340" Gap="16">
-                                    <!-- Tint card; the slider cards are added before it in code. -->
-                                    <Border x:Name="TintCard" Style="{StaticResource CardSurfaceStyle}">
-                                        <Grid RowSpacing="12">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                                            </Grid.RowDefinitions>
-                                            <Grid ColumnSpacing="12">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <Border x:Name="TintGlyphHost" Width="48" Height="40" CornerRadius="10"
-                                                        Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                                    <TextBlock Text="染色" Style="{StaticResource CardTitleStyle}" />
-                                                    <TextBlock x:Name="TintHex" Style="{StaticResource HintStyle}" Typography.NumeralAlignment="Tabular" />
-                                                </StackPanel>
-                                                <Button x:Name="TintButton" Grid.Column="2" Padding="4" VerticalAlignment="Center"
-                                                        AutomationProperties.Name="自定义颜色">
-                                                    <Border x:Name="TintSwatch" Width="56" Height="24" CornerRadius="6"
-                                                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1" />
-                                                    <Button.Flyout>
-                                                        <Flyout>
-                                                            <ColorPicker x:Name="TintPicker" IsAlphaEnabled="False" IsMoreButtonVisible="True"
-                                                                         ColorChanged="OnTintChanged" />
-                                                        </Flyout>
-                                                    </Button.Flyout>
-                                                </Button>
-                                            </Grid>
-                                            <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                       Text="玻璃混入的颜色，混入多少由“透明度”决定。白色最干净，石墨色像一块烟灰玻璃。" />
-                                            <StackPanel Grid.Row="2" x:Name="TintSwatches" Orientation="Horizontal" Spacing="4" Margin="-4,0,0,0" />
-                                        </Grid>
-                                    </Border>
-                                </local:ResponsiveGrid>
-                            </StackPanel>
-                        </ScrollViewer>
-
-                        <!-- 02 Shape -->
-                        <ScrollViewer x:Name="PageShape" Visibility="Collapsed">
-                            <local:ResponsiveGrid x:Name="LayoutGrid" MinCellWidth="340" Gap="16" MaxWidth="960" Margin="40,24,40,32">
-                                <Border x:Name="AutoWidthCard" Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border x:Name="AutoWidthGlyphHost" Width="48" Height="40" CornerRadius="10"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="1" Text="自动宽度" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ToggleSwitch x:Name="AutoWidthSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="自动宽度" VerticalAlignment="Center" Toggled="OnAutoWidthToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="玻璃栏随内容伸缩，像一枚贴合物品的胶囊；关闭后固定为“最大宽度”。" />
-                                    </Grid>
-                                </Border>
-                            </local:ResponsiveGrid>
-                        </ScrollViewer>
-
-                        <!-- 03 Pinned apps -->
-                        <Grid x:Name="PagePins" Visibility="Collapsed" MaxWidth="960" Margin="40,24,40,8">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-                            <Grid>
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button x:Name="AddPinButton" Click="OnAddPin">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon Glyph="&#xE710;" FontSize="14" />
-                                            <TextBlock Text="添加应用…" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button x:Name="ImportPinsButton" Click="OnImportPins">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon Glyph="&#xE896;" FontSize="14" />
-                                            <TextBlock Text="导入系统任务栏固定项" />
-                                        </StackPanel>
-                                    </Button>
-                                </StackPanel>
-                                <TextBlock x:Name="PinCount" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                           Style="{StaticResource CaptionTertiaryStyle}" Typography.NumeralAlignment="Tabular" />
-                            </Grid>
-
-                            <ListView x:Name="PinsList" Grid.Row="1" Margin="0,16,-16,0" Padding="0,0,16,16"
-                                      SelectionMode="None" CanReorderItems="True" CanDragItems="True" AllowDrop="True"
-                                      ItemContainerStyle="{StaticResource PinItemStyle}" DragItemsCompleted="OnPinsDragCompleted"
-                                      AutomationProperties.Name="固定的应用">
-                                <ListView.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel />
-                                    </ItemsPanelTemplate>
-                                </ListView.ItemsPanel>
-                                <ListView.ItemTemplate>
-                                    <DataTemplate x:DataType="local:PinVm">
-                                        <Border Style="{StaticResource CardSurfaceStyle}" Padding="12,8,12,8">
-                                            <Grid ColumnSpacing="12" MinHeight="48">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="24" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <FontIcon Glyph="&#xE76F;" FontSize="14" VerticalAlignment="Center"
-                                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                                <TextBlock Grid.Column="1" Text="{x:Bind Number, Mode=OneWay}" VerticalAlignment="Center"
-                                                           Style="{StaticResource CaptionTertiaryStyle}" Typography.NumeralAlignment="Tabular" />
-                                                <Grid Grid.Column="2" Width="44" Height="44" CornerRadius="10" VerticalAlignment="Center"
-                                                      Background="{ThemeResource ControlFillColorSecondaryBrush}">
-                                                    <FontIcon Glyph="&#xECAA;" FontSize="20" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}"
-                                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                    <Image Source="{x:Bind Icon, Mode=OneWay}" Width="32" Height="32" />
-                                                </Grid>
-                                                <StackPanel Grid.Column="3" VerticalAlignment="Center" Spacing="1">
-                                                    <TextBlock Text="{x:Bind Title}" Style="{StaticResource CardTitleStyle}" />
-                                                    <TextBlock Text="{x:Bind Detail}" Style="{StaticResource CaptionTertiaryStyle}"
-                                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                                </StackPanel>
-                                                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                                    <Button Style="{StaticResource SubtleButtonStyle}" Width="36" Height="32" Padding="0"
-                                                            Click="{x:Bind MoveUp}" IsEnabled="{x:Bind CanUp, Mode=OneWay}"
-                                                            AutomationProperties.Name="{x:Bind UpName}" ToolTipService.ToolTip="上移">
-                                                        <FontIcon Glyph="&#xE70E;" FontSize="14" />
-                                                    </Button>
-                                                    <Button Style="{StaticResource SubtleButtonStyle}" Width="36" Height="32" Padding="0"
-                                                            Click="{x:Bind MoveDown}" IsEnabled="{x:Bind CanDown, Mode=OneWay}"
-                                                            AutomationProperties.Name="{x:Bind DownName}" ToolTipService.ToolTip="下移">
-                                                        <FontIcon Glyph="&#xE70D;" FontSize="14" />
-                                                    </Button>
-                                                    <Button Style="{StaticResource SubtleButtonStyle}" Width="36" Height="32" Padding="0"
-                                                            Click="{x:Bind Remove}"
-                                                            AutomationProperties.Name="{x:Bind RemoveName}" ToolTipService.ToolTip="移除">
-                                                        <FontIcon Glyph="&#xE74D;" FontSize="14" />
-                                                    </Button>
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListView.ItemTemplate>
-                            </ListView>
-
-                            <!-- Empty state -->
-                            <StackPanel x:Name="PinsEmpty" Grid.Row="1" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                        Spacing="8" MaxWidth="360">
-                                <Canvas Width="160" Height="72" HorizontalAlignment="Center" Margin="0,0,0,12">
-                                    <Rectangle Width="160" Height="56" RadiusX="28" RadiusY="28" Canvas.Top="8"
-                                               Style="{StaticResource GlyphFaintStyle}" />
-                                    <Rectangle Width="32" Height="32" RadiusX="10" RadiusY="10" Canvas.Left="24" Canvas.Top="20"
-                                               Style="{StaticResource GlyphFaintStyle}" StrokeDashArray="2,3" />
-                                    <Rectangle Width="32" Height="32" RadiusX="10" RadiusY="10" Canvas.Left="64" Canvas.Top="20"
-                                               Style="{StaticResource GlyphAccentStyle}" StrokeDashArray="2,3" />
-                                    <Rectangle Width="32" Height="32" RadiusX="10" RadiusY="10" Canvas.Left="104" Canvas.Top="20"
-                                               Style="{StaticResource GlyphFaintStyle}" StrokeDashArray="2,3" />
-                                    <Line X1="80" X2="80" Y1="30" Y2="42" Style="{StaticResource GlyphAccentStyle}" />
-                                    <Line X1="74" X2="86" Y1="36" Y2="36" Style="{StaticResource GlyphAccentStyle}" />
-                                </Canvas>
-                                <TextBlock Text="还没有固定的应用" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"
-                                           HorizontalAlignment="Center" />
-                                <TextBlock Text="点“添加应用”选择一个程序，或一键导入 Windows 任务栏上已固定的应用。"
-                                           Style="{StaticResource CardDescriptionStyle}" TextAlignment="Center" />
-                            </StackPanel>
-                        </Grid>
-
-                        <!-- 04 Content -->
-                        <ScrollViewer x:Name="PageContent" Visibility="Collapsed">
-                            <StackPanel MaxWidth="960" Margin="40,24,40,32" Spacing="12">
-                            <TextBlock Text="玻璃栏" Style="{StaticResource SectionLabelStyle}" />
-                            <local:ResponsiveGrid MinCellWidth="340" Gap="16">
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border x:Name="ClockGlyphHost" Width="48" Height="40" CornerRadius="10"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="1" Text="显示时钟和日期" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ToggleSwitch x:Name="ClockSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="显示时钟和日期" VerticalAlignment="Center" Toggled="OnClockToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="在栏的右端显示时间和日期，如“10:24 / 2026/10/31”，使用系统的时间与日期格式。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border x:Name="RunningGlyphHost" Width="48" Height="40" CornerRadius="10"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="1" Text="显示正在运行的应用" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ToggleSwitch x:Name="RunningSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="显示正在运行的应用" VerticalAlignment="Center" Toggled="OnRunningToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="在固定的应用之后，显示未固定但正在运行的应用，下方带一个小圆点。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="文字颜色" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ComboBox x:Name="TextColorBox" Grid.Column="1" MinWidth="120" VerticalAlignment="Center"
-                                                      AutomationProperties.Name="文字颜色" SelectionChanged="OnTextColorChanged">
-                                                <ComboBoxItem Content="自动" Tag="auto" />
-                                                <ComboBoxItem Content="浅色" Tag="light" />
-                                                <ComboBoxItem Content="深色" Tag="dark" />
-                                            </ComboBox>
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="自动：按玻璃下方背景的明暗选择。深色背景用浅色文字，浅色背景用深色文字。" />
-                                        <Grid Grid.Row="2" ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border x:Name="ChipLight" Height="48" CornerRadius="10" BorderThickness="1.5" BorderBrush="Transparent">
-                                                <Border.Background>
-                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                                        <GradientStop Color="#FF2B2F45" Offset="0" /><GradientStop Color="#FF141622" Offset="1" />
-                                                    </LinearGradientBrush>
-                                                </Border.Background>
-                                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                    <TextBlock Text="10:24" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="SemiBold" Foreground="#FFF4F5FA" />
-                                                    <TextBlock Text="浅色文字" FontSize="11" Foreground="#B3F4F5FA" VerticalAlignment="Bottom" Margin="0,0,0,2" />
-                                                </StackPanel>
-                                            </Border>
-                                            <Border x:Name="ChipDark" Grid.Column="1" Height="48" CornerRadius="10" BorderThickness="1.5" BorderBrush="Transparent">
-                                                <Border.Background>
-                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                                        <GradientStop Color="#FFFAF3E6" Offset="0" /><GradientStop Color="#FFE6EAF2" Offset="1" />
-                                                    </LinearGradientBrush>
-                                                </Border.Background>
-                                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                    <TextBlock Text="10:24" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="SemiBold" Foreground="#FF16181D" />
-                                                    <TextBlock Text="深色文字" FontSize="11" Foreground="#B316181D" VerticalAlignment="Bottom" Margin="0,0,0,2" />
-                                                </StackPanel>
-                                            </Border>
-                                        </Grid>
-                                    </Grid>
-                                </Border>
-                            </local:ResponsiveGrid>
-
-                            <TextBlock Text="通知" Style="{StaticResource SectionLabelStyle}" Margin="0,12,0,0" />
-                            <local:ResponsiveGrid x:Name="NotifyGrid" MinCellWidth="340" Gap="16">
-                                <!-- The timeout card is inserted first in code. -->
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
-                                                <FontIcon Glyph="&#xE72E;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <TextBlock Grid.Column="1" Text="隐藏通知正文" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ToggleSwitch x:Name="HideBodySwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="隐藏通知正文" VerticalAlignment="Center" Toggled="OnHideBodyToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="卡片只显示应用和标题，正文显示为“内容已隐藏”；通知窗口同时不会出现在截图和屏幕共享里。演示模式下自动隐藏。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
-                                                <FontIcon Glyph="&#xE7E7;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                                <TextBlock Text="显示 Windows 通知" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Text="QQ、飞书等发出系统通知的应用" Style="{StaticResource HintStyle}" />
-                                            </StackPanel>
-                                            <ToggleSwitch x:Name="ListenerSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="显示 Windows 通知" VerticalAlignment="Center" Toggled="OnListenerToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="把其他应用的通知显示为 Atrium 卡片。不想同时看到 Windows 自己的横幅时，打开下方“桌面”中的“隐藏系统通知横幅”。需要在 Windows 隐私设置中允许访问通知。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
-                                                <FontIcon Glyph="&#xE8BD;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                                <TextBlock Text="显示微信消息" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Text="实验" Style="{StaticResource HintStyle}" />
-                                            </StackPanel>
-                                            <ToggleSwitch x:Name="WeChatSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="显示微信消息" VerticalAlignment="Center" Toggled="OnWeChatToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="微信不发出系统通知。Atrium 读取微信窗口里的会话列表（只读，不改动微信），有新的未读消息时显示卡片；免打扰的会话不提醒。微信窗口需要打开过一次。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
-                                                <FontIcon Glyph="&#xE8F2;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                                <TextBlock Text="显示飞书消息" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Text="实验" Style="{StaticResource HintStyle}" />
-                                            </StackPanel>
-                                            <ToggleSwitch x:Name="FeishuSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="显示飞书消息" VerticalAlignment="Center" Toggled="OnFeishuToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="飞书用自己的弹窗提醒，不发出系统通知。Atrium 读取飞书弹窗里的文字（只读，不改动飞书），同时显示为卡片；点击卡片打开飞书。" />
-                                    </Grid>
-                                </Border>
-                            </local:ResponsiveGrid>
-
-                            <TextBlock Text="桌面" Style="{StaticResource SectionLabelStyle}" Margin="0,12,0,0" />
-                            <local:ResponsiveGrid MinCellWidth="340" Gap="16">
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
-                                                <FontIcon Glyph="&#xE80A;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                                <TextBlock Text="桌面小组件" Style="{StaticResource CardTitleStyle}" />
-                                            </StackPanel>
-                                            <ToggleSwitch x:Name="WidgetsSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="桌面小组件" VerticalAlignment="Center" Toggled="OnWidgetsToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="时钟、世界时钟、日历和电池，放在桌面左上角，位于所有窗口之下；桌面在前台时显示全彩，打开应用时变为单色玻璃。拖动可移动，右键可改变大小、移除或添加。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="小组件背景" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ComboBox x:Name="WidgetBackdropBox" Grid.Column="1" MinWidth="140" VerticalAlignment="Center"
-                                                      AutomationProperties.Name="小组件背景" SelectionChanged="OnWidgetBackdropChanged">
-                                                <ComboBoxItem Content="实时桌面" Tag="desktop" />
-                                                <ComboBoxItem Content="静态壁纸（省电）" Tag="wallpaper" />
-                                            </ComboBox>
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="小组件的玻璃只映出桌面，不映出上面的窗口。实时桌面：跟随桌面变化（幻灯片放映、动态壁纸）。静态壁纸：直接读取壁纸图片，不占用屏幕捕获，开销最低；换壁纸后几秒内更新。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
-                                                <FontIcon Glyph="&#xE7C4;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <TextBlock Grid.Column="1" Text="隐藏系统任务栏" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ToggleSwitch x:Name="HideTaskbarSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="隐藏系统任务栏" VerticalAlignment="Center" Toggled="OnHideTaskbarToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="只留下 Atrium 栏：Atrium 运行时隐藏 Windows 任务栏（并设为自动隐藏，不占屏幕底部）。关闭开关或退出 Atrium 时恢复；Atrium 意外退出时，下次启动或重启 Windows 资源管理器即可恢复。Win 键、Win+N 等系统快捷键照常可用。" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CardSurfaceStyle}">
-                                    <Grid RowSpacing="12">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="40" CornerRadius="10" Background="{ThemeResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
-                                                <FontIcon Glyph="&#xE708;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <TextBlock Grid.Column="1" Text="隐藏系统通知横幅" Style="{StaticResource CardTitleStyle}" VerticalAlignment="Center" />
-                                            <ToggleSwitch x:Name="HideBannersSwitch" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Margin="0,0,-8,0"
-                                                          AutomationProperties.Name="隐藏系统通知横幅" VerticalAlignment="Center" Toggled="OnHideBannersToggled" />
-                                        </Grid>
-                                        <TextBlock Grid.Row="1" Style="{StaticResource CardDescriptionStyle}"
-                                                   Text="打开 Windows 的“请勿打扰”（仅闹钟），系统不再弹出横幅；通知仍进入通知中心，Atrium 照常显示为卡片。关闭开关或退出 Atrium 时关闭“请勿打扰”；如果你在 Windows 里自己关掉了它，Atrium 不会再打开。你事先已开启的“请勿打扰”不受影响。" />
-                                    </Grid>
-                                </Border>
-                            </local:ResponsiveGrid>
-                            </StackPanel>
-                        </ScrollViewer>
-
-                        <!-- 05 Design: built in code (MainWindow.Design.cs) the first time it is shown -->
-                        <ScrollViewer x:Name="PageDesign" Visibility="Collapsed">
-                            <StackPanel x:Name="DesignStack" MaxWidth="960" Margin="40,24,40,32" Spacing="32" />
-                        </ScrollViewer>
-
-                        <!-- 06 About -->
-                        <ScrollViewer x:Name="PageAbout" Visibility="Collapsed">
-                            <StackPanel MaxWidth="960" Margin="40,24,40,32" Spacing="32">
-                                <Grid ColumnSpacing="28" Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <local:Mark Width="104" Height="104" VerticalAlignment="Top" />
-                                    <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
-                                        <TextBlock Text="Atrium Desktop" FontFamily="{StaticResource DisplayFont}" FontSize="40" FontWeight="SemiLight"
-                                                   CharacterSpacing="-16" />
-                                        <TextBlock x:Name="VersionText" Style="{StaticResource CardDescriptionStyle}" FontSize="14"
-                                                   Typography.NumeralAlignment="Tabular" />
-                                        <TextBlock Style="{StaticResource CardDescriptionStyle}" FontSize="14" LineHeight="22"
-                                                   Text="一条悬浮在桌面底部的玻璃任务栏：边缘实时折射、柔和高光，与系统任务栏共存。" />
-                                        <HyperlinkButton NavigateUri="https://github.com/wynter-yaxley/atrium-desktop" Padding="0" Margin="0,8,0,0"
-                                                         AutomationProperties.Name="GitHub">
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <FontIcon Glyph="&#xE774;" FontSize="14" />
-                                                <TextBlock Text="github.com/wynter-yaxley/atrium-desktop" />
-                                            </StackPanel>
-                                        </HyperlinkButton>
-                                    </StackPanel>
-                                </Grid>
-
-                                <StackPanel Spacing="12">
-                                    <TextBlock Text="工作原理" Style="{StaticResource SectionLabelStyle}" />
-                                    <local:ResponsiveGrid MinCellWidth="240" Gap="16">
-                                        <Border Style="{StaticResource CardSurfaceStyle}">
-                                            <StackPanel Spacing="8">
-                                                <TextBlock Text="01" FontFamily="{StaticResource DisplayFont}" FontSize="28" FontWeight="SemiLight"
-                                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Typography.NumeralAlignment="Tabular" />
-                                                <TextBlock Text="只画玻璃背后的那一块" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Style="{StaticResource CardDescriptionStyle}"
-                                                           Text="捕获栏背后的屏幕画面，由 GPU 着色器实时折射、模糊，再贴回桌面。" />
-                                            </StackPanel>
-                                        </Border>
-                                        <Border Style="{StaticResource CardSurfaceStyle}">
-                                            <StackPanel Spacing="8">
-                                                <TextBlock Text="02" FontFamily="{StaticResource DisplayFont}" FontSize="28" FontWeight="SemiLight"
-                                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Typography.NumeralAlignment="Tabular" />
-                                                <TextBlock Text="与系统任务栏共存" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Style="{StaticResource CardDescriptionStyle}"
-                                                           Text="不替换资源管理器，不向系统进程注入代码；意外退出后，下次启动会撤销它对系统做过的改动。" />
-                                            </StackPanel>
-                                        </Border>
-                                        <Border Style="{StaticResource CardSurfaceStyle}">
-                                            <StackPanel Spacing="8">
-                                                <TextBlock Text="03" FontFamily="{StaticResource DisplayFont}" FontSize="28" FontWeight="SemiLight"
-                                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Typography.NumeralAlignment="Tabular" />
-                                                <TextBlock Text="先预览，再保存" Style="{StaticResource CardTitleStyle}" />
-                                                <TextBlock Style="{StaticResource CardDescriptionStyle}"
-                                                           Text="拖动滑块时玻璃栏实时变化；点“保存”才写入文件，关闭窗口会撤销未保存的预览。" />
-                                            </StackPanel>
-                                        </Border>
-                                    </local:ResponsiveGrid>
-                                </StackPanel>
-
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="设置文件" Style="{StaticResource SectionLabelStyle}" />
-                                    <TextBlock x:Name="PathText" Style="{StaticResource CardDescriptionStyle}" IsTextSelectionEnabled="True"
-                                               FontFamily="Cascadia Mono, Consolas" FontSize="12" />
-                                    <TextBlock Text="MIT License · 开源，可自由使用与修改。" Style="{StaticResource CaptionTertiaryStyle}" Margin="0,16,0,0" />
-                                </StackPanel>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </Grid>
-
-                    <!-- Visible status for save errors and limits -->
-                    <InfoBar x:Name="Status" Grid.Row="3" IsOpen="False" IsClosable="True" MaxWidth="960" Margin="40,8,40,0" />
-
-                    <!-- Footer action bar -->
-                    <Grid Grid.Row="4" Padding="0,12,0,16" BorderThickness="0,1,0,0"
-                          BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,12,0,0">
-                        <Grid MaxWidth="960" Margin="40,0,40,0">
-                            <Button Content="恢复默认" Click="OnDefaults" HorizontalAlignment="Left" />
-                            <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
-                                <StackPanel x:Name="DirtyLabel" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Opacity="0"
-                                            Margin="0,0,4,0">
-                                    <StackPanel.OpacityTransition><ScalarTransition Duration="0:0:0.2" /></StackPanel.OpacityTransition>
-                                    <Ellipse x:Name="DirtyDot" Width="8" Height="8" Fill="{ThemeResource SystemFillColorCautionBrush}" />
-                                    <TextBlock x:Name="DirtyText" Text="未保存的修改" Style="{StaticResource CardDescriptionStyle}" VerticalAlignment="Center" />
-                                </StackPanel>
-                                <Button x:Name="RevertButton" Content="撤销修改" Click="OnRevert" IsEnabled="False" />
-                                <Button x:Name="SaveButton" Content="保存" Click="OnSave" IsEnabled="False"
-                                        Style="{StaticResource AccentButtonStyle}" MinWidth="96" />
-                            </StackPanel>
-                        </Grid>
-                    </Grid>
-                </Grid>
-            </Border>
         </Grid>
     </Grid>
 </Window>

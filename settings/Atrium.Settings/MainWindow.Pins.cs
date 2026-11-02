@@ -23,8 +23,8 @@ public sealed class PinVm : INotifyPropertyChanged
         _owner = owner;
         Pin = pin;
         Title = MainWindow.PinTitle(pin);
-        // Files show where they are; Store and system apps have no useful path.
-        Detail = pin.Path.Length > 0 ? pin.Path : "已安装的应用";
+        // Files show their file name; Store and system apps have no path.
+        Detail = pin.Path.Length > 0 ? System.IO.Path.GetFileName(pin.Path) : "已安装的应用";
         UpName = "上移 " + Title;
         DownName = "下移 " + Title;
         RemoveName = "移除 " + Title;

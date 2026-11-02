@@ -17,6 +17,9 @@ namespace atrium {
 // Posted to the host window when the effective settings changed; lParam is
 // unused, the host reads SettingsServer::Current().
 constexpr UINT WM_ATRIUM_SETTINGS = WM_APP + 1;
+// Sent (not posted) by the pipe's thread: add a desktop widget. wParam, lParam:
+// const std::wstring* kind and size ("clock", "medium"); the result is 1 if it was added.
+constexpr UINT WM_ATRIUM_ADD_WIDGET = WM_APP + 9;
 
 std::wstring SettingsPipeName();
 

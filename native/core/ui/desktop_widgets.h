@@ -8,6 +8,7 @@
 // the widgets' content are saved in %LOCALAPPDATA%\Atrium\widgets.json.
 #pragma once
 
+#include "ui/glass_menu.h"
 #include "ui/widget_faces.h"
 
 #include <functional>
@@ -16,14 +17,6 @@
 #include <vector>
 
 namespace atrium {
-
-// What the menus offer to add.
-struct WidgetChoice {
-    WidgetKind kind;
-    WidgetSize size;
-    const wchar_t* name;
-};
-const std::vector<WidgetChoice>& WidgetChoices();
 
 class DesktopWidgets {
 public:
@@ -35,14 +28,18 @@ public:
     void SetEnabled(bool on);
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor);
-    // Adds a widget in the first free place (the bar's menu, a widget's menu).
-    void Add(WidgetKind kind, WidgetSize size);
+    // Adds a widget in the first free place; false when there is no room.
+    bool Add(WidgetKind kind, WidgetSize size);
+    // The same by name ("clock", "medium"; the settings app's gallery).
+    bool AddNamed(const std::wstring& kind, const std::wstring& size);
     // Test hooks: log what is shown (screen px); "add:<kind>:<size>", "remove:<i>", "size:<i>:<size>",
     // "restack", "type:<i>:<text>" (types into a note, or a new reminder).
     void LogState() const;
     void TestAction(const std::wstring& arg);
 
-    std::function<void()> onCalendar; // a calendar widget was clicked
+    std::function<void()> onCalendar;    // a calendar widget was clicked
+    std::function<void()> onAddWidgets;  // "添加小组件…": the settings app's widget gallery
+    GlassMenu* menu = nullptr;           // a widget's menu (main's)
 
 private:
     struct Widget;
@@ -89,7 +86,7 @@ private:
 
     HINSTANCE instance_;
     HWND host_ = nullptr; // timers, the menu's owner
-    HWINEVENTHOOK hook_ = nullptr;
+    HWINEVENTHOOK hook_ = nullptr, showHook_ = nullptr, uncloakHook_ = nullptr;
     bool enabled_ = false;
     HMONITOR monitor_ = nullptr;
     std::vector<std::unique_ptr<Widget>> widgets_;

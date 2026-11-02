@@ -5,6 +5,7 @@
 #include "render/capture.h"
 #include "render/desktop_backdrop.h"
 #include "render/glass_renderer.h"
+#include "render/ui_font.h"
 #include "ui/surface.h"
 
 #include <commctrl.h>
@@ -161,18 +162,6 @@ void ClockStrings(std::wstring& time, std::wstring& date)
     date = d;
 }
 
-float TextWidth(IDWriteFactory3* dw, const std::wstring& text, float px, DWRITE_FONT_WEIGHT weight)
-{
-    winrt::com_ptr<IDWriteTextFormat> f;
-    winrt::com_ptr<IDWriteTextLayout> layout;
-    if (FAILED(dw->CreateTextFormat(L"Segoe UI Variable Text", nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"",
-                                    f.put())) ||
-        FAILED(dw->CreateTextLayout(text.c_str(), UINT32(text.size()), f.get(), 10000, 1000, layout.put())))
-        return px * float(text.size()) * 0.6f;
-    DWRITE_TEXT_METRICS m{};
-    layout->GetMetrics(&m);
-    return m.widthIncludingTrailingWhitespace;
-}
 
 // Widest rendering of a clock string: every digit replaced by the widest digit.
 std::wstring WidestDigits(std::wstring s)
@@ -571,6 +560,12 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         std::wstring key = HitTest(pt);
         POINT screen = pt;
         ClientToScreen(h, &screen);
+        // Menus open above the bar (and above icons the pointer magnified), without the tooltip.
+        HideTooltip();
+        KillTimer(h, kTooltipTimer);
+        RECT wr;
+        GetWindowRect(h, &wr);
+        screen.y = wr.top;
         if (!key.empty() && !IsEntry(key) && onItemMenu)
             onItemMenu(key, screen);
         else if (onContextMenu)
@@ -725,8 +720,8 @@ void Bar::Relayout()
     if (st.showClock) {
         std::wstring time, date;
         ClockStrings(time, date);
-        float w = std::max(TextWidth(dwrite_.get(), WidestDigits(time), timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD),
-                           TextWidth(dwrite_.get(), WidestDigits(date), datePx, DWRITE_FONT_WEIGHT_NORMAL));
+        float w = std::max(MeasureUiText(dwrite_.get(), WidestDigits(time), timePx, DWRITE_FONT_WEIGHT_SEMI_BOLD),
+                           MeasureUiText(dwrite_.get(), WidestDigits(date), datePx, DWRITE_FONT_WEIGHT_NORMAL));
         clockW = int(std::ceil(w)) + Px(22, s);
     }
 
@@ -1602,7 +1597,10 @@ bool Bar::RenderSession()
             r.Resize(w, h);
             if (p.desktop) {
                 ID3D11Texture2D* pic = desktop.Texture();
-                if (pic && (changed || ps.desktopVersion != desktop.Version() || !r.HasBackdrop())) {
+                // Again once the glass is on screen if its ink was never measured: the
+                // first copy (before any present) is not compared, and a still desktop
+                // would leave a widget with the default ink over any wallpaper.
+                if (pic && (changed || ps.desktopVersion != desktop.Version() || !r.HasBackdrop() || ps.grid.w == 0)) {
                     r.UpdateBackdrop(pic, p.window.left - desktop.Origin().x, p.window.top - desktop.Origin().y);
                     ps.desktopVersion = desktop.Version();
                 }

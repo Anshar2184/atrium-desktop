@@ -65,15 +65,17 @@ public sealed partial class MainWindow
         new("Approach · 指数渐近", "进 20/s · 出 11/s", "悬停与按下的底板", 0.3, t => Motion.Approach(t, 20)),
     };
 
-    private static readonly (string Name, double Size, bool Strong, string Mac, string Use)[] TypeRamp =
+    // The type ramp (DESIGN.md §1.2): name, size, MiSans file, its weight, macOS counterpart, where.
+    private static readonly (string Name, double Size, string Font, string Weight, string Mac, string Use)[] TypeRamp =
     {
-        ("Title", 20, true, "Title 1 · 22", "日历的月份"),
-        ("Headline", 15, true, "Title 3 · 15", "电量百分比、大号数值"),
-        ("Body Strong", 13.5, true, "Headline · 13", "行标题、通知的应用名"),
-        ("Body", 13.5, false, "Body · 13", "正文、通知内容"),
-        ("Callout", 12.5, false, "Callout · 12", "滑块标题、说明文字"),
-        ("Subhead", 12, false, "Subheadline · 11", "次要信息、链接"),
-        ("Caption", 11.5, false, "Footnote · 10", "时间、百分比、状态"),
+        ("Large Title", 30, "TitleFont", "Semibold 520", "Large Title · 26", "页标题、产品名"),
+        ("Title", 20, "TitleFont", "Semibold 520", "Title 1 · 22", "空状态标题、日历的月份"),
+        ("Row", 15, "TextFont", "Medium 380", "Body · 13", "设置中心的行标题"),
+        ("Value", 15, "EmphasisFont", "Demibold 450", "—", "滑块的数值（等宽数字）"),
+        ("Body", 13.5, "TextFont", "Medium 380", "Body · 13", "面板正文、通知内容"),
+        ("Note", 13, "TextFont", "Medium 380", "Callout · 12", "行下方的说明"),
+        ("Section", 13, "EmphasisFont", "Demibold 450", "—", "分组标题"),
+        ("Footnote", 12, "TextFont", "Medium 380", "Footnote · 10", "补充说明；玻璃上升为 Demibold"),
     };
 
     // Logical width from, typical screens, bar height, icon, bottom margin, magnification.
@@ -100,13 +102,18 @@ public sealed partial class MainWindow
         return t;
     }
 
-    private static Border Card(UIElement child) => new() { Style = StyleOf("CardSurfaceStyle"), Child = child };
+    private static Border Card(UIElement child) => new() { Style = StyleOf("GroupStyle"), Padding = new Thickness(20, 16, 20, 16), Child = child };
 
     private static StackPanel Section(string label, string? note, UIElement body)
     {
         var s = new StackPanel { Spacing = 12 };
-        s.Children.Add(Text(label, "SectionLabelStyle"));
-        if (note != null) s.Children.Add(Text(note, "CardDescriptionStyle"));
+        s.Children.Add(Text(label, "SectionStyle"));
+        if (note != null)
+        {
+            var n = Text(note, "RowNoteStyle");
+            n.Margin = new Thickness(18, -4, 0, 0);
+            s.Children.Add(n);
+        }
         s.Children.Add(body);
         return s;
     }
@@ -118,7 +125,7 @@ public sealed partial class MainWindow
         DesignStack.Children.Add(Principles());
         DesignStack.Children.Add(Section("动效", "弹簧参数按 Apple 的方式给出：时长与回弹（= 1 − 阻尼比）。所有动画都可以中途打断，从当前位置和速度继续；与帧率无关。点卡片播放。",
             CurveGrid()));
-        DesignStack.Children.Add(Section("排版", "Segoe UI Variable，字号与 macOS 的文本样式一一对应；正文比 macOS 大半号，给中文笔画留出空间。一个界面最多三档。",
+        DesignStack.Children.Add(Section("排版", "MiSans 三个字重（Medium 380、Demibold 450、Semibold 520），字号与 macOS 的文本样式一一对应；数字一律等宽。一个界面最多三档。",
             TypeCard()));
         DesignStack.Children.Add(Section("圆角", "同心：内层圆角 = 外层圆角 − 边距（至少 6）。优先使用胶囊形，圆角为高度的一半。", RadiusCard()));
         DesignStack.Children.Add(Section("尺寸", "先把分辨率换算成逻辑宽度（像素 ÷ 缩放），再查栏的尺寸。图标是栏高的一半，栏高约为逻辑屏幕高度的 6%。", SizeCard()));
@@ -145,10 +152,10 @@ public sealed partial class MainWindow
         {
             var s = new StackPanel { Spacing = 8 };
             var num = Text(n, "ValueStyle");
-            num.Foreground = BrushOf("AccentTextFillColorPrimaryBrush");
+            num.Foreground = Tokens.Brush("AccentBrush");
             s.Children.Add(num);
-            s.Children.Add(Text(title, "CardTitleStyle"));
-            s.Children.Add(Text(body, "CardDescriptionStyle"));
+            s.Children.Add(Text(title, "RowTitleStyle"));
+            s.Children.Add(Text(body, "RowNoteStyle"));
             grid.Children.Add(Card(s));
         }
         return Section("原则", null, grid);
@@ -182,7 +189,7 @@ public sealed partial class MainWindow
         plot.Children.Add(cursor);
 
         var track = new Grid { Height = 22 };
-        track.Children.Add(new Border { CornerRadius = new CornerRadius(11), Background = BrushOf("ControlFillColorSecondaryBrush") });
+        track.Children.Add(new Border { CornerRadius = new CornerRadius(11), Background = Tokens.Brush("FillBrush") });
         var lane = new Canvas();
         var chip = new Rectangle { Width = Chip, Height = 14, RadiusX = 7, RadiusY = 7, Style = StyleOf("GlyphAccentFillStyle") };
         Canvas.SetTop(chip, 4);
@@ -218,11 +225,11 @@ public sealed partial class MainWindow
         Draw(w);
 
         var text = new StackPanel { Spacing = 2 };
-        text.Children.Add(Text(c.Name, "CardTitleStyle"));
-        var spec = Text(c.Spec, "HintStyle");
+        text.Children.Add(Text(c.Name, "RowTitleStyle"));
+        var spec = Text(c.Spec, "RowNoteStyle");
         Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(spec, FontNumeralAlignment.Tabular);
         text.Children.Add(spec);
-        text.Children.Add(Text(c.Use, "CardDescriptionStyle"));
+        text.Children.Add(Text(c.Use, "RowNoteStyle"));
 
         var body = new StackPanel { Spacing = 10 };
         body.Children.Add(text);
@@ -265,7 +272,7 @@ public sealed partial class MainWindow
         var rows = new StackPanel { Spacing = 0 };
         for (int i = 0; i < TypeRamp.Length; i++)
         {
-            var (name, size, strong, mac, use) = TypeRamp[i];
+            var (name, size, font, weight, mac, use) = TypeRamp[i];
             var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(0, 10, 0, 10) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
@@ -273,23 +280,22 @@ public sealed partial class MainWindow
             var sample = new TextBlock
             {
                 Text = "玻璃之下，内容优先 Aa 0123",
-                FontFamily = (FontFamily)Application.Current.Resources["TextFont"],
+                FontFamily = (FontFamily)Application.Current.Resources[font],
                 FontSize = size,
-                FontWeight = strong ? FontWeights.SemiBold : FontWeights.Normal,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
-            var spec = Text($"{name} · {size} {(strong ? "SemiBold" : "Regular")}", "CardDescriptionStyle");
+            var spec = Text($"{name} · {size} · {weight}", "RowNoteStyle");
             spec.VerticalAlignment = VerticalAlignment.Center;
             var where = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            where.Children.Add(Text("macOS " + mac, "CaptionTertiaryStyle"));
-            where.Children.Add(Text(use, "CardDescriptionStyle"));
+            where.Children.Add(Text("macOS " + mac, "FootnoteStyle"));
+            where.Children.Add(Text(use, "RowNoteStyle"));
             Grid.SetColumn(spec, 1);
             Grid.SetColumn(where, 2);
             g.Children.Add(sample);
             g.Children.Add(spec);
             g.Children.Add(where);
-            if (i > 0) rows.Children.Add(new Rectangle { Height = 1, Fill = BrushOf("DividerStrokeColorDefaultBrush") });
+            if (i > 0) rows.Children.Add(new Rectangle { Height = 1, Fill = Tokens.Brush("SeparatorBrush") });
             rows.Children.Add(g);
         }
         return Card(rows);
@@ -308,7 +314,7 @@ public sealed partial class MainWindow
         Canvas.SetTop(inner, P);
         demo.Children.Add(outer);
         demo.Children.Add(inner);
-        var label = Text($"R {R} − 边距 {P} = r {R - P}", "CardTitleStyle");
+        var label = Text($"R {R} − 边距 {P} = r {R - P}", "RowTitleStyle");
         label.Width = Ww - 2 * P;
         label.TextAlignment = TextAlignment.Center;
         Canvas.SetLeft(label, P);
@@ -316,7 +322,7 @@ public sealed partial class MainWindow
         demo.Children.Add(label);
         var left = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
         left.Children.Add(demo);
-        var why = Text("两条弧共用一个圆心，四周边距处处相等。", "CardDescriptionStyle");
+        var why = Text("两条弧共用一个圆心，四周边距处处相等。", "RowNoteStyle");
         why.HorizontalAlignment = HorizontalAlignment.Center;
         left.Children.Add(why);
 
@@ -327,10 +333,10 @@ public sealed partial class MainWindow
             var s = new StackPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
             // The bar's radius is half its height: drawn as the capsule it makes.
             s.Children.Add(new Rectangle { Width = r >= 30 ? 100 : 60, Height = 60, RadiusX = r, RadiusY = r, Style = StyleOf("GlyphInkStyle"), HorizontalAlignment = HorizontalAlignment.Center });
-            var v = Text(r.ToString(), "CardTitleStyle");
+            var v = Text(r.ToString(), "RowTitleStyle");
             v.HorizontalAlignment = HorizontalAlignment.Center;
             s.Children.Add(v);
-            var u = Text(use, "CaptionTertiaryStyle");
+            var u = Text(use, "FootnoteStyle");
             u.HorizontalAlignment = HorizontalAlignment.Center;
             s.Children.Add(u);
             ladder.Children.Add(s);
@@ -360,7 +366,7 @@ public sealed partial class MainWindow
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         for (int c = 0; c < head.Length; c++)
         {
-            var t = Text(head[c], "CaptionTertiaryStyle");
+            var t = Text(head[c], "FootnoteStyle");
             t.Margin = new Thickness(c == 0 ? 10 : 0, 0, 0, 8);
             Grid.SetColumn(t, c);
             g.Children.Add(t);
@@ -372,7 +378,7 @@ public sealed partial class MainWindow
             g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             if (i == mine)
             {
-                var band = new Border { CornerRadius = new CornerRadius(8), Background = BrushOf("SubtleFillColorSecondaryBrush") };
+                var band = new Border { CornerRadius = new CornerRadius(8), Background = Tokens.Brush("FillBrush") };
                 Grid.SetRow(band, row);
                 Grid.SetColumnSpan(band, head.Length);
                 g.Children.Add(band);
@@ -381,7 +387,7 @@ public sealed partial class MainWindow
             string[] cells = { range, k.Screens, k.Height.ToString(), k.Icon.ToString(), k.Margin.ToString(), k.Magnify.ToString("0.0") };
             for (int c = 0; c < cells.Length; c++)
             {
-                var t = Text(cells[c], c == 0 ? "CardTitleStyle" : "CardDescriptionStyle");
+                var t = Text(cells[c], c == 0 ? "RowTitleStyle" : "RowNoteStyle");
                 t.FontSize = c == 0 ? 13 : 12;
                 t.Margin = new Thickness(c == 0 ? 10 : 0, 9, c == cells.Length - 1 ? 10 : 0, 9);
                 t.VerticalAlignment = VerticalAlignment.Center;
@@ -393,7 +399,7 @@ public sealed partial class MainWindow
         }
         var k0 = SizeClasses[mine];
         var here = Text($"这块屏幕：{area.Width} × {area.Height} 像素，缩放 {scale * 100:0}% → 逻辑宽度 {logical:0}。建议栏高 {k0.Height}、图标 {k0.Icon}；当前设置为栏高 {_current.Height:0}、图标 {_current.IconSize:0}。",
-            "CardDescriptionStyle");
+            "RowNoteStyle");
         here.Margin = new Thickness(10, 12, 10, 0);
         var s = new StackPanel();
         s.Children.Add(g);
@@ -415,7 +421,7 @@ public sealed partial class MainWindow
                 {
                     Text = $"{name} · {a * 100:0}%",
                     FontSize = 13.5,
-                    FontWeight = name == "主文字" ? FontWeights.SemiBold : FontWeights.Normal,
+                    FontFamily = (FontFamily)Application.Current.Resources[name == "主文字" ? "EmphasisFont" : "TextFont"],
                     Foreground = new SolidColorBrush(Color.FromArgb((byte)Math.Round(a * 255), ink.R, ink.G, ink.B)),
                 });
             var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 6, 0, 0) };
