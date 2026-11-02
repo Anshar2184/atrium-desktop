@@ -91,9 +91,10 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
     surface_.onMargin = [this] { Close(); };
     wchar_t privacy[8] = {};
     private_ = GetEnvironmentVariableW(L"ATRIUM_PRIVACY", privacy, 8) && privacy[0] == L'1';
+    ReadRadios(false); // the brightness (WMI is slow) before the first opening
 }
 
-float ControlCenter::MainHeight() const { return kTopH + kGap + kSliderH + (brightness_ >= 0 ? kGap + kSliderH : 0); }
+float ControlCenter::MainHeight() const { return kTopH + kGap + kSliderH + (HasBrightness() ? kGap + kSliderH : 0); }
 
 float ControlCenter::PageHeight(Page page) const
 {
@@ -126,7 +127,7 @@ std::vector<ShapeDip> ControlCenter::MainShapes() const
     s.push_back({D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2), modR});
     s.push_back({D2D1::RectF(colW + kGap, (kTopH - kGap) / 2 + kGap, kW, kTopH), modR});
     float y = kTopH + kGap;
-    if (brightness_ >= 0) {
+    if (HasBrightness()) {
         s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
         y += kSliderH + kGap;
     }
@@ -403,7 +404,7 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
     const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
     float y = kTopH + kGap;
     D2D1_RECT_F bright{};
-    if (brightness_ >= 0) {
+    if (HasBrightness()) {
         bright = D2D1::RectF(0, y, kW, y + kSliderH);
         y = bright.bottom + kGap;
     }
@@ -490,8 +491,9 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
                projecting_.empty() ? t.subtext : t.accent);
         hits_.push_back({cast, L"cast"});
     }
-    if (brightness_ >= 0)
-        PaintSlider(c, t, bright, L"bright", L"显示器", L"\uE706", brightness_, false, std::to_wstring(brightness_) + L"%", brightTrack_);
+    if (HasBrightness())
+        PaintSlider(c, t, bright, L"bright", L"显示器", L"\uE706", std::max(brightness_, 0), false,
+                    brightness_ >= 0 ? std::to_wstring(brightness_) + L"%" : std::wstring(), brightTrack_);
     std::wstring level = !status_.audio ? L"没有播放设备" : status_.muted ? L"静音" : std::to_wstring(status_.volume) + L"%";
     const wchar_t* g = !status_.audio || status_.muted ? L"\uE74F" : status_.volume < 34 ? L"\uE993" : status_.volume < 67 ? L"\uE994" : L"\uE995";
     PaintSlider(c, t, sound, L"slider", L"声音", g, status_.audio ? status_.volume : 0, status_.muted, level, volumeTrack_);

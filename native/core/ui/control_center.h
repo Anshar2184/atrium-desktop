@@ -85,7 +85,10 @@ private:
     bool brightRead_ = false; // the brightness, once per opening (WMI is slow)
     std::vector<BluetoothDevice> devices_;
     bool devicesRead_ = false;
-    int brightness_ = -1; // -1: not adjustable (no built-in screen), -2: not read yet
+    int brightness_ = -2; // -1: not adjustable (no built-in screen), -2: not read yet
+    // The display's slider: read, or (before the first reading) a laptop's built-in screen, so the
+    // first opening is laid out at once instead of the sound's slider moving down when WMI answers.
+    bool HasBrightness() const { return brightness_ >= 0 || (brightness_ == -2 && status_.battery); }
     std::vector<WifiNetwork> networks_;
     bool scanning_ = false, scanned_ = false;
     unsigned scanGen_ = 0, acceptedGen_ = 0;
