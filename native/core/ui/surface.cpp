@@ -759,9 +759,11 @@ void Surface::Move(RECT rect)
 {
     if (EqualRect(&rect, &rect_))
         return;
+    bool resized = rect.right - rect.left != rect_.right - rect_.left || rect.bottom - rect.top != rect_.bottom - rect_.top;
     Place(rect);
     if (visible_) {
-        Invalidate();
+        if (resized) // a move alone keeps the content: the window carries it
+            Invalidate();
         PublishPanel();
     }
 }

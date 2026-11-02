@@ -1,9 +1,8 @@
 // Desktop widgets after macOS's (Sonoma and later): pieces of the bar's glass
 // on the desktop, in a grid from the top left of the bar's monitor. They
-// stand just above the desktop, under every window: in full colour while the
-// desktop is in front, in the glass's monochrome ink while an app is (macOS
-// dims them the same way); Win+D (every app minimised) lifts them over the
-// desktop. Drag one to move it (it snaps to the grid); right-click for its
+// stand just above the desktop, under every window, always clear glass with
+// its ink and a few colours of macOS's (the second hand, the weekday, the
+// battery's ring); Win+D (every app minimised) lifts them over the desktop. Drag one to move it (it snaps to the grid); right-click for its
 // sizes, to remove it or to add another. The layout is saved in
 // %LOCALAPPDATA%\Atrium\widgets.json.
 #pragma once
@@ -34,7 +33,7 @@ public:
     void SetMonitor(HMONITOR monitor);
     // Adds a widget in the first free place (the tray icon's menu, a widget's menu).
     void Add(WidgetKind kind, WidgetSize size);
-    // Test hooks: log what is shown (screen px); "add:<kind>:<size>", "remove:<i>", "size:<i>:<size>", "restack", "vivid:<0|1>".
+    // Test hooks: log what is shown (screen px); "add:<kind>:<size>", "remove:<i>", "size:<i>:<size>", "restack".
     void LogState() const;
     void TestAction(const std::wstring& arg);
 
@@ -69,7 +68,6 @@ private:
     void Menu(Widget& w);
     void Activate(Widget& w);
     void Paint(Widget& w, Canvas& c);
-    float Vivid(double now) const;
 
     HINSTANCE instance_;
     HWND host_ = nullptr; // timers, the menu's owner
@@ -77,16 +75,13 @@ private:
     bool enabled_ = false;
     HMONITOR monitor_ = nullptr;
     std::vector<std::unique_ptr<Widget>> widgets_;
-    bool vivid_ = true; // the desktop is in front: full colour
-    float vividFrom_ = 1;
-    double vividMs_ = 0;
     bool raised_ = false; // every app minimised: over the desktop
-    bool light_ = true;   // the apps' light or dark appearance
     SystemStatus status_;
     ChineseCalendar lunar_;
     std::wstring city_; // the local time zone's first city
     int lastMinute_ = -1;
-    bool test_ = false; // ATRIUM_WIDGETS_TEST=1: over everything, full colour by command (screenshots)
+    bool test_ = false; // ATRIUM_WIDGETS_TEST=1: over everything (screenshots)
+    bool restackPosted_ = false;
 };
 
 } // namespace atrium

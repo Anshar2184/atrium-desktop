@@ -26,10 +26,11 @@ namespace {
 
 // macOS's widget grid: a small widget is a square, a medium one two squares wide.
 constexpr float kCell = 164, kGap = 16, kMargin = 24, kRadius = 22;
-constexpr double kVividMs = 420, kGlideMs = 240;
-constexpr UINT_PTR kTickTimer = 1, kRestackTimer = 2, kGlideTimer = 3, kSafetyTimer = 4;
+constexpr double kGlideMs = 240;
+constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4;
 constexpr const wchar_t* kHostClass = L"AtriumWidgetsHost";
 constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1; // lParam Widget*: removed once its own message is done
+constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2; // a burst of window events, one restack
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
 
@@ -64,14 +65,6 @@ std::wstring LayoutPath()
 {
     std::wstring p = SettingsPath();
     return p.substr(0, p.find_last_of(L'\\')) + L"\\widgets.json";
-}
-
-bool AppsLight()
-{
-    DWORD v = 1, size = sizeof(v);
-    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD,
-                 nullptr, &v, &size);
-    return v != 0;
 }
 
 std::wstring ClassOf(HWND h)
@@ -135,22 +128,16 @@ int64_t Minutes(const SYSTEMTIME& t)
     return int64_t((ULARGE_INTEGER{f.dwLowDateTime, f.dwHighDateTime}.QuadPart) / 600000000ULL);
 }
 
-// The colours of a widget: macOS's own in full colour (opaque, so the glass's
-// ink never changes them), the glass's ink when dimmed.
+// The colours of a widget: the glass's ink, and macOS's accents.
 struct Pal {
     D2D1_COLOR_F text, sub, faint, face, red, orange, green, track;
 };
 
-Pal VividPal(bool light)
+Pal GlassPal(const Theme& t)
 {
-    if (light)
-        return {Rgba(0x1C1C1E, 0.98f), Rgba(0x6E6E73, 0.98f), Rgba(0xA1A1A6, 0.98f), Rgba(0xFFFFFF, 0.98f),
-                Rgba(0xFF3B30, 0.98f), Rgba(0xFF9500, 0.98f), Rgba(0x34C759, 0.98f), Rgba(0xE3E3E8, 0.98f)};
-    return {Rgba(0xFFFFFF, 0.98f), Rgba(0x98989F, 0.98f), Rgba(0x636366, 0.98f), Rgba(0x1C1C1E, 0.98f),
-            Rgba(0xFF453A, 0.98f), Rgba(0xFF9F0A, 0.98f), Rgba(0x30D158, 0.98f), Rgba(0x3A3A3C, 0.98f)};
+    return {t.text, t.subtext, t.faint, Alpha(t.text, 0.10f), Rgba(0xFF453A, 0.98f), Rgba(0xFF9F0A, 0.98f), Rgba(0x30D158, 0.98f),
+            Alpha(t.text, 0.18f)};
 }
-
-Pal MonoPal(const Theme& t) { return {t.text, t.subtext, t.faint, t.hover, t.text, t.text, t.text, t.hover}; }
 
 const wchar_t* const kWeekLong[] = {L"星期一", L"星期二", L"星期三", L"星期四", L"星期五", L"星期六", L"星期日"};
 const wchar_t* const kWeekShort[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
@@ -222,11 +209,8 @@ DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
     host_ = CreateWindowExW(WS_EX_TOOLWINDOW, kHostClass, L"Atrium Widgets", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     SetWindowLongPtrW(host_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     city_ = LocalCity();
-    light_ = AppsLight();
     wchar_t test[8] = {};
     test_ = GetEnvironmentVariableW(L"ATRIUM_WIDGETS_TEST", test, 8) && test[0] == L'1';
-    if (GetEnvironmentVariableW(L"ATRIUM_WIDGETS_LIGHT", test, 8)) // screenshots in both appearances
-        light_ = test[0] == L'1';
 }
 
 DesktopWidgets::~DesktopWidgets()
@@ -544,12 +528,13 @@ bool DesktopWidgets::IsOurs(HWND h) const
 
 void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD, HWND, LONG obj, LONG, DWORD, DWORD)
 {
-    if (g_widgets && obj == OBJID_WINDOW)
-        SetTimer(g_widgets->host_, kRestackTimer, 60, nullptr); // a burst of events, one restack
+    if (g_widgets && obj == OBJID_WINDOW && !g_widgets->restackPosted_) {
+        g_widgets->restackPosted_ = true; // a burst of events, one restack right after it
+        PostMessageW(g_widgets->host_, WM_WIDGET_RESTACK, 0, 0);
+    }
 }
 
-// Full colour while the desktop is in front; dimmed while an app is. Just
-// above the desktop, under every window; over it when every app is
+// Just above the desktop, under every window; over it when every app is
 // minimised (Win+D raises the desktop over windows at the bottom, D14).
 void DesktopWidgets::Restack()
 {
@@ -558,7 +543,7 @@ void DesktopWidgets::Restack()
     if (std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->dragging; }))
         return; // the one being dragged stays over the windows
     if (test_) {
-        // Screenshots: over the test backdrop; full colour or not by command.
+        // Screenshots: over the test backdrop.
         for (auto& w : widgets_)
             if (w->surface)
                 SetWindowPos(w->surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -567,18 +552,6 @@ void DesktopWidgets::Restack()
     HWND fg = GetForegroundWindow();
     // Atrium's own windows (the bar, its menus) and the taskbar change nothing.
     bool neutral = fg && (IsOurs(fg) || ClassOf(fg) == L"Shell_TrayWnd" || ClassOf(fg) == L"Shell_SecondaryTrayWnd");
-    if (!neutral) {
-        bool vivid = !fg || IsDesktopWindow(fg);
-        if (vivid != vivid_) {
-            double now = ClockMs();
-            vividFrom_ = Vivid(now);
-            vivid_ = vivid;
-            vividMs_ = now;
-            for (auto& w : widgets_)
-                if (w->surface)
-                    w->surface->Invalidate();
-        }
-    }
     // Every app on this screen minimised (or none), and none in front.
     struct Scan {
         const DesktopWidgets* self;
@@ -646,12 +619,14 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         case WM_TIMER:
             if (w == kTickTimer)
                 self->Tick();
-            else if (w == kRestackTimer || w == kSafetyTimer) {
-                if (w == kRestackTimer)
-                    KillTimer(h, kRestackTimer);
+            else if (w == kSafetyTimer)
                 self->Restack();
-            } else if (w == kGlideTimer)
+            else if (w == kGlideTimer)
                 self->Glide();
+            return 0;
+        case WM_WIDGET_RESTACK:
+            self->restackPosted_ = false;
+            self->Restack();
             return 0;
         case WM_DISPLAYCHANGE:
         case WM_DPICHANGED:
@@ -660,12 +635,7 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                     self->Place(*wd, false);
             return 0;
         case WM_SETTINGCHANGE:
-            if (l && wcscmp(reinterpret_cast<const wchar_t*>(l), L"ImmersiveColorSet") == 0) {
-                self->light_ = AppsLight();
-                for (auto& wd : self->widgets_)
-                    if (wd->surface)
-                        wd->surface->Invalidate();
-            } else if (w == SPI_SETWORKAREA && self->enabled_) {
+            if (w == SPI_SETWORKAREA && self->enabled_) {
                 for (auto& wd : self->widgets_)
                     self->Place(*wd, false);
             }
@@ -696,12 +666,6 @@ void DesktopWidgets::Tick()
     for (auto& w : widgets_)
         if (w->surface && (w->kind == WidgetKind::Clock || minute))
             w->surface->Invalidate();
-}
-
-float DesktopWidgets::Vivid(double now) const
-{
-    float k = vividMs_ > 0 ? Ease(float((now - vividMs_) / kVividMs)) : 1.f;
-    return vividFrom_ + ((vivid_ ? 1.f : 0.f) - vividFrom_) * k;
 }
 
 // ---- input -------------------------------------------------------------------
@@ -848,17 +812,15 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
     const Theme& t = c.theme;
     const float W = WidthOf(w.size), H = kCell;
     const D2D1_RECT_F card = D2D1::RectF(0, 0, W, H);
-    const float v = Vivid(c.now);
-    if (v > 0.001f && v < 0.999f)
-        c.Continue();
     if (c.panel)
         c.Fill(card, kRadius, t.panel);
     SYSTEMTIME now;
     GetLocalTime(&now);
 
-    auto draw = [&](const Pal& p, bool vivid) {
+    const Pal p = GlassPal(t);
+    {
         const float pad = 14;
-        D2D1_COLOR_F face = vivid ? p.face : Alpha(t.text, 0.10f);
+        const D2D1_COLOR_F face = p.face;
         if (w.kind == WidgetKind::Clock && w.size == WidgetSize::Small) {
             ClockFace(c, W / 2, H / 2, H / 2 - 9, now, p, face, p.text, true, city_, p.sub);
         } else if (w.kind == WidgetKind::Clock) {
@@ -873,14 +835,8 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
                     SystemTimeToTzSpecificLocalTimeEx(&z, &utc, &ct);
                 bool night = ct.wHour < 6 || ct.wHour >= 18;
                 float cx = pad + colW * (float(i) + 0.5f), cy = (H - 2 * R - 42) / 2 + R - 2;
-                D2D1_COLOR_F f = face, ink = p.text;
-                if (vivid && night) {
-                    f = Rgba(0x1C1C1E, 0.98f);
-                    ink = Rgba(0xFFFFFF, 0.98f);
-                } else if (vivid) {
-                    f = light_ ? Rgba(0xF2F2F7, 0.98f) : Rgba(0xFFFFFF, 0.98f);
-                    ink = Rgba(0x1C1C1E, 0.98f);
-                }
+                // Night: a dark face with light ink, as on macOS.
+                D2D1_COLOR_F f = night ? Rgba(0x000000, 0.42f) : face, ink = night ? Rgba(0xFFFFFF, 0.96f) : p.text;
                 ClockFace(c, cx, cy, R, ct, p, f, ink, false, {}, ink);
                 int64_t diff = (Minutes(ct) - Minutes(now)) / 60;
                 int dayDiff = int((Minutes(ct) / 1440) - (Minutes(now) / 1440));
@@ -925,8 +881,7 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
                     if (today)
                         c.Circle(cx, cy, rh / 2 + 0.5f, p.red);
                     bool weekend = (first + cell % 7) % 7 >= 5;
-                    D2D1_COLOR_F ink = today ? (vivid ? Rgba(0xFFFFFF, 0.98f) : (t.light ? Rgba(0xFFFFFF, 0.98f) : Rgba(0x1C1C1E, 0.98f)))
-                                       : weekend ? p.sub : p.text;
+                    D2D1_COLOR_F ink = today ? Rgba(0xFFFFFF, 0.98f) : weekend ? p.sub : p.text;
                     c.Text(std::to_wstring(d), D2D1::RectF(x0, cy - rh / 2, x0 + cw, cy + rh / 2), 10.5f, ink,
                            today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
                 }
@@ -952,23 +907,6 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
                 c.Text(L"已接通电源", D2D1::RectF(0, cy + R + 12, W, cy + R + 34), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
             }
         }
-    };
-
-    // Full colour on macOS's own widget background over the glass; dimmed,
-    // the glass alone with its ink. Between the two they cross-fade.
-    const bool halo = c.halo;
-    if (v < 0.999f) {
-        c.BeginGroup(1 - v, 1, W / 2, H / 2);
-        draw(MonoPal(t), false);
-        c.EndGroup();
-    }
-    if (v > 0.001f) {
-        c.BeginGroup(v, 1, W / 2, H / 2);
-        c.Fill(card, kRadius, light_ ? Rgba(0xF5F5F7, 0.72f) : Rgba(0x1C1C1E, 0.64f));
-        c.halo = false;
-        draw(VividPal(light_), true);
-        c.halo = halo;
-        c.EndGroup();
     }
 }
 
@@ -976,8 +914,7 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
 
 void DesktopWidgets::LogState() const
 {
-    Log(L"widgets: state enabled=%d vivid=%d raised=%d count=%zu cols=%d rows=%d", enabled_ ? 1 : 0, vivid_ ? 1 : 0, raised_ ? 1 : 0, widgets_.size(), Cols(),
-        Rows());
+    Log(L"widgets: state enabled=%d raised=%d count=%zu cols=%d rows=%d", enabled_ ? 1 : 0, raised_ ? 1 : 0, widgets_.size(), Cols(), Rows());
     for (size_t i = 0; i < widgets_.size(); ++i) {
         const Widget& w = *widgets_[i];
         RECT r = w.surface ? w.surface->Rect() : RECT{};
@@ -1025,14 +962,6 @@ void DesktopWidgets::TestAction(const std::wstring& arg)
         }
     } else if (verb == L"restack") {
         Restack();
-    } else if (verb == L"vivid") {
-        double now = ClockMs();
-        vividFrom_ = Vivid(now);
-        vivid_ = part(1) == L"1";
-        vividMs_ = now;
-        for (auto& w : widgets_)
-            if (w->surface)
-                w->surface->Invalidate();
     }
 }
 

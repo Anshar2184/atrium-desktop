@@ -1510,6 +1510,7 @@ bool Bar::RenderSession()
         unsigned pop = 0;
         bool ready = false;   // presented once (the popup was told)
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
+        RECT window{};        // where it was last drawn: a moved panel is drawn again at once
         bool dark = false;
         InkGrid grid;         // ink region by region (published for the popup)
         // Distance-field shapes as textures, by image (the image is kept alive here).
@@ -1518,6 +1519,34 @@ bool Bar::RenderSession()
         std::vector<ID3D11ShaderResourceView*> views; // the distance fields last presented
     };
     std::map<HWND, PanelState> panels;
+    // A panel that moves (a widget dragged or gliding) needs the backdrop at
+    // its new place even when the screen has not changed and no frame comes:
+    // for a second after a move the newest frame is kept.
+    winrt::com_ptr<ID3D11Texture2D> lastFrame;
+    double panelMovedMs = -1e9;
+    auto keepFrame = [&](ID3D11Texture2D* frame) {
+        if (ClockMs() - panelMovedMs > 1000) {
+            lastFrame = nullptr;
+            return;
+        }
+        if (!frame)
+            return;
+        D3D11_TEXTURE2D_DESC d{};
+        frame->GetDesc(&d);
+        D3D11_TEXTURE2D_DESC have{};
+        if (lastFrame)
+            lastFrame->GetDesc(&have);
+        if (!lastFrame || have.Width != d.Width || have.Height != d.Height || have.Format != d.Format) {
+            lastFrame = nullptr;
+            d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            d.MiscFlags = 0;
+            d.Usage = D3D11_USAGE_DEFAULT;
+            d.CPUAccessFlags = 0;
+            if (FAILED(gpu.device->CreateTexture2D(&d, nullptr, lastFrame.put())))
+                return;
+        }
+        gpu.context->CopyResource(lastFrame.get(), frame);
+    };
     // Draws the panels; true while one of them animates.
     auto renderPanels = [&](const Snapshot& snap, ID3D11Texture2D* source, bool& lost) {
         for (auto it = panels.begin(); it != panels.end();) {
@@ -1542,10 +1571,14 @@ bool Bar::RenderSession()
                 }
             }
             GlassRenderer& r = *ps.renderer;
-            bool changed = r.Width() != w || r.Height() != h;
+            const bool moved = !EqualRect(&ps.window, &p.window);
+            bool changed = r.Width() != w || r.Height() != h || moved;
+            ps.window = p.window;
+            if (moved)
+                panelMovedMs = now;
             r.Resize(w, h);
-            if (source)
-                r.UpdateBackdrop(source, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
+            if (ID3D11Texture2D* under = source ? source : moved ? lastFrame.get() : nullptr)
+                r.UpdateBackdrop(under, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
             std::vector<GlassParams> gp = PanelParams(snap.settings, snap.scale, p);
             if (auto rb = r.Poll()) {
                 changed |= rb->changed;
@@ -1712,6 +1745,8 @@ bool Bar::RenderSession()
                 }
                 hidden = frozen;
             }
+            if (!freeze)
+                keepFrame(frame);
             panelsMoving = renderPanels(snap, hidden.get(), lost);
             hidden = nullptr;
             capture->Release();
@@ -1747,6 +1782,8 @@ bool Bar::RenderSession()
             renderer.UpdateBackdrop(source.get(), snap.window.left - snap.monitor.left, snap.window.top - snap.monitor.top);
         {
             bool lost = false;
+            if (!freeze)
+                keepFrame(frame);
             panelsMoving = renderPanels(snap, source.get(), lost);
             if (lost) {
                 Log(L"render: device lost (popup glass)");
