@@ -208,6 +208,8 @@ void GlassRenderer::CreateSizeDependent()
     gpu_.context->UpdateSubresource(cmpCb_.get(), 0, nullptr, cp, 0, 0);
     hasPresented_ = false;
     hasBackdrop_ = false;
+    comparisonPending_ = false;
+    mipsDirty_ = false;
     inFlight_.clear(); // results for the old size are meaningless
 }
 
@@ -235,17 +237,28 @@ void GlassRenderer::UpdateBackdrop(ID3D11Texture2D* frame, int x, int y)
         return;
     D3D11_BOX box{UINT(cx0), UINT(cy0), 0, UINT(cx1), UINT(cy1), 1};
     gpu_.context->CopySubresourceRegion(roi_.get(), 0, UINT(cx0 - x0), UINT(cy0 - y0), 0, frame, 0, &box);
-    gpu_.context->GenerateMips(roiSrv_.get());
+    mipsDirty_ = true;
     hasBackdrop_ = true;
-    if (!hasPresented_)
-        return; // nothing to compare with yet; the caller presents anyway
+    comparisonPending_ = true;
+    QueueComparison();
+}
 
-    // Keep at most kSlots comparisons in flight; on overflow wait for the oldest.
-    if (int(inFlight_.size()) == kSlots) {
-        Readback discard;
-        ReadSlot(inFlight_.front(), true, discard);
-        inFlight_.pop_front();
-    }
+void GlassRenderer::PrepareBackdrop()
+{
+    if (!mipsDirty_)
+        return;
+    gpu_.context->GenerateMips(roiSrv_.get());
+    mipsDirty_ = false;
+}
+
+bool GlassRenderer::QueueComparison()
+{
+    // A busy GPU must never make the render thread wait for a readback. Keep
+    // the newest ROI and submit its comparison once Poll retires a slot.
+    if (!comparisonPending_ || !hasPresented_ || int(inFlight_.size()) == kSlots)
+        return false;
+    comparisonPending_ = false;
+    PrepareBackdrop(); // coalesce mip generation too while the readback ring is full
     auto* ctx = gpu_.context.get();
     const UINT zero[4] = {};
     ctx->ClearUnorderedAccessViewUint(cmpUav_.get(), zero);
@@ -266,32 +279,36 @@ void GlassRenderer::UpdateBackdrop(ID3D11Texture2D* frame, int x, int y)
     ctx->CopyResource(slots_[slot].counters.get(), cmpOut_.get());
     ctx->CopySubresourceRegion(slots_[slot].grid.get(), 0, 0, 0, 0, roi_.get(), gridMip_, nullptr);
     inFlight_.push_back(slot); // the render loop flushes once per wake-up; the result is polled later
+    return true;
 }
 
-bool GlassRenderer::ReadSlot(int slot, bool wait, Readback& out)
+bool GlassRenderer::ReadSlot(int slot, Readback& out)
 {
     auto* ctx = gpu_.context.get();
-    UINT flags = wait ? 0 : D3D11_MAP_FLAG_DO_NOT_WAIT;
     D3D11_MAPPED_SUBRESOURCE m{};
-    if (ctx->Map(slots_[slot].counters.get(), 0, D3D11_MAP_READ, flags, &m) != S_OK)
-        return false; // DXGI_ERROR_WAS_STILL_DRAWING (or device trouble: retried later)
+    HRESULT hr = ctx->Map(slots_[slot].counters.get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m);
+    if (hr == DXGI_ERROR_WAS_STILL_DRAWING)
+        return false;
+    Check(hr); // a lost device is rebuilt by RenderThread, not polled indefinitely
     out.changed = static_cast<const UINT*>(m.pData)[0] != 0;
     ctx->Unmap(slots_[slot].counters.get(), 0);
-    if (ctx->Map(slots_[slot].grid.get(), 0, D3D11_MAP_READ, 0, &m) == S_OK) {
-        out.gridW = gridW_;
-        out.gridH = gridH_;
-        out.cellX = float(w_ + 2 * kPad) / float(gridW_);
-        out.cellY = float(h_ + 2 * kPad) / float(gridH_);
-        out.luma.resize(size_t(gridW_) * size_t(gridH_));
-        for (int y = 0; y < gridH_; ++y) {
-            const auto* row = static_cast<const uint8_t*>(m.pData) + size_t(y) * m.RowPitch;
-            for (int x = 0; x < gridW_; ++x) {
-                const uint8_t* px = row + 4 * x; // BGRA
-                out.luma[size_t(y) * gridW_ + x] = (0.0722f * px[0] + 0.7152f * px[1] + 0.2126f * px[2]) / 255.f;
-            }
+    hr = ctx->Map(slots_[slot].grid.get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m);
+    if (hr == DXGI_ERROR_WAS_STILL_DRAWING)
+        return false; // the counter copy can finish before the luminance copy
+    Check(hr);
+    out.gridW = gridW_;
+    out.gridH = gridH_;
+    out.cellX = float(w_ + 2 * kPad) / float(gridW_);
+    out.cellY = float(h_ + 2 * kPad) / float(gridH_);
+    out.luma.resize(size_t(gridW_) * size_t(gridH_));
+    for (int y = 0; y < gridH_; ++y) {
+        const auto* row = static_cast<const uint8_t*>(m.pData) + size_t(y) * m.RowPitch;
+        for (int x = 0; x < gridW_; ++x) {
+            const uint8_t* px = row + 4 * x; // BGRA
+            out.luma[size_t(y) * gridW_ + x] = (0.0722f * px[0] + 0.7152f * px[1] + 0.2126f * px[2]) / 255.f;
         }
-        ctx->Unmap(slots_[slot].grid.get(), 0);
     }
+    ctx->Unmap(slots_[slot].grid.get(), 0);
     return true;
 }
 
@@ -314,13 +331,17 @@ std::optional<Readback> GlassRenderer::Poll()
     std::optional<Readback> merged;
     while (!inFlight_.empty()) {
         Readback r;
-        if (!ReadSlot(inFlight_.front(), false, r))
+        if (!ReadSlot(inFlight_.front(), r))
             break;
         inFlight_.pop_front();
         bool changed = r.changed || (merged && merged->changed);
         merged = r;
         merged->changed = changed;
     }
+    // Poll can run after the host's batch Flush. Submit deferred work here so
+    // it also completes when the desktop stops producing capture frames.
+    if (QueueComparison())
+        gpu_.context->Flush();
     return merged;
 }
 
@@ -331,6 +352,7 @@ bool GlassRenderer::Present(const GlassParams& params, const std::function<void(
 
 bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay)
 {
+    PrepareBackdrop(); // a present can need the newest glass before its comparison completes
     auto* ctx = gpu_.context.get();
     if (!rtv_) {
         winrt::com_ptr<ID3D11Texture2D> back;

@@ -82,7 +82,7 @@ public:
     // Completed comparisons since the last call, merged (changed = any changed,
     // colour = newest), or nullopt if none finished yet. Never waits.
     std::optional<Readback> Poll();
-    bool ReadbackPending() const { return !inFlight_.empty(); }
+    bool ReadbackPending() const { return (comparisonPending_ && hasPresented_) || !inFlight_.empty(); }
 
     // Draws the glass, then `overlay` with D2D on the same back buffer, and
     // presents. Returns false if the device was lost.
@@ -100,6 +100,7 @@ public:
 
 private:
     void CreateSizeDependent();
+    void PrepareBackdrop();
 
     Gpu gpu_;
     int w_, h_;
@@ -125,7 +126,10 @@ private:
     int nextSlot_ = 0;
     UINT gridMip_ = 0;
     int gridW_ = 1, gridH_ = 1;
-    bool ReadSlot(int slot, bool wait, Readback& out);
+    bool comparisonPending_ = false; // the newest ROI, deferred while all slots are in flight
+    bool mipsDirty_ = false;
+    bool QueueComparison();
+    bool ReadSlot(int slot, Readback& out);
 
     winrt::com_ptr<ID3D11Buffer> cb_, cmpCb_, cmpOut_;
     winrt::com_ptr<ID3D11UnorderedAccessView> cmpUav_;

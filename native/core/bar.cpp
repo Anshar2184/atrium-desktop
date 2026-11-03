@@ -1831,6 +1831,9 @@ bool Bar::RenderSession()
         // Pending readbacks are polled soon.
         bool owed = barOwed || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed || e.second.desktopDue; });
         bool paced = animating || panelsMoving || owed;
+        bool readback = renderer.ReadbackPending() || std::any_of(panels.begin(), panels.end(), [](const auto& e) {
+            return e.second.renderer && e.second.renderer->ReadbackPending();
+        });
         DWORD w = WAIT_FAILED;
         if (paced && g_waitClock) {
             w = g_waitClock(3, handles, 100);
@@ -1841,7 +1844,7 @@ bool Bar::RenderSession()
                 ++tick;
             }
         } else {
-            w = WaitForMultipleObjects(3, handles, FALSE, paced ? 6 : renderer.ReadbackPending() ? 3 : 1000);
+            w = WaitForMultipleObjects(3, handles, FALSE, paced ? 6 : readback ? 3 : 1000);
             ++tick;
         }
         if (w == WAIT_OBJECT_0)
@@ -1882,6 +1885,10 @@ bool Bar::RenderSession()
         if (snap.hmonitor != MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY))
             return true; // primary monitor changed: new device and capture
         if (!snap.visible) {
+            // Retire the bar's reads even while hidden. Otherwise its last pending
+            // slot keeps the idle loop waking every 3 ms until the bar is revealed.
+            renderer.Poll();
+            drawnGeneration = 0; // its ink and glass are measured again when revealed
             bool lost = false;
             winrt::com_ptr<ID3D11Texture2D> hidden;
             hidden.copy_from(frame);
