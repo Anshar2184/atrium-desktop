@@ -25,7 +25,7 @@ public:
     WindowPreview& operator=(const WindowPreview&) = delete;
 
     // Shows (or updates) the windows of app `key` centred above `anchor` (screen px: the icon's
-    // centre, the top of what the bar draws); `icon` stands in for a minimized window.
+    // centre, the top of what the bar draws); `icon` stands in when DWM has no thumbnail.
     void Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, const IconImage& icon);
     // The pointer left the app on the bar: the preview goes soon, unless the pointer comes onto it.
     void Leave();
@@ -43,7 +43,6 @@ private:
         HTHUMBNAIL thumb = nullptr;
         SIZE source{};        // the thumbnail's source size, px
         RECT sourceRect{};    // the window without its invisible borders, in the source's px
-        bool minimized = false;
         D2D1_RECT_F rect{};   // the card, content DIP
         D2D1_RECT_F image{};  // where the window's picture goes, content DIP
         D2D1_RECT_F close{};  // its close button, content DIP

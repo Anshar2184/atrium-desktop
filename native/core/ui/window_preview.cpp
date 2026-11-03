@@ -57,7 +57,8 @@ void WindowPreview::DropThumbs()
 void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, const IconImage& icon)
 {
     KillTimer(surface_.Hwnd(), kLeaveTimer);
-    const bool same = surface_.Visible() && key == key_;
+    const bool visible = surface_.Visible();
+    const bool same = visible && key == key_;
     key_ = key;
     anchor_ = anchor;
     icon_ = icon;
@@ -74,7 +75,6 @@ void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windo
         }
         c.window = h;
         c.title = TitleOf(h);
-        c.minimized = IsIconic(h) != FALSE;
         next.push_back(std::move(c));
     }
     DropThumbs();
@@ -93,7 +93,8 @@ void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windo
         RECT win{}, frame{};
         GetWindowRect(c.window, &win);
         c.sourceRect = RECT{0, 0, c.source.cx, c.source.cy};
-        if (SUCCEEDED(DwmGetWindowAttribute(c.window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) && win.right > win.left) {
+        if (!IsIconic(c.window) && SUCCEEDED(DwmGetWindowAttribute(c.window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) &&
+            win.right > win.left) {
             // The source size is in the window's own (physical) px, as the rectangles are.
             c.sourceRect = RECT{frame.left - win.left, frame.top - win.top, frame.right - win.left, frame.bottom - win.top};
             c.sourceRect.right = std::min<LONG>(c.sourceRect.right, c.source.cx);
@@ -102,7 +103,10 @@ void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windo
     }
     if (!same) {
         hover_ = pressed_ = -1;
-        thumbAlpha_ = 0;
+        // Reusing the open surface does not send onReady again. Keep its fade
+        // progress when switching apps instead of leaving the new picture invisible.
+        if (!visible)
+            thumbAlpha_ = 0;
     }
     Place();
     if (!same)
@@ -192,7 +196,7 @@ void WindowPreview::UpdateThumbs()
         p.dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY;
         p.rcDestination = RECT{tl.x, tl.y, tl.x + LONG(std::lround(dw * s)), tl.y + LONG(std::lround(dh * s))};
         p.rcSource = c.sourceRect;
-        p.fVisible = !c.minimized && thumbAlpha_ > 0.01f; // shown once the glass is out, fading in
+        p.fVisible = thumbAlpha_ > 0.01f; // DWM can also show the last frame of a minimized window
         p.opacity = BYTE(std::lround(255 * thumbAlpha_));
         p.fSourceClientAreaOnly = FALSE;
         DwmUpdateThumbnailProperties(c.thumb, &p);
@@ -230,8 +234,8 @@ void WindowPreview::Paint(Canvas& c)
             c.Fill(card.close, 12, plate);
             c.Glyph(L"", card.close, 10, int(i) == hover_ && overClose_ ? D2D1::ColorF(1, 1, 1, hv) : Alpha(t.text, hv));
         }
-        // A minimized window has no picture: its app's icon in a quiet frame instead.
-        if (card.minimized || !card.thumb) {
+        // Use the app's icon only when DWM could not provide a thumbnail.
+        if (!card.thumb) {
             c.Fill(card.image, kCardR - 4, t.card);
             float ic = std::min(48.f, (card.image.bottom - card.image.top) * 0.5f), mx = (card.image.left + card.image.right) / 2,
                   my = (card.image.top + card.image.bottom) / 2;
