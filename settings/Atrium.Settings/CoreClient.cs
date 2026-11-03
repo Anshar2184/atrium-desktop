@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Atrium.Settings;
@@ -17,6 +18,7 @@ internal sealed class CoreClient : IDisposable
     public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "settings.json");
 
     private readonly SemaphoreSlim _io = new(1, 1);
+    private readonly byte[] _readBuffer = new byte[4096];
     private NamedPipeClientStream? _pipe;
 
     public bool Connected => _pipe is { IsConnected: true };
@@ -57,19 +59,19 @@ internal sealed class CoreClient : IDisposable
         await _io.WaitAsync();
         try
         {
-            if (_pipe is not { IsConnected: true }) return null;
-            var bytes = Encoding.UTF8.GetBytes(request.ToJsonString());
-            await _pipe.WriteAsync(bytes);
-            await _pipe.FlushAsync();
-            var buffer = new byte[64 * 1024];
+            var pipe = _pipe;
+            if (pipe is not { IsConnected: true }) return null;
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(request);
+            await pipe.WriteAsync(bytes);
+            await pipe.FlushAsync();
             using var message = new MemoryStream();
             do
             {
-                int n = await _pipe.ReadAsync(buffer);
+                int n = await pipe.ReadAsync(_readBuffer);
                 if (n == 0) throw new IOException("pipe closed");
-                message.Write(buffer, 0, n);
-            } while (!_pipe.IsMessageComplete);
-            return JsonNode.Parse(message.ToArray()) as JsonObject;
+                message.Write(_readBuffer, 0, n);
+            } while (!pipe.IsMessageComplete);
+            return JsonNode.Parse(message.GetBuffer().AsSpan(0, (int)message.Length)) as JsonObject;
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException or System.Text.Json.JsonException)
         {
@@ -176,6 +178,6 @@ internal sealed class CoreClient : IDisposable
     public void Dispose()
     {
         Disconnect();
-        _io.Dispose();
+        // In-flight requests still release this semaphore after Disconnect completes their I/O.
     }
 }

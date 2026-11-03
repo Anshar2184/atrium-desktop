@@ -125,6 +125,11 @@ private:
     winrt::com_ptr<ID2D1Effect> shadow_;
     winrt::com_ptr<ID2D1LinearGradientBrush> logoBlue_; // the start logo's panes and their lit edge (DrawLogo)
     winrt::com_ptr<ID2D1SolidColorBrush> logoSheen_;
+    struct StatusArc {
+        winrt::com_ptr<ID2D1PathGeometry> path;
+        float sweep = -1;
+    } ringTrack_, ringLevel_;
+    winrt::com_ptr<ID2D1PathGeometry> chargingBolt_;
     std::map<std::wstring, Motion> motion_;
     std::map<uint64_t, winrt::com_ptr<ID2D1Bitmap1>> bitmaps_;
     std::set<uint64_t> usedBitmaps_; // during one DrawContent

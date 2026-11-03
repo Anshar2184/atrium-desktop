@@ -17,69 +17,47 @@ public sealed partial class MainWindow : Window
 
     // One slider tile: its group, UI range, and the mapping between the stored
     // value and the slider value (percentages are stored as 0..1).
-    private sealed record SliderDef(string Group, string Title, string Description, double Min, double Max, double Step, string Unit,
-        Func<double, string> Hint, Func<BarSettings, double> Get, Action<BarSettings, double> Set, bool Material);
+    private sealed record SliderDef(string Group, string Title, double Min, double Max, double Step, string Unit,
+        Func<BarSettings, double> Get, Action<BarSettings, double> Set, bool Material);
 
     private SliderDef[] Sliders => new SliderDef[]
     {
-        new("clarity", "透明度", "玻璃混入多少染色。100% 如清水般通透，0% 像一块纯色亚克力。", 0, 100, 1, "%",
-            v => v >= 90 ? "几乎无色" : v >= 70 ? "清透" : v >= 40 ? "淡淡的染色" : v >= 15 ? "浓郁的染色" : "接近纯色",
+        new("clarity", "透明度", 0, 100, 1, "%",
             s => s.Transparency * 100, (s, v) => s.Transparency = v / 100, true),
-        new("clarity", "模糊", "背景被磨砂的程度。0% 依然清晰可辨，100% 只剩色块。", 0, 100, 1, "%",
-            v => v < 1 ? "完全清晰" : v < 25 ? "微微朦胧" : v < 60 ? "柔和" : v < 85 ? "磨砂" : "深度磨砂",
+        new("clarity", "模糊", 0, 100, 1, "%",
             s => s.Blur * 100, (s, v) => s.Blur = v / 100, true),
-        new("edge", "折射强度", "边缘把背景“弯折”的距离，像水滴边缘放大背后的景物。0 就是一块平板玻璃。", 0, 60, 1, "px",
-            v => v < 1 ? "平板玻璃" : v <= 12 ? "轻微弯折" : v <= 36 ? "水滴般的边缘" : "夸张的凸透镜",
+        new("edge", "折射强度", 0, 60, 1, "px",
             s => s.Refraction, (s, v) => s.Refraction = v, true),
-        new("edge", "折射边缘宽度", "折射发生的范围：从外沿向内多少像素。窄像薄片，宽像厚实的凸透镜。", 1, 80, 1, "px",
-            v => v <= 8 ? "薄如刀片" : v <= 28 ? "圆润" : "宽厚的透镜边",
+        new("edge", "折射边缘宽度", 1, 80, 1, "px",
             s => s.Edge, (s, v) => s.Edge = v, true),
-        new("edge", "色散", "边缘处红、绿、蓝分离的程度，像棱镜折出的彩虹边。", 0, 50, 1, "%",
-            v => v < 1 ? "纯净" : v <= 10 ? "几乎看不出" : v <= 30 ? "细腻的彩虹边" : "明显的棱镜彩边",
+        new("edge", "色散", 0, 50, 1, "%",
             s => s.Dispersion * 100, (s, v) => s.Dispersion = v / 100, true),
-        new("light", "高光", "玻璃边沿被光照亮的那条亮线。", 0, 100, 1, "%",
-            v => v < 1 ? "没有反光" : v < 35 ? "含蓄" : v < 75 ? "清晰的亮边" : "强烈的镜面光",
+        new("light", "高光", 0, 100, 1, "%",
             s => s.Highlight * 100, (s, v) => s.Highlight = v / 100, true),
-        new("light", "阴影", "玻璃下方投影的浓度。越浓，玻璃栏看起来离桌面越“悬浮”。", 0, 100, 1, "%",
-            v => v < 1 ? "没有投影" : v < 25 ? "若有若无" : v < 55 ? "轻盈悬浮" : "厚重的投影",
+        new("light", "阴影", 0, 100, 1, "%",
             s => s.Shadow * 100, (s, v) => s.Shadow = v / 100, true),
 
-        new("size", "高度", "玻璃栏的整体厚度，图标的留白与时钟的字号也随之变化。", 32, 120, 1, "px",
-            v => v < 44 ? "纤薄" : v <= 68 ? "标准" : "厚实",
+        new("size", "高度", 32, 120, 1, "px",
             s => s.Height, (s, v) => s.Height = v, false),
-        new("size", "圆角", "角的弯曲程度。超过高度的一半时即为胶囊形。", 0, 80, 1, "px",
-            v => v < 1 ? "直角" : v >= _current.Height / 2 ? "胶囊形" : v < 12 ? "微圆角" : "圆润",
+        new("size", "圆角", 0, 80, 1, "px",
             s => s.CornerRadius, (s, v) => s.CornerRadius = v, false),
-        new("dock", "图标大小", "任务栏图标的边长。系统任务栏的图标是 24 px。", 16, 64, 1, "px",
-            v => v < 24 ? "比系统图标小" : v < 25 ? "与系统相同" : v <= 36 ? "略大" : "大图标",
+        new("dock", "图标大小", 16, 64, 1, "px",
             s => s.IconSize, (s, v) => s.IconSize = v, false),
-        new("width", "最大宽度", "开启“自动宽度”时最宽不超过此值；不会超过屏幕工作区。", 300, 2400, 10, "px",
-            v => v >= 1920 ? "宽于 1080p 屏幕" : $"约 1080p 宽度的 {Math.Round(v / 19.2)}%",
+        new("width", "最大宽度", 300, 2400, 10, "px",
             s => s.Width, (s, v) => s.Width = v, false),
-        new("dock", "底部间距", "与工作区底边的距离。", 0, 200, 1, "px",
-            v => v < 1 ? "贴着底边" : v <= 16 ? "贴近底边" : v <= 60 ? "悬浮" : "高高悬浮",
+        new("dock", "底部间距", 0, 200, 1, "px",
             s => s.Margin, (s, v) => s.Margin = v, false),
-        new("dock", "悬停放大", "指针下的图标放大到这个倍数，两侧依次变大，玻璃栏随之伸展。100% 即关闭。", 100, 200, 5, "%",
-            v => v < 101 ? "关闭" : v < 140 ? "轻轻放大" : v < 180 ? "像 macOS 程序坞" : "夸张",
+        new("dock", "悬停放大", 100, 200, 5, "%",
             s => s.Magnify * 100, (s, v) => s.Magnify = v / 100, false),
 
-        new("notify", "停留时间", "新通知弹出后停留多久；指针停在卡片上时不会消失。", 3, 30, 1, "s",
-            v => v <= 4 ? "一闪而过" : v <= 10 ? "适中" : "从容阅读",
+        new("notify", "停留时间", 3, 30, 1, "s",
             s => s.NotifyTimeout, (s, v) => s.NotifyTimeout = v, false),
     };
 
-    private static readonly (string Title, string Subtitle)[] PageInfo =
+    private static readonly string[] PageTitles =
     {
-        ("材质", "玻璃的质感：通透、模糊、折射与光。"),
-        ("形状", "玻璃栏的尺寸、轮廓与位置。"),
-        ("程序坞", "栏上显示什么，以及固定的应用和它们的顺序。"),
-        ("通知", "通知卡片怎样弹出，以及显示哪些应用的消息。"),
-        ("小组件", "放在桌面上的玻璃小组件。"),
-        ("系统", "Atrium 与 Windows 自带界面的分工。"),
-        ("设计语言", "Atrium 怎样设计：材质、几何、排版、色彩与动效。展开详细参数，可以看到每一个数值，都取自 Atrium 的代码。"),
-        ("关于", "一条悬浮在桌面底部的玻璃程序坞。"),
+        "材质", "形状", "程序坞", "通知", "小组件", "系统", "设计语言", "关于",
     };
-
     private readonly CoreClient _client = new();
     private readonly List<(SliderDef Def, SliderTile Tile)> _rows = new();
     private readonly List<(uint Rgb, Button Button, FrameworkElement Ring)> _tintButtons = new();
@@ -98,18 +76,27 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
+        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "atrium.ico"));
         double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
         // A roomy default (the preview is the centre of the window), never larger than the screen.
         var work = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(Math.Min((int)(1440 * scale), work.Width * 92 / 100), Math.Min((int)(920 * scale), work.Height * 92 / 100)));
+        int width = Math.Min((int)(1440 * scale), work.Width * 92 / 100), height = Math.Min((int)(920 * scale), work.Height * 92 / 100);
+        AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(work.X + (work.Width - width) / 2, work.Y + (work.Height - height) / 2, width, height));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.PreferredMinimumWidth = (int)(980 * scale);
             presenter.PreferredMinimumHeight = (int)(680 * scale);
         }
         AppWindow.Closing += OnClosing;
+        Closed += (_, _) =>
+        {
+            _widgetWatcher?.Dispose();
+            StopDesignAnimations();
+            _renderWorker?.Stop();
+            _swatchWorker?.Stop();
+        };
 
         _mains = new FrameworkElement[] { MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainSystem, DesignStack, MainAbout };
         _sides = new FrameworkElement?[] { SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, null, null, null };
@@ -140,6 +127,7 @@ public sealed partial class MainWindow : Window
     // inspector part; pages without parameters of their own (system, design, about) take the full width.
     private void ShowPage(int index)
     {
+        if (_page == 6 && index != 6) StopDesignAnimations();
         _page = index;
         for (int i = 0; i < _mains.Length; i++)
         {
@@ -157,9 +145,7 @@ public sealed partial class MainWindow : Window
             ShowWidgetMap();
         }
         if (_mains[index] == MainNotify) ShowNotifyPreview(true);
-        var info = PageInfo[index];
-        HeaderTitle.Text = info.Title;
-        HeaderSubtitle.Text = info.Subtitle;
+        HeaderTitle.Text = PageTitles[index];
         HeroBlock.Visibility = index < 3 ? Visibility.Visible : Visibility.Collapsed;
         LoupeToggle.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
         Loupe.Visibility = index == 0 && LoupeSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
@@ -169,8 +155,8 @@ public sealed partial class MainWindow : Window
         CenterScroll.ChangeView(null, 0, null, true);
         InspectorScroll.ChangeView(null, 0, null, true);
         if (index < 3) UpdateHero();
+        if (index == 0) UpdateCustomSwatch();
         AnimateIn(_mains[index]);
-        AnimateIn(Header);
         if (_sides[index] is { } shown) AnimateIn(shown);
     }
 
@@ -205,6 +191,10 @@ public sealed partial class MainWindow : Window
         FoldedInspector.Visibility = has && _folded ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    // Every page uses the viewport width, including pages with small intrinsic content.
+    private void OnWorkspaceSizeChanged(object sender, SizeChangedEventArgs e) =>
+        CenterStack.Width = Math.Max(0, e.NewSize.Width - CenterStack.Margin.Left - CenterStack.Margin.Right);
+
     // The previews keep a natural proportion as the workspace widens.
     private void OnCenterSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -216,6 +206,12 @@ public sealed partial class MainWindow : Window
     private void OnLoupeToggled(object sender, RoutedEventArgs e)
     {
         Loupe.Visibility = _page == 0 && LoupeSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        if (Loupe.Visibility == Visibility.Collapsed)
+        {
+            _loupeBrush.ImageSource = null;
+            _loupeBmp = null;
+        }
+        UpdateHero();
     }
 
     // The preview's photograph: the sample, or the user's own wallpaper (Photo.cs).
@@ -258,7 +254,7 @@ public sealed partial class MainWindow : Window
         {
             var (panel, first, flat) = groups[d.Group];
             var tile = new SliderTile { Flat = flat };
-            tile.Configure(d.Title, d.Description, d.Min, d.Max, d.Step, d.Unit, d.Hint);
+            tile.Configure(d.Title, d.Min, d.Max, d.Step, d.Unit);
             tile.UserValueChanged += v => OnSliderChanged(d, v);
             tile.Engaged += on => OnEngage(d.Title, on);
             _rows.Add((d, tile));
@@ -546,18 +542,19 @@ public sealed partial class MainWindow : Window
     {
         UpdateButtons();
         UpdateHero();
+        UpdateCustomSwatch();
         if (_page == 3) ShowNotifyPreview(false);
         SchedulePreview();
     }
 
-    // The floating capsule: shown while there is something to save, and for a moment after a save.
+    // Title-bar actions appear while there is something to save, and briefly after a save.
     private void UpdateButtons()
     {
         bool dirty = !_current.SameAs(_saved);
         SaveButton.IsEnabled = dirty;
         RevertButton.IsEnabled = dirty;
         _flashId++;
-        DirtyText.Text = "未保存的修改";
+        DirtyText.Text = "未保存";
         DirtyDot.Fill = new SolidColorBrush(Color.FromArgb(255, 0xFF, 0x9F, 0x0A));
         RevertButton.Visibility = SaveButton.Visibility = Visibility.Visible;
         ShowSaveBar(dirty);
@@ -565,13 +562,8 @@ public sealed partial class MainWindow : Window
 
     private void ShowSaveBar(bool on)
     {
-        if (SaveBar.OpacityTransition == null)
-        {
-            SaveBar.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(200) };
-            SaveBar.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) };
-        }
+        SaveBar.OpacityTransition ??= new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
         SaveBar.Opacity = on ? 1 : 0;
-        SaveBar.Translation = new Vector3(0, on ? 0 : 24, 32);
         SaveBar.IsHitTestVisible = on;
     }
 

@@ -6,10 +6,9 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Atrium.Settings;
 
-// One adjustable parameter on a tile: name, value, slider, a word for the value and a description.
+// One adjustable parameter: name, value and slider.
 public sealed partial class SliderTile : UserControl
 {
-    private Func<double, string>? _hint;
     private string _unit = "";
     private double _min, _max;
     private bool _flat;
@@ -24,17 +23,13 @@ public sealed partial class SliderTile : UserControl
         LostFocus += (_, _) => SetEngaged(false);
     }
 
-    public void Configure(string title, string description, double min, double max, double step, string unit, Func<double, string> hint)
+    public void Configure(string title, double min, double max, double step, string unit)
     {
-        _unit = unit; _min = min; _max = max; _hint = hint;
+        _unit = unit; _min = min; _max = max;
         TitleText.Text = title;
-        DescriptionText.Text = description;
-        DescriptionText.Visibility = description.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         Track.Minimum = min; Track.Maximum = max; Track.StepFrequency = step;
         AutomationProperties.SetName(Track, title);
     }
-
-    public double Value => Track.Value;
 
     // In the inspector: a plain row, no card (lit while in use all the same).
     public bool Flat
@@ -57,7 +52,6 @@ public sealed partial class SliderTile : UserControl
 
     private void Refresh(double v)
     {
-        HintText.Text = _hint?.Invoke(v) ?? "";
         ValueRun.Text = Math.Round(v).ToString(System.Globalization.CultureInfo.InvariantCulture);
         UnitRun.Text = _unit is "" or "%" ? _unit : " " + _unit;
     }

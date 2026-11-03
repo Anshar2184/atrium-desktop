@@ -21,6 +21,7 @@ public sealed partial class MainWindow
 
     private void UpdateReadout()
     {
+        if (_page != 1) return;
         if (_readout.Count == 0)
             foreach (var name in new[] { "高度", "圆角", "宽度", "轮廓" })
             {
@@ -45,12 +46,6 @@ public sealed partial class MainWindow
         _readout[2].Note.Text = s.AutoWidth ? $"最宽 {s.Width:0} px" : "固定宽度";
         _readout[3].Value.Text = capsule ? "胶囊形" : r < 1 ? "直角" : "圆角矩形";
         _readout[3].Note.Text = $"距底边 {s.Margin:0} px";
-        HeroCaption.Text = _page switch
-        {
-            0 => "实时预览：与桌面上的玻璃栏使用同一组参数",
-            1 => $"{s.Height:0} × {(s.AutoWidth ? "自动" : s.Width.ToString("0"))} · 圆角 {r:0}",
-            _ => $"图标 {s.IconSize:0} px · 放大 {s.Magnify * 100:0}% · 距底边 {s.Margin:0} px",
-        };
     }
 
     // ---- Notifications: two cards over the photo, as the core lays them out ----
@@ -100,7 +95,7 @@ public sealed partial class MainWindow
             NotifyCards.Children.Add(card);
             if (animate) Rise(card, i * 90);
         }
-        NotifyCaption.Text = $"新通知停留 {s.NotifyTimeout:0} 秒，指针停在卡片上时不会消失" + (s.NotifyHideBody ? "；正文已隐藏" : "");
+        NotifyCaption.Text = $"{s.NotifyTimeout:0} 秒后收起" + (s.NotifyHideBody ? " · 正文已隐藏" : "");
     }
 
     private void OnReplayNotify(object sender, RoutedEventArgs e) => ShowNotifyPreview(true);
@@ -201,9 +196,9 @@ public sealed partial class MainWindow
         Canvas.SetTop(bar, WidgetStage.Height - barH - Math.Max(2, _current.Margin * kh));
         WidgetMap.Children.Add(bar);
 
-        WidgetMapCaption.Text = !_current.Widgets ? "桌面小组件已关闭；打开后按这里的位置显示。"
-            : shown == 0 ? "桌面上还没有小组件，从下面点按一个即可添加。"
-            : $"桌面上的 {shown} 个小组件 · 网格 {cols} × {rows} · 在桌面上拖动、拖下角或右键来调整";
+        WidgetMapCaption.Text = !_current.Widgets ? "桌面小组件已关闭"
+            : shown == 0 ? "暂无小组件"
+            : $"{shown} 个小组件";
         WidgetMap.Opacity = _current.Widgets ? 1 : 0.5;
     }
 

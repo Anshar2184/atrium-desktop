@@ -1512,6 +1512,9 @@ bool Bar::RenderSession()
     Log(L"render: started on %s, window %ldx%ld", gpu.adapterName.c_str(), snap.window.right - snap.window.left, snap.window.bottom - snap.window.top);
     // Glass layers of the popups, created while they are shown.
     struct PanelState {
+        explicit PanelState(HWND owner) : hwnd(owner) {}
+        ~PanelState() { ForgetGlass(hwnd); }
+        HWND hwnd; // frame/ink records leave with the layer, including device resets
         std::unique_ptr<GlassRenderer> renderer;
         unsigned pop = 0;
         bool ready = false;   // presented once (the popup was told)
@@ -1570,8 +1573,6 @@ bool Bar::RenderSession()
     auto renderPanels = [&](const Snapshot& snap, ID3D11Texture2D* source, bool& lost) {
         for (auto it = panels.begin(); it != panels.end();) {
             bool listed = std::any_of(snap.panels.begin(), snap.panels.end(), [&](const GlassPanel& p) { return p.hwnd == it->first; });
-            if (!listed)
-                PublishInk(it->first, InkGrid{});
             it = listed ? std::next(it) : panels.erase(it);
         }
         bool moving = false;
@@ -1598,7 +1599,7 @@ bool Bar::RenderSession()
             int w = p.window.right - p.window.left, h = p.window.bottom - p.window.top;
             if (w <= 0 || h <= 0 || !IsWindow(p.hwnd))
                 continue;
-            PanelState& ps = panels[p.hwnd];
+            PanelState& ps = panels.try_emplace(p.hwnd, p.hwnd).first->second;
             const double t0 = ClockMs();
             double created = 0;
             if (!ps.renderer) {

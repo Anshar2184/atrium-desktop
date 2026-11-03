@@ -28,19 +28,6 @@ std::map<HWND, InkGrid> g_ink;
 
 } // namespace
 
-bool InkGrid::DarkAt(float x0, float y0, float x1, float y1, bool fallback) const
-{
-    if (dark.empty() || w <= 0 || h <= 0)
-        return fallback;
-    int gx0 = std::clamp(int(x0 / cellX), 0, w - 1), gx1 = std::clamp(int((x1 - 0.01f) / cellX), 0, w - 1);
-    int gy0 = std::clamp(int(y0 / cellY), 0, h - 1), gy1 = std::clamp(int((y1 - 0.01f) / cellY), 0, h - 1);
-    int n = 0, d = 0;
-    for (int y = gy0; y <= gy1; ++y)
-        for (int x = gx0; x <= gx1; ++x, ++n)
-            d += dark[size_t(y) * size_t(w) + size_t(x)];
-    return n ? 2 * d >= n : fallback;
-}
-
 void InkFade::Target(float target, double nowMs)
 {
     if (!set) {
@@ -75,7 +62,7 @@ float InkField::DarkAt(float x0, float y0, float x1, float y1, float fallback) c
             cells.push_back(dark[size_t(y) * size_t(w) + size_t(x)]);
     if (cells.empty())
         return fallback;
-    auto mid = cells.begin() + ptrdiff_t(cells.size() / 2); // the upper median: a tie goes to dark, as in InkGrid::DarkAt
+    auto mid = cells.begin() + ptrdiff_t(cells.size() / 2); // the upper median: ties favor dark ink
     std::nth_element(cells.begin(), mid, cells.end());
     return *mid;
 }
@@ -87,6 +74,13 @@ void GlassPresented(HWND hwnd, unsigned gen)
         g_gen[hwnd] = gen;
     }
     g_genChanged.notify_all();
+}
+
+void ForgetGlass(HWND hwnd)
+{
+    std::scoped_lock g(g_genMutex, g_inkMutex);
+    g_gen.erase(hwnd);
+    g_ink.erase(hwnd);
 }
 
 bool WaitGlass(HWND hwnd, unsigned gen, double timeoutMs)

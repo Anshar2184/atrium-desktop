@@ -529,21 +529,28 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
     ID2D1StrokeStyle* round = RoundStroke(d2d);
     constexpr float kDeg = 3.14159265f / 180.f;
     // An arc from `a0` clockwise over `sweep` degrees (0° = right, 90° = down).
-    auto arc = [&](float ox, float oy, float rad, float a0, float sweep, D2D1_COLOR_F c, float width) {
+    auto arc = [&](float ox, float oy, float rad, float a0, float sweep, D2D1_COLOR_F c, float width, StatusArc& cached) {
         if (sweep <= 0.01f || c.a <= 0.003f)
             return;
-        winrt::com_ptr<ID2D1PathGeometry> g;
-        winrt::com_ptr<ID2D1GeometrySink> sink;
-        if (FAILED(factory->CreatePathGeometry(g.put())) || FAILED(g->Open(sink.put())))
-            return;
-        float a1 = a0 + sweep;
-        sink->BeginFigure(D2D1::Point2F(ox + rad * std::cos(a0 * kDeg), oy + rad * std::sin(a0 * kDeg)), D2D1_FIGURE_BEGIN_HOLLOW);
-        sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(ox + rad * std::cos(a1 * kDeg), oy + rad * std::sin(a1 * kDeg)), D2D1::SizeF(rad, rad), 0,
-                                      D2D1_SWEEP_DIRECTION_CLOCKWISE, sweep > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
-        sink->EndFigure(D2D1_FIGURE_END_OPEN);
-        sink->Close();
+        if (!cached.path || cached.sweep != sweep) {
+            cached.path = nullptr;
+            winrt::com_ptr<ID2D1GeometrySink> sink;
+            if (FAILED(factory->CreatePathGeometry(cached.path.put())) || FAILED(cached.path->Open(sink.put())))
+                return;
+            float a1 = a0 + sweep;
+            sink->BeginFigure(D2D1::Point2F(std::cos(a0 * kDeg), std::sin(a0 * kDeg)), D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(std::cos(a1 * kDeg), std::sin(a1 * kDeg)), D2D1::SizeF(1, 1), 0,
+                                          D2D1_SWEEP_DIRECTION_CLOCKWISE, sweep > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            sink->Close();
+            cached.sweep = sweep;
+        }
         brush->SetColor(c);
-        d2d->DrawGeometry(g.get(), brush, width, round);
+        D2D1_MATRIX_3X2_F previous;
+        d2d->GetTransform(&previous);
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(rad, rad) * D2D1::Matrix3x2F::Translation(ox, oy) * previous);
+        d2d->DrawGeometry(cached.path.get(), brush, width / rad, round);
+        d2d->SetTransform(previous);
     };
     // The connection: the Wi-Fi fan (a dot and three arcs, lit by the signal),
     // the wired glyph, or a faint fan when offline. `size` is the fan's height.
@@ -583,26 +590,30 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
         level = D2D1::ColorF(red.r + (ink.r - red.r) * (1 - k), red.g + (ink.g - red.g) * (1 - k), red.b + (ink.b - red.b) * (1 - k), ink.a);
     }
     const bool silent = st.muted && mix > 0.5f;
-    arc(cx, cy, rad, kStart, kSweep, dim(silent ? 0.16f : 0.24f), stroke);
-    arc(cx, cy, rad, kStart, kSweep * std::clamp(sm.fill, 0.f, 1.f), level, stroke);
+    arc(cx, cy, rad, kStart, kSweep, dim(silent ? 0.16f : 0.24f), stroke, ringTrack_);
+    arc(cx, cy, rad, kStart, kSweep * std::clamp(sm.fill, 0.f, 1.f), level, stroke, ringLevel_);
 
     // In the gap: a bolt while charging (fades out while a level shows).
     float bolt = st.battery && st.charging ? 1 - shown : 0;
     if (bolt > 0.003f) {
-        winrt::com_ptr<ID2D1PathGeometry> g;
-        winrt::com_ptr<ID2D1GeometrySink> sink;
-        if (SUCCEEDED(factory->CreatePathGeometry(g.put())) && SUCCEEDED(g->Open(sink.put()))) {
-            const float bh = h * 0.26f, bw = h * 0.17f, by = cy + rad;
+        if (!chargingBolt_) {
+            winrt::com_ptr<ID2D1GeometrySink> sink;
+            if (FAILED(factory->CreatePathGeometry(chargingBolt_.put())) || FAILED(chargingBolt_->Open(sink.put())))
+                return;
             const D2D1_POINT_2F pts[] = {{0.18f, -0.5f}, {-0.4f, 0.08f}, {-0.02f, 0.08f}, {-0.18f, 0.5f}, {0.4f, -0.08f}, {0.02f, -0.08f}};
-            auto at = [&](D2D1_POINT_2F p) { return D2D1::Point2F(cx + p.x * bw, by + p.y * bh); };
+            auto at = [](D2D1_POINT_2F p) { return D2D1::Point2F(p.x * 0.17f, 0.44f + p.y * 0.26f); };
             sink->BeginFigure(at(pts[0]), D2D1_FIGURE_BEGIN_FILLED);
             for (int i = 1; i < 6; ++i)
                 sink->AddLine(at(pts[i]));
             sink->EndFigure(D2D1_FIGURE_END_CLOSED);
             sink->Close();
-            brush->SetColor(fade(ink, bolt));
-            d2d->FillGeometry(g.get(), brush);
         }
+        D2D1_MATRIX_3X2_F previous;
+        d2d->GetTransform(&previous);
+        d2d->SetTransform(D2D1::Matrix3x2F::Scale(h, h) * D2D1::Matrix3x2F::Translation(cx, cy) * previous);
+        brush->SetColor(fade(ink, bolt));
+        d2d->FillGeometry(chargingBolt_.get(), brush);
+        d2d->SetTransform(previous);
     }
 
     // Inside: the connection, or the speaker or the sun while a level shows.

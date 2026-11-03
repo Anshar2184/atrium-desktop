@@ -130,7 +130,6 @@ public sealed partial class MainWindow
     private StackPanel? _designDetails;
 
     private static Style StyleOf(string key) => (Style)Application.Current.Resources[key];
-    private static Brush BrushOf(string key) => (Brush)Application.Current.Resources[key];
 
     private static TextBlock Text(string text, string style, double? size = null)
     {
@@ -803,6 +802,15 @@ public sealed partial class MainWindow
         if (_playing.Count > 0) return;
         CompositionTarget.Rendering -= OnDesignFrame;
         _designTicking = false;
+    }
+
+    private void StopDesignAnimations()
+    {
+        if (!_designTicking) return;
+        CompositionTarget.Rendering -= OnDesignFrame;
+        _designTicking = false;
+        foreach (var (_, curve, show) in _playing) show(curve.Seconds);
+        _playing.Clear();
     }
 
     // ---- Corners ----

@@ -61,7 +61,12 @@ internal sealed class BarSettings
         Tint = preset.Tint;
     }
 
-    public BarSettings Clone() => FromJson(ToJson(), new BarSettings());
+    public BarSettings Clone()
+    {
+        var copy = (BarSettings)MemberwiseClone();
+        copy.Pins = Pins == null ? null : new List<PinnedApp>(Pins);
+        return copy;
+    }
 
     public JsonObject ToJson()
     {
@@ -168,7 +173,13 @@ internal sealed class BarSettings
         return s;
     }
 
-    public bool SameAs(BarSettings other) => ToJson().ToJsonString() == other.ToJson().ToJsonString();
+    public bool SameAs(BarSettings o) =>
+        SameMaterial(o) && Preset == o.Preset && CornerRadius == o.CornerRadius && Width == o.Width && Height == o.Height &&
+        Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
+        ShowRunning == o.ShowRunning && TextColor == o.TextColor && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
+        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Widgets == o.Widgets &&
+        WidgetBackdrop == o.WidgetBackdrop && HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners &&
+        (Pins == o.Pins || (Pins != null && o.Pins != null && Pins.SequenceEqual(o.Pins)));
 
     public bool SameMaterial(BarSettings o) =>
         Transparency == o.Transparency && Blur == o.Blur && Refraction == o.Refraction && Edge == o.Edge && Dispersion == o.Dispersion &&

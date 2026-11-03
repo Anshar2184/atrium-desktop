@@ -57,7 +57,7 @@ public sealed partial class MainWindow
         WidgetGallery.Opacity = WidgetsSwitch.IsOn ? 1 : 0.45;
         WidgetGallery.IsHitTestVisible = WidgetsSwitch.IsOn;
         if (!WidgetsSwitch.IsOn) WidgetHint.Text = "先打开“桌面小组件”。";
-        else if (WidgetHint.Text == "先打开“桌面小组件”。") WidgetHint.Text = "点按一个小组件，把它放到桌面上第一个空位。";
+        else if (WidgetHint.Text == "先打开“桌面小组件”。") WidgetHint.Text = "点按添加到桌面";
     }
 
     private FrameworkElement GalleryCard(WidgetChoice c)
@@ -69,14 +69,13 @@ public sealed partial class MainWindow
             Background = PhotoBrush(),
             Child = new Viewbox { Stretch = Stretch.Uniform, Child = Face(c, PhotoBrush()) },
         };
-        var name = new TextBlock { Text = c.Name, Style = (Style)Application.Current.Resources["RowTitleStyle"] };
-        var note = new TextBlock
+        var name = new TextBlock
         {
-            Text = (c.Size switch { "small" => "小 · ", "medium" => "中 · ", _ => "大 · " }) + c.Note,
-            Style = (Style)Application.Current.Resources["FootnoteStyle"], TextWrapping = TextWrapping.NoWrap,
+            Text = c.Name + " · " + (c.Size switch { "small" => "小", "medium" => "中", _ => "大" }),
+            Style = (Style)Application.Current.Resources["RowTitleStyle"], Margin = new Thickness(4, 0, 4, 2),
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
-        var body = new StackPanel { Spacing = 10, Children = { stage, new StackPanel { Spacing = 1, Margin = new Thickness(4, 0, 4, 2), Children = { name, note } } } };
+        var body = new StackPanel { Spacing = 10, Children = { stage, name } };
         var button = new Button
         {
             Content = body, Padding = new Thickness(10), CornerRadius = new CornerRadius(16), HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -88,6 +87,7 @@ public sealed partial class MainWindow
         button.PointerEntered += (_, _) => button.Translation = new Vector3(0, -2, 0);
         button.PointerExited += (_, _) => button.Translation = Vector3.Zero;
         AutomationProperties.SetName(button, "添加 " + c.Name + (c.Size == "small" ? "（小）" : c.Size == "medium" ? "（中）" : "（大）"));
+        ToolTipService.SetToolTip(button, c.Note);
         button.Click += async (_, _) =>
         {
             var error = await _client.AddWidgetAsync(c.Kind, c.Size);

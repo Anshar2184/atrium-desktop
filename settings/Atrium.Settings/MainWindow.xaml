@@ -10,35 +10,59 @@
         <MicaBackdrop Kind="Base" />
     </Window.SystemBackdrop>
 
-    <!-- Three columns (DESIGN.md §8): the sidebar on the window's material; the workspace (title, live preview,
+    <!-- Three columns (DESIGN.md §8): the sidebar on the window's material; the workspace (live preview,
          the page's main choices) scrolling on its own; the inspector (the page's other parameters) on the right,
          scrolling on its own. A narrow window folds the inspector under the workspace (OnContentSizeChanged). -->
     <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="56" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="232" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- Title bar: a drag area over the window's top -->
-        <Grid x:Name="AppTitleBar" Grid.ColumnSpan="2" Height="44" VerticalAlignment="Top" Background="Transparent" Canvas.ZIndex="1" />
+        <!-- Both scrolling columns start below this fixed title bar. -->
+        <Border Grid.ColumnSpan="2" Background="{ThemeResource PageBrush}" BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="144" />
+                </Grid.ColumnDefinitions>
+                <Grid x:Name="AppTitleBar" Background="Transparent">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="232" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="22,0,0,0" VerticalAlignment="Center">
+                        <Image Source="ms-appx:///Assets/atrium-256.png" Width="26" Height="26" />
+                        <TextBlock Text="Atrium" FontFamily="{StaticResource TitleFont}" FontSize="16" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock x:Name="HeaderTitle" Grid.Column="1" Style="{StaticResource TitleStyle}" Margin="32,0,0,0"
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                </Grid>
+                <!-- Outside the draggable element, so both actions receive normal pointer input. -->
+                <Border x:Name="SaveBar" Grid.Column="1" VerticalAlignment="Center" Opacity="0" IsHitTestVisible="False">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Ellipse x:Name="DirtyDot" Width="6" Height="6" VerticalAlignment="Center" Fill="#FFFF9F0A" />
+                        <TextBlock x:Name="DirtyText" Text="未保存" FontSize="13" VerticalAlignment="Center" />
+                        <Button x:Name="RevertButton" Content="撤销" AutomationProperties.Name="撤销修改" Click="OnRevert" IsEnabled="False" />
+                        <Button x:Name="SaveButton" Content="保存" Click="OnSave" IsEnabled="False" Style="{StaticResource PrimaryButtonStyle}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
 
         <!-- ============ Sidebar ============ -->
-        <Grid Padding="12,52,12,18">
+        <Grid Grid.Row="1" Padding="12,16,12,18">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <StackPanel Orientation="Horizontal" Spacing="12" Margin="10,0,0,24">
-                <Image Source="ms-appx:///Assets/atrium-256.png" Width="40" Height="40" />
-                <StackPanel VerticalAlignment="Center" Spacing="0">
-                    <TextBlock Text="Atrium" Style="{StaticResource TitleStyle}" />
-                    <TextBlock Text="设置" FontSize="13" Foreground="{ThemeResource InkSecondaryBrush}" />
-                </StackPanel>
-            </StackPanel>
-
-            <ListView x:Name="Nav" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnNavChanged"
+            <ListView x:Name="Nav" SelectionMode="Single" SelectionChanged="OnNavChanged"
                       AutomationProperties.Name="导航" VerticalAlignment="Top" ItemContainerStyle="{StaticResource NavItemStyle}">
                 <ListViewItem AutomationProperties.Name="材质"><local:NavLabel Glyph="&#xE790;" Text="材质" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="形状"><local:NavLabel Glyph="&#xE7C9;" Text="形状" /></ListViewItem>
@@ -50,7 +74,7 @@
                 <ListViewItem AutomationProperties.Name="关于"><local:NavLabel Glyph="&#xE946;" Text="关于" /></ListViewItem>
             </ListView>
 
-            <StackPanel Grid.Row="2" Spacing="10" Margin="10,0,6,0">
+            <StackPanel Grid.Row="1" Spacing="10" Margin="10,0,6,0">
                 <Grid ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -67,20 +91,15 @@
         </Grid>
 
         <!-- ============ Workspace + inspector ============ -->
-        <Grid x:Name="ContentGrid" Grid.Column="1" Background="{ThemeResource PageBrush}" SizeChanged="OnContentSizeChanged">
+        <Grid x:Name="ContentGrid" Grid.Row="1" Grid.Column="1" Background="{ThemeResource PageBrush}" SizeChanged="OnContentSizeChanged">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <!-- ======== Workspace ======== -->
-            <ScrollViewer x:Name="CenterScroll" Style="{StaticResource PageStyle}">
+            <ScrollViewer x:Name="CenterScroll" Style="{StaticResource PageStyle}" SizeChanged="OnWorkspaceSizeChanged">
                 <StackPanel x:Name="CenterStack" Style="{StaticResource WorkspaceStackStyle}" SizeChanged="OnCenterSizeChanged">
-                    <StackPanel x:Name="Header" Spacing="6">
-                        <TextBlock x:Name="HeaderTitle" Style="{StaticResource LargeTitleStyle}" />
-                        <TextBlock x:Name="HeaderSubtitle" Style="{StaticResource SubtitleStyle}" />
-                    </StackPanel>
-
                     <!-- The live preview: the glass bar over the photo (material, shape, dock) -->
                     <StackPanel x:Name="HeroBlock" Spacing="10">
                         <Border x:Name="HeroFrame" Height="360" CornerRadius="20" Background="#FFCBD3DD" SizeChanged="OnHeroSizeChanged">
@@ -110,8 +129,6 @@
                                     <RadioButton x:Name="BgWallpaper" GroupName="herobg" Content="我的壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
                                 </StackPanel>
                             </Border>
-                            <TextBlock x:Name="HeroCaption" Grid.Column="1" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center"
-                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" />
                             <StackPanel x:Name="LoupeToggle" Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                                 <TextBlock Text="局部放大" Style="{StaticResource RowNoteStyle}" VerticalAlignment="Center" />
                                 <ToggleSwitch x:Name="LoupeSwitch" Style="{StaticResource SwitchStyle}" Toggled="OnLoupeToggled"
@@ -132,30 +149,21 @@
                                              AutomationProperties.Name="液态玻璃" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
                                         <Border x:Name="SwatchLiquid" Height="76" CornerRadius="9" Background="#FFCBD3DD" />
-                                        <StackPanel Spacing="1" Margin="4,0,4,2">
-                                            <TextBlock Text="液态玻璃" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="边缘折射，轻度模糊" Style="{StaticResource FootnoteStyle}" />
-                                        </StackPanel>
+                                        <TextBlock Text="液态玻璃" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
                                 <RadioButton x:Name="PresetFrosted" Grid.Column="1" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="frosted"
                                              AutomationProperties.Name="磨砂玻璃" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
                                         <Border x:Name="SwatchFrosted" Height="76" CornerRadius="9" Background="#FFCBD3DD" />
-                                        <StackPanel Spacing="1" Margin="4,0,4,2">
-                                            <TextBlock Text="磨砂玻璃" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="强模糊，几乎没有折射" Style="{StaticResource FootnoteStyle}" />
-                                        </StackPanel>
+                                        <TextBlock Text="磨砂玻璃" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
                                 <RadioButton x:Name="PresetCustom" Grid.Column="2" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="custom"
                                              AutomationProperties.Name="自定义" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
                                         <Border x:Name="SwatchCustom" Height="76" CornerRadius="9" Background="#FFCBD3DD" />
-                                        <StackPanel Spacing="1" Margin="4,0,4,2">
-                                            <TextBlock Text="自定义" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="修改任一参数后即为自定义" Style="{StaticResource FootnoteStyle}" />
-                                        </StackPanel>
+                                        <TextBlock Text="自定义" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
                             </Grid>
@@ -171,7 +179,6 @@
                                 <Border x:Name="TintTile" Style="{StaticResource TileStyle}">
                                     <Grid RowSpacing="10">
                                         <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
@@ -195,8 +202,6 @@
                                                 </Button.Flyout>
                                             </Button>
                                         </StackPanel>
-                                        <TextBlock Grid.Row="2" Style="{StaticResource RowNoteStyle}"
-                                                   Text="混入多少由“透明度”决定。白色最干净，石墨色像一块烟灰玻璃。" />
                                     </Grid>
                                 </Border>
                             </local:ResponsiveGrid>
@@ -209,8 +214,6 @@
                         <Border Style="{StaticResource TileStyle}" Padding="22,16,22,16">
                             <local:ResponsiveGrid x:Name="ShapeReadout" MinCellWidth="120" Gap="12" />
                         </Border>
-                        <TextBlock Style="{StaticResource FootnoteStyle}" Margin="4,10,0,0"
-                                   Text="调节右侧的参数时，预览会标出正在改变的尺寸。圆角达到高度的一半即为胶囊形。" />
                     </StackPanel>
 
                     <!-- ==== Dock: the pinned apps ==== -->
@@ -308,7 +311,7 @@
                             <TextBlock Text="添加小组件" Style="{StaticResource SectionStyle}" />
                             <local:ResponsiveGrid x:Name="WidgetGallery" MinCellWidth="180" Gap="12" />
                             <TextBlock x:Name="WidgetHint" Style="{StaticResource FootnoteStyle}" Margin="4,10,0,0"
-                                       Text="点按一个小组件，把它放到桌面上第一个空位。" />
+                                       Text="点按添加到桌面" />
                         </StackPanel>
                     </StackPanel>
 
@@ -336,36 +339,12 @@
                                     <TextBlock Text="Atrium Desktop" Style="{StaticResource LargeTitleStyle}" />
                                     <TextBlock x:Name="VersionText" Style="{StaticResource RowNoteStyle}" Typography.NumeralAlignment="Tabular" />
                                     <TextBlock Style="{StaticResource RowNoteStyle}" Margin="0,6,0,0"
-                                               Text="一条悬浮在桌面底部的玻璃程序坞：边缘实时折射、柔和高光，与系统任务栏共存。" />
+                                               Text="玻璃程序坞与桌面小组件" />
                                     <HyperlinkButton NavigateUri="https://github.com/wynter-yaxley/atrium-desktop" Padding="0" Margin="0,6,0,0"
                                                      Content="github.com/wynter-yaxley/atrium-desktop" />
                                 </StackPanel>
                             </Grid>
                         </Border>
-
-                        <StackPanel>
-                            <TextBlock Text="工作原理" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid MinCellWidth="250" Gap="12" StretchLastRow="True">
-                                <Border Style="{StaticResource TileStyle}">
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Text="只画玻璃背后的那一块" Style="{StaticResource RowTitleStyle}" />
-                                        <TextBlock Style="{StaticResource RowNoteStyle}" Text="捕获栏背后的屏幕画面，由 GPU 着色器实时折射、模糊，再贴回桌面。" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource TileStyle}">
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Text="与系统任务栏共存" Style="{StaticResource RowTitleStyle}" />
-                                        <TextBlock Style="{StaticResource RowNoteStyle}" Text="不替换资源管理器，不向系统进程注入代码；意外退出后，下次启动会撤销它对系统做过的改动。" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource TileStyle}">
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Text="先预览，再保存" Style="{StaticResource RowTitleStyle}" />
-                                        <TextBlock Style="{StaticResource RowNoteStyle}" Text="调节时玻璃栏实时变化；点“保存”才写入文件，关闭窗口会撤销未保存的预览。" />
-                                    </StackPanel>
-                                </Border>
-                            </local:ResponsiveGrid>
-                        </StackPanel>
 
                         <StackPanel>
                             <TextBlock Text="设置文件" Style="{StaticResource SectionStyle}" />
@@ -445,7 +424,6 @@
                                             <RadioButton x:Name="TextDark" GroupName="ink" Content="深色" Tag="dark" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
                                         </StackPanel>
                                     </Border>
-                                    <TextBlock Style="{StaticResource RowNoteStyle}" Text="自动：按玻璃下方背景的明暗选择。" />
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel>
@@ -494,7 +472,6 @@
                                             <RadioButton x:Name="BackdropWallpaper" GroupName="backdrop" Content="静态壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
                                         </StackPanel>
                                     </Border>
-                                    <TextBlock Style="{StaticResource RowNoteStyle}" Text="实时桌面跟随动态壁纸与幻灯片；静态壁纸直接读取图片，开销最低。" />
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>
@@ -503,23 +480,8 @@
             </Grid>
 
             <!-- Errors: a quiet banner over the workspace's top -->
-            <InfoBar x:Name="Status" IsOpen="False" IsClosable="True" MaxWidth="760" Margin="36,52,36,0" VerticalAlignment="Top" />
+            <InfoBar x:Name="Status" IsOpen="False" IsClosable="True" MaxWidth="760" Margin="32,12,32,0" VerticalAlignment="Top" />
 
-            <!-- Unsaved changes: a floating capsule at the bottom, only while there are any -->
-            <Border x:Name="SaveBar" Grid.ColumnSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,28"
-                    CornerRadius="24" Padding="18,8,8,8" BorderThickness="1"
-                    Background="{ThemeResource FloatBrush}" BorderBrush="{ThemeResource FloatStrokeBrush}"
-                    Opacity="0" IsHitTestVisible="False">
-                <Border.Shadow>
-                    <ThemeShadow />
-                </Border.Shadow>
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Ellipse x:Name="DirtyDot" Width="8" Height="8" VerticalAlignment="Center" Fill="#FFFF9F0A" />
-                    <TextBlock x:Name="DirtyText" Text="未保存的修改" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <Button x:Name="RevertButton" Content="撤销修改" Click="OnRevert" IsEnabled="False" CornerRadius="16" />
-                    <Button x:Name="SaveButton" Content="保存" Click="OnSave" IsEnabled="False" Style="{StaticResource PrimaryButtonStyle}" CornerRadius="16" />
-                </StackPanel>
-            </Border>
         </Grid>
     </Grid>
 </Window>

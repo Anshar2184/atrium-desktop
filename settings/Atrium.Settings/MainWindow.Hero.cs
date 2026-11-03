@@ -31,7 +31,7 @@ public sealed partial class MainWindow
         bool Clock, double ClockX, double ClockW, double TimePx, double DatePx, double SepX,
         double LoupeX0, double LoupeY0);
 
-    private sealed record RenderJob(BarSettings S, HeroLayout L, double W, double H, double Rs);
+    private sealed record RenderJob(BarSettings S, HeroLayout L, double W, double H, double Rs, bool Loupe);
 
     private static readonly (string Glyph, uint C1, uint C2, bool Running)[] MockApps =
     {
@@ -185,7 +185,7 @@ public sealed partial class MainWindow
         if (L == null) return;
         PositionMock(L);
         DrawAnnotations(L);
-        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale));
+        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale, Loupe.Visibility == Visibility.Visible));
     }
 
     private Brush InkBrush()
@@ -366,25 +366,34 @@ public sealed partial class MainWindow
             inset + Math.Clamp(bw - bh / 2, 1, bw), inset + Math.Max(bh * 3 / 4, bh / 4 + 1));
         frames.Publish(luma, (bx - inset) / j.Rs, (by - inset) / j.Rs, j.Rs);
 
-        // Loupe: the right end of the bar repainted at 3x, so the rim is real detail, not enlarged pixels.
-        int lw = (int)Math.Round(LoupeW * j.Rs), lh = (int)Math.Round(LoupeH * j.Rs);
-        double ppd = LoupeZoom * j.Rs;
-        string lkey = $"{lw}x{lh}/{j.W:F1}x{j.H:F1}/{L.LoupeX0:F2},{L.LoupeY0:F2}/{Photo.Generation}";
-        if (_loupeBg == null || lkey != _loupeKey)
+        // Only the material page with the loupe enabled needs its second render.
+        int lw = j.Loupe ? (int)Math.Round(LoupeW * j.Rs) : 0, lh = j.Loupe ? (int)Math.Round(LoupeH * j.Rs) : 0;
+        if (j.Loupe)
         {
-            _loupeBg = Backdrop.Create(lw, lh, j.W, j.H, L.LoupeX0, L.LoupeY0, ppd);
-            _loupeKey = lkey;
+            double ppd = LoupeZoom * j.Rs;
+            string lkey = $"{lw}x{lh}/{j.W:F1}x{j.H:F1}/{L.LoupeX0:F2},{L.LoupeY0:F2}/{Photo.Generation}";
+            if (_loupeBg == null || lkey != _loupeKey)
+            {
+                _loupeBg = Backdrop.Create(lw, lh, j.W, j.H, L.LoupeX0, L.LoupeY0, ppd);
+                _loupeKey = lkey;
+            }
+            var lframes = _loupeFrames;
+            if (lframes == null || lframes.Width != lw || lframes.Height != lh)
+                _loupeFrames = lframes = new FrameBuffers(lw, lh);
+            Buffer.BlockCopy(_loupeBg.Base, 0, lframes.Back, 0, _loupeBg.Base.Length);
+            var lspec = GlassSpec.For(j.S, L.S * ppd);
+            int linset = (int)lspec.Inset;
+            int lbx = (int)Math.Round((L.BarX - L.LoupeX0) * ppd), lby = (int)Math.Round((L.BarY - L.LoupeY0) * ppd);
+            int lbw = (int)Math.Round(L.BarW * ppd), lbh = (int)Math.Round(L.BarH * ppd);
+            GlassRenderer.Draw(_loupeBg, lframes.Back, lbx - linset, lby - linset, lbw + 2 * linset, lbh + 2 * linset, lspec);
+            lframes.Publish(luma);
         }
-        var lframes = _loupeFrames;
-        if (lframes == null || lframes.Width != lw || lframes.Height != lh)
-            _loupeFrames = lframes = new FrameBuffers(lw, lh);
-        Buffer.BlockCopy(_loupeBg.Base, 0, lframes.Back, 0, _loupeBg.Base.Length);
-        var lspec = GlassSpec.For(j.S, L.S * ppd);
-        int linset = (int)lspec.Inset;
-        int lbx = (int)Math.Round((L.BarX - L.LoupeX0) * ppd), lby = (int)Math.Round((L.BarY - L.LoupeY0) * ppd);
-        int lbw = (int)Math.Round(L.BarW * ppd), lbh = (int)Math.Round(L.BarH * ppd);
-        GlassRenderer.Draw(_loupeBg, lframes.Back, lbx - linset, lby - linset, lbw + 2 * linset, lbh + 2 * linset, lspec);
-        lframes.Publish(luma);
+        else
+        {
+            _loupeBg = null;
+            _loupeFrames = null;
+            _loupeKey = "";
+        }
 
         sw.Stop();
         LogRender(sw.Elapsed.TotalMilliseconds, pw, ph, lw, lh);
@@ -434,7 +443,7 @@ public sealed partial class MainWindow
                 if (_current.TextColor == "auto" && before != _luma > 0.6f) UpdateHero();
             }
         }
-        if (_loupeFrames is { } lf) Upload(lf, ref _loupeBmp, _loupeBrush);
+        if (Loupe.Visibility == Visibility.Visible && _loupeFrames is { } lf) Upload(lf, ref _loupeBmp, _loupeBrush);
     }
 
     private static void Upload(FrameBuffers f, ref WriteableBitmap? bmp, ImageBrush brush)
@@ -454,7 +463,14 @@ public sealed partial class MainWindow
     private static Backdrop? s_swatchBg;
     private static readonly object s_swatchLock = new();
 
-    private void UpdateCustomSwatch() => _swatchWorker?.Post(_current.Clone());
+    private BarSettings? _swatchSettings;
+
+    private void UpdateCustomSwatch()
+    {
+        if (_page != 0 || (_swatchSettings?.SameMaterial(_current) ?? false)) return;
+        _swatchSettings = _current.Clone();
+        _swatchWorker?.Post(_swatchSettings);
+    }
 
     // Swatches are tiny; rendering them at 2x keeps them crisp up to 200 % scale.
     private void RenderSwatch(BarSettings material, Border target)

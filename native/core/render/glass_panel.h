@@ -53,6 +53,7 @@ struct GlassPanel {
 // in the same composition, the popup waits (briefly) after publishing a
 // change until the render thread has presented that panel's glass.
 void GlassPresented(HWND hwnd, unsigned gen);              // render thread
+void ForgetGlass(HWND hwnd);                              // render thread; layer removed
 bool WaitGlass(HWND hwnd, unsigned gen, double timeoutMs); // UI thread; false on timeout
 
 class GlassHost {
@@ -77,8 +78,6 @@ struct InkGrid {
     float cellX = 1, cellY = 1;
     std::vector<uint8_t> dark;
     bool operator==(const InkGrid&) const = default;
-    // Dark ink for a rectangle (window px): what most of the cells under it need; `fallback` without a grid.
-    bool DarkAt(float x0, float y0, float x1, float y1, bool fallback) const;
 };
 void PublishInk(HWND hwnd, const InkGrid& grid); // render thread
 InkGrid InkFor(HWND hwnd);                        // UI thread

@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.Intrinsics;
 using System.Runtime.CompilerServices;
 
 namespace Atrium.Settings;
@@ -17,23 +18,23 @@ namespace Atrium.Settings;
 internal sealed class Backdrop
 {
     public readonly int Width, Height;
-    public readonly float[][] Mips;   // RGBA float, 4 per texel
+    public readonly byte[][] Mips;    // BGRA8, as the native renderer's UNORM texture
     public readonly int[] MipW, MipH;
-    public readonly byte[] Base;      // level 0 as BGRA8, the starting point of every frame
+    public byte[] Base => Mips[0];
 
-    private Backdrop(int w, int h, float[][] mips, int[] mw, int[] mh, byte[] baseBgra)
+    private Backdrop(int w, int h, byte[][] mips, int[] mw, int[] mh)
     {
-        Width = w; Height = h; Mips = mips; MipW = mw; MipH = mh; Base = baseBgra;
+        Width = w; Height = h; Mips = mips; MipW = mw; MipH = mh;
     }
 
     // The photo for a pw x ph pixel viewport onto an art of artW x artH DIP whose top-left
     // visible point is (x0, y0) DIP, at ppd pixels per DIP.
     public static Backdrop Create(int pw, int ph, double artW, double artH, double x0, double y0, double ppd)
     {
-        var l0 = new float[pw * ph * 4];
+        var l0 = new byte[pw * ph * 4];
         Photo.Current.Paint(l0, pw, ph, (float)artW, (float)artH, (float)x0, (float)y0, (float)ppd);
 
-        var mips = new List<float[]> { l0 };
+        var mips = new List<byte[]> { l0 };
         var mw = new List<int> { pw };
         var mh = new List<int> { ph };
         while (mw[^1] > 1 || mh[^1] > 1)
@@ -41,7 +42,7 @@ internal sealed class Backdrop
             var src = mips[^1];
             int sw = mw[^1], sh = mh[^1];
             int w = Math.Max(1, (sw + 1) / 2), h = Math.Max(1, (sh + 1) / 2);
-            var dst = new float[w * h * 4];
+            var dst = new byte[w * h * 4];
             void Row(int y)
             {
                 int y0r = Math.Min(2 * y, sh - 1), y1r = Math.Min(2 * y + 1, sh - 1);
@@ -50,10 +51,10 @@ internal sealed class Backdrop
                     int x0r = Math.Min(2 * x, sw - 1), x1r = Math.Min(2 * x + 1, sw - 1);
                     int a = (y0r * sw + x0r) * 4, b = (y0r * sw + x1r) * 4, c = (y1r * sw + x0r) * 4, d = (y1r * sw + x1r) * 4;
                     int o = (y * w + x) * 4;
-                    dst[o] = (src[a] + src[b] + src[c] + src[d]) * 0.25f;
-                    dst[o + 1] = (src[a + 1] + src[b + 1] + src[c + 1] + src[d + 1]) * 0.25f;
-                    dst[o + 2] = (src[a + 2] + src[b + 2] + src[c + 2] + src[d + 2]) * 0.25f;
-                    dst[o + 3] = 1;
+                    dst[o] = (byte)((src[a] + src[b] + src[c] + src[d] + 2) / 4);
+                    dst[o + 1] = (byte)((src[a + 1] + src[b + 1] + src[c + 1] + src[d + 1] + 2) / 4);
+                    dst[o + 2] = (byte)((src[a + 2] + src[b + 2] + src[c + 2] + src[d + 2] + 2) / 4);
+                    dst[o + 3] = 255;
                 }
             }
             if (w * h > 4096) Parallel.For(0, h, Row);
@@ -61,18 +62,8 @@ internal sealed class Backdrop
             mips.Add(dst); mw.Add(w); mh.Add(h);
         }
 
-        var bgra = new byte[pw * ph * 4];
-        for (int i = 0, n = pw * ph; i < n; i++)
-        {
-            bgra[i * 4] = To8(l0[i * 4 + 2]);
-            bgra[i * 4 + 1] = To8(l0[i * 4 + 1]);
-            bgra[i * 4 + 2] = To8(l0[i * 4]);
-            bgra[i * 4 + 3] = 255;
-        }
-        return new Backdrop(pw, ph, mips.ToArray(), mw.ToArray(), mh.ToArray(), bgra);
+        return new Backdrop(pw, ph, mips.ToArray(), mw.ToArray(), mh.ToArray());
     }
-
-    private static byte To8(float v) => (byte)(Math.Clamp(v, 0f, 1f) * 255f + 0.5f);
 }
 
 // GlassParams of glass.hlsl, in pixels of the target bitmap.
@@ -123,6 +114,7 @@ internal static class GlassRenderer
         Parallel.For(y0, y1, ly => Row(bg, dst, winW, 0, 0, true, winX, winY, winW, winH, p, ly));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void Row(Backdrop bg, byte[] dst, int stride, int dstX, int dstY, bool overlay, int winX, int winY, int winW, int winH,
                             GlassSpec p, int ly)
     {
@@ -277,6 +269,7 @@ internal static class GlassRenderer
     private static byte To8(float v) => (byte)(Sat(v) * 255f + 0.5f);
 
     // Bg.SampleLevel(Linear, ...) with trilinear filtering and clamped addressing.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static Vector3 Tex(Backdrop bg, float x, float y, float lod)
     {
         int maxL = bg.Mips.Length - 1;
@@ -302,13 +295,21 @@ internal static class GlassRenderer
         int x1 = Math.Clamp(x0 + 1, 0, w - 1), y1 = Math.Clamp(y0 + 1, 0, h - 1);
         x0 = Math.Clamp(x0, 0, w - 1); y0 = Math.Clamp(y0, 0, h - 1);
         int i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
-        var a = new Vector3(m[i00], m[i00 + 1], m[i00 + 2]);
-        var b = new Vector3(m[i10], m[i10 + 1], m[i10 + 2]);
-        var c = new Vector3(m[i01], m[i01 + 1], m[i01 + 2]);
-        var d = new Vector3(m[i11], m[i11 + 1], m[i11 + 2]);
+        var a = Pixel(m, i00);
+        var b = Pixel(m, i10);
+        var c = Pixel(m, i01);
+        var d = Pixel(m, i11);
         a += (b - a) * tx;
         c += (d - c) * tx;
-        return a + (c - a) * ty;
+        var color = (a + (c - a) * ty) * (1f / 255f);
+        return new Vector3(color.Z, color.Y, color.X);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector4 Pixel(byte[] pixels, int offset)
+    {
+        uint bgra = Unsafe.ReadUnaligned<uint>(ref pixels[offset]);
+        return Vector128.ConvertToSingle(Vector128.WidenLower(Vector128.WidenLower(Vector128.CreateScalarUnsafe(bgra).AsByte()))).AsVector4();
     }
 }
 
@@ -320,6 +321,7 @@ internal sealed class LatestWorker<T> where T : class
     private readonly object _lock = new();
     private T? _next;
     private bool _busy;
+    private bool _stopped;
 
     public LatestWorker(Action<T> run) => _run = run;
 
@@ -327,11 +329,17 @@ internal sealed class LatestWorker<T> where T : class
     {
         lock (_lock)
         {
+            if (_stopped) return;
             _next = job;
             if (_busy) return;
             _busy = true;
         }
         Task.Run(Loop);
+    }
+
+    public void Stop()
+    {
+        lock (_lock) { _stopped = true; _next = null; }
     }
 
     private void Loop()

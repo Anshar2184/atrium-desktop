@@ -29,8 +29,6 @@
                     <SolidColorBrush x:Key="KnobBrush" Color="#FFFFFFFF" />
                     <SolidColorBrush x:Key="KnobStrokeBrush" Color="#1F000000" />
                     <SolidColorBrush x:Key="SegmentSelectedBrush" Color="#FFFFFFFF" />
-                    <SolidColorBrush x:Key="FloatBrush" Color="#F2FFFFFF" />
-                    <SolidColorBrush x:Key="FloatStrokeBrush" Color="#14000000" />
                     <SolidColorBrush x:Key="ButtonBackground" Color="#FFE8E8ED" />
                     <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#FFDDDDE3" />
                     <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#FFD2D2D8" />
@@ -58,8 +56,6 @@
                     <SolidColorBrush x:Key="KnobBrush" Color="#FFFFFFFF" />
                     <SolidColorBrush x:Key="KnobStrokeBrush" Color="#33000000" />
                     <SolidColorBrush x:Key="SegmentSelectedBrush" Color="#FF636366" />
-                    <SolidColorBrush x:Key="FloatBrush" Color="#F23A3A3C" />
-                    <SolidColorBrush x:Key="FloatStrokeBrush" Color="#1FFFFFFF" />
                     <SolidColorBrush x:Key="ButtonBackground" Color="#FF3A3A3C" />
                     <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#FF48484A" />
                     <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#FF545456" />
@@ -162,19 +158,21 @@
             <Style x:Key="PageStyle" TargetType="ScrollViewer">
                 <Setter Property="HorizontalScrollMode" Value="Disabled" />
                 <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
             </Style>
-            <!-- The workspace column (title, preview, main choices) and the inspector column. -->
+            <!-- Bottom scroll room lets the last control clear the desktop dock. -->
             <Style x:Key="WorkspaceStackStyle" TargetType="StackPanel">
                 <Setter Property="MaxWidth" Value="1120" />
-                <Setter Property="Margin" Value="36,52,36,140" />
-                <Setter Property="Spacing" Value="28" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="Margin" Value="32,24,32,160" />
+                <Setter Property="Spacing" Value="24" />
             </Style>
             <Style x:Key="InspectorStackStyle" TargetType="StackPanel">
-                <Setter Property="Margin" Value="24,60,22,140" />
+                <Setter Property="Margin" Value="24,24,24,160" />
             </Style>
             <Style x:Key="InspectorPageStyle" TargetType="StackPanel">
-                <Setter Property="Spacing" Value="30" />
+                <Setter Property="Spacing" Value="24" />
             </Style>
             <!-- A row of the inspector: no card, a little air above and below (DESIGN.md §8). -->
             <Style x:Key="FlatRowStyle" TargetType="StackPanel">

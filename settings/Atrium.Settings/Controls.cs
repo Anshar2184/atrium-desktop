@@ -37,11 +37,10 @@ public sealed class NavLabel : StackPanel
     public string Text { get => _text.Text; set => _text.Text = value; }
 }
 
-// A tile with a switch: the name and the switch on top, a sentence under them.
+// A named switch; supporting help is available on hover.
 public sealed class ToggleTile : UserControl
 {
     private readonly TextBlock _title = new() { Style = Res<Style>("RowTitleStyle"), VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _note = new() { Style = Res<Style>("RowNoteStyle") };
 
     public ToggleSwitch Switch { get; } = new() { Style = Res<Style>("SwitchStyle") };
     public event RoutedEventHandler? Toggled;
@@ -49,17 +48,12 @@ public sealed class ToggleTile : UserControl
     public ToggleTile()
     {
         IsTabStop = false;
-        var grid = new Grid { RowSpacing = 6, ColumnSpacing = 12 };
+        var grid = new Grid { ColumnSpacing = 12, MinHeight = 32 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetColumn(Switch, 1);
-        Grid.SetRow(_note, 1);
-        Grid.SetColumnSpan(_note, 2);
         grid.Children.Add(_title);
         grid.Children.Add(Switch);
-        grid.Children.Add(_note);
         Content = _surface = new Border { Style = Res<Style>("TileStyle"), Child = grid };
         Switch.Toggled += (_, e) => Toggled?.Invoke(this, e);
     }
@@ -74,7 +68,7 @@ public sealed class ToggleTile : UserControl
     }
 
     public string Title { get => _title.Text; set => _title.Text = value; }
-    public string Note { get => _note.Text; set => _note.Text = value; }
+    public string Note { get => ToolTipService.GetToolTip(Switch)?.ToString() ?? ""; set => ToolTipService.SetToolTip(Switch, value); }
     // The switch's name for UI Automation (and screen readers).
     public string SwitchName { get => AutomationProperties.GetName(Switch); set => AutomationProperties.SetName(Switch, value); }
     public bool IsOn { get => Switch.IsOn; set => Switch.IsOn = value; }

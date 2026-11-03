@@ -87,8 +87,8 @@ internal sealed class Photo
     }
 
     // The photo covering an art of artW x artH DIP (cropped, never letterboxed), painted for a
-    // pw x ph pixel viewport whose top-left is (x0, y0) DIP, at ppd pixels per DIP. RGBA floats.
-    public void Paint(float[] rgba, int pw, int ph, float artW, float artH, float x0, float y0, float ppd)
+    // pw x ph pixel viewport whose top-left is (x0, y0) DIP, at ppd pixels per DIP. BGRA8.
+    public void Paint(byte[] bgra, int pw, int ph, float artW, float artH, float x0, float y0, float ppd)
     {
         float s = MathF.Max(artW / _w, artH / _h); // DIP per photo pixel
         float ox = (artW - _w * s) * 0.5f, oy = (artH - _h * s) * FocusY;
@@ -100,10 +100,12 @@ internal sealed class Photo
                 float u = (x0 + (i + 0.5f) / ppd - ox) / s;
                 Vector3 c = Sample(u, v);
                 int o = (j * pw + i) * 4;
-                rgba[o] = c.X; rgba[o + 1] = c.Y; rgba[o + 2] = c.Z; rgba[o + 3] = 1;
+                bgra[o] = To8(c.Z); bgra[o + 1] = To8(c.Y); bgra[o + 2] = To8(c.X); bgra[o + 3] = 255;
             }
         });
     }
+
+    private static byte To8(float v) => (byte)(Math.Clamp(v, 0f, 1f) * 255f + 0.5f);
 
     // Bilinear, clamped; (u, v) in photo pixels.
     private Vector3 Sample(float u, float v)
