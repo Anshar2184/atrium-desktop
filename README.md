@@ -1,17 +1,9 @@
 <p align="center">
-  <img src="docs/images/readme/hero-zh.jpg" alt="Atrium：液态玻璃的任务栏与桌面小组件" width="100%">
+  <img src="docs/images/readme/hero.jpg" alt="Atrium Desktop" width="100%">
 </p>
 
-<br>
-
 <p align="center">
-  <img src="assets/atrium-256.png" alt="" width="76">
-</p>
-
-<h1 align="center">Atrium Desktop</h1>
-
-<p align="center">
-  为 Windows 11 重新做的一层桌面。<br>
+  <b>为 Windows 11 重新做的一层桌面。</b><br>
   任务栏、开始菜单、控制中心、通知和桌面小组件，用的是同一块实时折射的玻璃、同一套动效和同一种字体。
 </p>
 
@@ -308,4 +300,4 @@ docs/          设计规范、有效决策、验证记录、设置协议、交�
 
 [MIT](LICENSE)。视觉灵感来自 Apple 的 Liquid Glass；本项目与 Apple、Microsoft 无关。
 
-<sub>本页配图不是截图，而是由 [`tools/readme`](tools/readme) 离线渲染的：玻璃移植自 `glass.hlsl`，任务栏、状态圆环和小组件按核心的绘制代码与尺寸重画，背景和应用图标是原创图形。实机画面见上方的“实机截图”。</sub>
+<sub>本页配图不是截图，而是离线渲染的：玻璃移植自 `glass.hlsl`，任务栏、状态圆环和小组件按核心的绘制代码与尺寸重画；背景是设置中心自带的预览照片（Martin Martz / Unsplash），应用图标是原创图形。实机画面见上方的“实机截图”。</sub>

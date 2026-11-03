@@ -95,9 +95,15 @@ class Canvas:
 
     # -- shapes ---------------------------------------------------------
     def fill(self, rect, radius, colour):
+        """Canvas::Fill: a G3 rounded rectangle (FillContinuousRect), circular ends for capsules."""
         l, t, r, b = [self.P(v) for v in rect]
         rad = self.P(radius)
-        self._layer((l, t, r, b), colour, lambda d, ox, oy: d.rounded_rectangle((l - ox, t - oy, r - ox - 1, b - oy - 1), rad, fill=255))
+        if rad <= 0 or rad >= min(r - l, b - t) / 2 - 0.01:
+            self._layer((l, t, r, b), colour, lambda d, ox, oy: d.rounded_rectangle((l - ox, t - oy, r - ox - 1, b - oy - 1), rad, fill=255))
+            return
+        from glass import g3_points
+        pts = g3_points(l, t, r, b, rad)
+        self._layer((l, t, r, b), colour, lambda d, ox, oy: d.polygon([(x - ox, y - oy) for x, y in pts], fill=255))
 
     def circle(self, cx, cy, r, colour):
         cx, cy, r = self.P(cx), self.P(cy), self.P(r)

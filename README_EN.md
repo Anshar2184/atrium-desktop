@@ -1,17 +1,9 @@
 <p align="center">
-  <img src="docs/images/readme/hero-en.jpg" alt="Atrium: a liquid glass taskbar and desktop widgets" width="100%">
+  <img src="docs/images/readme/hero.jpg" alt="Atrium Desktop" width="100%">
 </p>
 
-<br>
-
 <p align="center">
-  <img src="assets/atrium-256.png" alt="" width="76">
-</p>
-
-<h1 align="center">Atrium Desktop</h1>
-
-<p align="center">
-  A new desktop layer for Windows 11.<br>
+  <b>A new desktop layer for Windows 11.</b><br>
   The taskbar, start menu, control centre, notifications and desktop widgets share one piece of real-time refracting glass, one motion system and one typeface.
 </p>
 
@@ -308,4 +300,4 @@ The most valuable contributions now are design review and test results from othe
 
 [MIT](LICENSE). Visually inspired by Apple's Liquid Glass; not affiliated with Apple or Microsoft.
 
-<sub>The artwork on this page is rendered offline by [`tools/readme`](tools/readme), not captured: the glass is a port of `glass.hlsl`, the bar, the status ring and the widgets are redrawn from the core's drawing code and metrics, and the backdrops and app icons are original drawings. For the real thing, see Screenshots above.</sub>
+<sub>The artwork on this page is rendered offline, not captured: the glass is a port of `glass.hlsl`, the bar, the status ring and the widgets are redrawn from the core's drawing code and metrics; the backdrops are the settings app's preview photographs (Martin Martz / Unsplash), the app icons original drawings. For the real thing, see Screenshots above.</sub>

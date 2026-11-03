@@ -175,6 +175,12 @@ def paint_reminders(c, t, items):
         else:
             c.arc(cx, cy, 7.4, -90, 270, t.sub, 1.5, caps=False)
         c.text(text, (PAD + 26, y, W - PAD, y + row), 13.5, t.sub if done else t.text)
+    # The last row adds one.
+    shown = min(len(order), max(1, int((H - PAD - top) / row)) - 1)
+    if shown < int((H - PAD - top) / row):
+        y = top + row * shown
+        c.text('+', (PAD - 1, y, PAD + 19, y + row), 17, t.faint, 'regular', 1)
+        c.text('新提醒', (PAD + 26, y, W - PAD, y + row), 13.5, t.faint)
 
 
 def paint_notes(c, t, lines):

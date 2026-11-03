@@ -36,14 +36,62 @@ INSET_DIP = 14  # bar.cpp kInsetDip: room for the drop shadow
 LIGHT = (-0.6, -0.8)  # ParamsFor: unit vector towards the light
 
 
+def sd_corner(qx, qy, r):
+    """glass.hlsl sdCorner: the G3 corner f(x) + f(y) = 1, f(t) = t^4 / (0.02 + 0.98 t^2)."""
+    out = np.maximum(qx, qy) - r
+    inside = np.minimum(qx, qy) > 0
+    if r <= 0 or not inside.any():
+        return out
+    x, y = qx[inside], qy[inside]
+    n = np.hypot(x, y)
+    for _ in range(2):
+        vx, vy = x / n, y / n
+        xx, yy = vx * vx, vy * vy
+        dx, dy = 0.02 + 0.98 * xx, 0.02 + 0.98 * yy
+        fx = 2 * vx * xx * (0.04 + 0.98 * xx) / (dx * dx)
+        fy = 2 * vy * yy * (0.04 + 0.98 * yy) / (dy * dy)
+        n = n * (1 + (xx * xx / dx + yy * yy / dy - 1) / (vx * fx + vy * fy))
+    out = out.copy()
+    out[inside] = (n - r) * (vx * fx + vy * fy) / np.hypot(fx, fy)
+    return out
+
+
 def sd_round_rect(px, py, rect, r):
+    """glass.hlsl sdRoundRect: capsules keep circular ends, other corners are G3 (v0.9.11)."""
     l, t, rr, b = rect
     cx, cy = (l + rr) / 2, (t + b) / 2
     bx, by = max((rr - l) / 2, 1), max((b - t) / 2, 1)
     r = min(r, bx, by)
     qx = np.abs(px - cx) - bx + r
     qy = np.abs(py - cy) - by + r
-    return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
+    if r >= min(bx, by) - 1e-6:
+        return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
+    return sd_corner(qx, qy, r)
+
+
+def g3_points(l, t, r, b, radius, steps=24):
+    """The outline of a G3 rounded rectangle (continuous_corners.h), clockwise from the top left."""
+    radius = min(radius, (r - l) / 2, (b - t) / 2)
+    quarter = []
+    for i in range(steps + 1):
+        th = math.pi / 2 * i / steps
+        x, y = math.sin(th), -math.cos(th)
+        n = 1.0
+        for _ in range(6):
+            vx, vy = x / n, y / n
+            xx, yy = vx * vx, vy * vy
+            dx, dy = 0.02 + 0.98 * xx, 0.02 + 0.98 * yy
+            fx = 2 * vx * xx * (0.04 + 0.98 * xx) / (dx * dx)
+            fy = 2 * vy * yy * (0.04 + 0.98 * yy) / (dy * dy)
+            n *= 1 + (xx * xx / dx + yy * yy / dy - 1) / (vx * fx + vy * fy)
+        quarter.append((x / n, y / n))  # from the top (0, -1) to the right (1, 0)
+    pts = []
+    for cx, cy, rot in ((l + radius, t + radius, 3), (r - radius, t + radius, 0), (r - radius, b - radius, 1), (l + radius, b - radius, 2)):
+        for x, y in quarter:
+            for _ in range(rot):
+                x, y = -y, x
+            pts.append((cx + x * radius, cy + y * radius))
+    return pts
 
 
 class Backdrop:
@@ -69,7 +117,7 @@ def _sample(img, x, y, channel=None):
     return np.stack([ndimage.map_coordinates(img[..., c], coords, order=1, mode='nearest') for c in range(3)], -1)
 
 
-def render(dst, backdrop, rect, radius, mat=LIQUID, scale=2.0):
+def render(dst, backdrop, rect, radius, mat=LIQUID, scale=2.0, dist_fn=None):
     """Draws one piece of glass (rect in px, radius in px) into dst, in place.
 
     Returns the mean luminance under the glass, which picks the ink as the core
@@ -88,7 +136,7 @@ def render(dst, backdrop, rect, radius, mat=LIQUID, scale=2.0):
     x1, y1 = min(int(math.ceil(rect[2])) + m, W), min(int(math.ceil(rect[3])) + m, H)
     yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
     px, py = xx + 0.5, yy + 0.5
-    dist = lambda X, Y: sd_round_rect(X, Y, rect, radius)
+    dist = dist_fn or (lambda X, Y: sd_round_rect(X, Y, rect, radius))
 
     d = dist(px, py)
     ds = dist(px, py - inset * 0.25)

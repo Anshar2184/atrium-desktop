@@ -126,6 +126,21 @@ def band(W, H):
     return silk(W, H, rs, glow=[(W / H * 0.5, 0.35, 0.6, 0x5A2410, 0.30)])
 
 
+
+def photo(name, W, H, focus=(0.5, 0.5), scale=1.0):
+    """One of the settings' preview photographs (assets/backgrounds, Martin Martz / Unsplash),
+    covering W x H: `scale` zooms in, `focus` places the crop (0..1 of the spare room)."""
+    import os
+    from PIL import Image
+    path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'backgrounds', name + '.jpg')
+    im = Image.open(path).convert('RGB')
+    k = max(W / im.width, H / im.height) * scale
+    w, h = int(round(im.width * k)), int(round(im.height * k))
+    im = im.resize((w, h), Image.LANCZOS)
+    x0, y0 = int((w - W) * focus[0]), int((h - H) * focus[1])
+    return np.asarray(im.crop((x0, y0, x0 + W, y0 + H)), np.float32) / 255
+
+
 if __name__ == '__main__':
     import sys
     from PIL import Image

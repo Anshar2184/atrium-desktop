@@ -69,30 +69,55 @@ def headline(img, lang, x, y, s):
     over(img, c.result(), x * s, y * s)
 
 
+def text_field(text, size_px, W, H, x, y, weight='semibold', ss=4, soften=4.0):
+    """A signed distance field of a line of type (px, negative inside), for glass in its shape."""
+    from PIL import Image as _I, ImageDraw as _D
+    from scipy import ndimage as _nd
+    from draw import font
+    f = font(size_px * ss, weight)
+    mask = _I.new('L', (W * ss, H * ss), 0)
+    _D.Draw(mask).text((x * ss, y * ss), text, font=f, fill=255, anchor='ls', features=['kern'])
+    m = np.asarray(mask) > 127
+    inside = _nd.distance_transform_edt(m)
+    outside = _nd.distance_transform_edt(~m)
+    field = ((outside - inside) / ss).astype(np.float32)
+    # Rounded a little, so the letters read as poured glass rather than cut: no creases at corners.
+    field = _nd.gaussian_filter(field, soften * ss)
+    # Sampled at the output's pixel centres: the field of pixel (i, j) is at ss * (i + 0.5) - 0.5.
+    def dist(X, Y):
+        return _nd.map_coordinates(field, [Y * ss - 0.5, X * ss - 0.5], order=1, mode='nearest')
+    return dist, f.getbbox(text, anchor='ls', features=['kern'])
+
+
 def hero(lang):
-    Wd, Hd = 1200, 680
-    W, H = int(Wd * S), int(Hd * S)
-    bg = backdrop.ember(W, H)
+    """The app's icon, and its name in the bar's liquid glass, over the 'layers' photograph."""
+    from PIL import Image as _I, ImageFilter as _F
+    W, H = 2400, 1100
+    bg = backdrop.photo('layers', W, H, focus=(0.5, 0.36))
     bd = glass.Backdrop(bg)
     img = bg.copy()
 
-    # The widgets: the right half of the grid (cell 164, gap 16, margin 24), anchored right.
-    colA, colB = Wd - 24 - 164, Wd - 24 - 164 - 16 - 164
-    rows = [24, 204, 384]
-    widget(img, bd, colB, rows[0], 344, 164, lambda c, t: faces.paint_calendar_medium(c, t, 2026, 11, 3, '九月廿五'), S)
-    widget(img, bd, colB, rows[1], 164, 164, lambda c, t: faces.paint_clock_small(c, t, (10, 9, 32)), S)
-    widget(img, bd, colA, rows[1], 164, 164, lambda c, t: faces.paint_battery(c, t, 82, True), S)
-    widget(img, bd, colB, rows[2], 344, 164, lambda c, t: faces.paint_system_medium(
-        c, t, [('CPU', 0.23, '处理器'), ('内存', 0.58, '9.2 / 16 GB'), ('磁盘', 0.74, '214 GB 可用')]), S)
+    # The icon: the tile as the taskbar shows it (tools/make_icon.py crops the master's margin).
+    icon = _I.open(os.path.join(ROOT, 'assets', 'atrium-1024.png')).convert('RGBA').crop((100, 100, 924, 924))
+    size = 470
+    icon = icon.resize((size, size), _I.LANCZOS)
+    ix, iy = 250, (H - size) // 2
+    shadow = _I.new('L', (size + 240, size + 240), 0)
+    shadow.paste(icon.getchannel('A'), (120, 120))
+    shadow = shadow.filter(_F.GaussianBlur(38)).point(lambda v: int(v * 0.55))
+    sh = np.zeros((shadow.height, shadow.width, 4), np.float32)
+    sh[..., 3] = np.asarray(shadow, np.float32) / 255
+    over(img, _I.fromarray((sh * 255).astype(np.uint8), 'RGBA'), ix - 120, iy - 120 + 28)
+    over(img, icon, ix, iy)
 
-    # The bar, the pointer over the photos: the wave of the magnification.
-    bar = Bar(APPS, pointer=None, running={'browser', 'files', 'code', 'music', 'terminal'}, active='code',
-              status=dict(fill=0.82, charging=True, signal=3), s=S)
-    bar.pointer = bar.app_x(APPS.index('photos')) + 6
-    bar.draw(img, bd, Wd / 2, Hd - 10)
-
-    headline(img, lang, 64, 92, S)
-    save(img, f'hero-{lang}.jpg')
+    # The name: two lines of glass with the shader's lens, dispersion and rim light.
+    mat = glass.Material(transparency=0.92, blur=0.4, refraction=12, edge=8, dispersion=0.6, highlight=2.2, shadow=0.55)
+    x0 = ix + size + 120
+    for line, base in (('Atrium', iy + 205), ('Desktop', iy + size - 18)):
+        dist, box = text_field(line, 238, W, H, x0, base)
+        rect = (x0 + box[0], base + box[1], x0 + box[2], base + box[3])
+        glass.render(img, bd, rect, 0, mat, S, dist_fn=dist)
+    save(img, 'hero.jpg')
 
 
 LUNAR_NOV_2026 = ['廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十', '十月'] + \
@@ -118,7 +143,7 @@ TEXT = {
 def material(lang):
     """The two presets side by side over the same ribbons."""
     Wd, Hd = 1200, 520
-    bg = backdrop.strata(int(Wd * S), int(Hd * S))
+    bg = backdrop.photo('paper', int(Wd * S), int(Hd * S), focus=(0.5, 0.45))
     bd = glass.Backdrop(bg)
     img = bg.copy()
     tx = TEXT[lang]
@@ -136,7 +161,7 @@ def material(lang):
 def ring(lang):
     """The status ring's states, each on a round piece of the bar's glass."""
     Wd, Hd = 1200, 380
-    bg = backdrop.band(int(Wd * S), int(Hd * S))
+    bg = backdrop.photo('layers', int(Wd * S), int(Hd * S), focus=(0.5, 0.42))
     bd = glass.Backdrop(bg)
     img = bg.copy()
     states = [dict(fill=0.82, signal=3), dict(fill=0.64, charging=True, signal=3), dict(fill=0.60, mode='volume', volume=60),
@@ -172,7 +197,7 @@ def cursor(c, x, y):
 def widgets(lang):
     """Both halves of the widget grid, on a light desktop: the ink turns dark."""
     Wd, Hd = 1040, 572
-    bg = backdrop.dune(int(Wd * S), int(Hd * S))
+    bg = backdrop.photo('paper', int(Wd * S), int(Hd * S), focus=(0.5, 0.5))
     bd = glass.Backdrop(bg)
     img = bg.copy()
     left, top, cell, g = 24, 24, 164, 16
@@ -191,11 +216,11 @@ def widgets(lang):
     labels = [(l, False) for l in LUNAR_NOV_2026]
     widget(img, bd, colB, top, 344, 344, lambda c, t: faces.paint_calendar_large(c, t, 2026, 11, 3, '九月廿五', labels), S)
     # The photo: a crop of the hero's backdrop, cut to the widget's corners.
-    photo = backdrop.ember(int(344 * S * 1.6), int(164 * S * 1.6))
+    photo = backdrop.photo('layers', int(344 * S * 1.6), int(164 * S * 1.6), focus=(0.5, 0.6))
     from PIL import Image as _I, ImageDraw as _D
     ph = to_image(photo).resize((int(344 * S), int(164 * S)), _I.LANCZOS).convert('RGBA')
     mask = _I.new('L', (ph.width * 4, ph.height * 4), 0)
-    _D.Draw(mask).rounded_rectangle((0, 0, mask.width - 1, mask.height - 1), 22 * S * 4, fill=255)
+    _D.Draw(mask).polygon(glass.g3_points(0, 0, mask.width, mask.height, 22 * S * 4), fill=255)  # ImageRounded: G3
     ph.putalpha(mask.resize(ph.size, _I.LANCZOS))
     glass.render(img, bd, (colB * S, (top + 2 * (cell + g)) * S, (colB + 344) * S, (top + 2 * (cell + g) + 164) * S), 22 * S, glass.LIQUID, S)
     over(img, ph, colB * S, (top + 2 * (cell + g)) * S)
@@ -209,7 +234,7 @@ def widgets(lang):
 def bar(lang):
     """The bar alone, close up, the pointer between two icons."""
     Wd, Hd = 1200, 190
-    bg = backdrop.strata(int(Wd * S), int(Hd * S * 2.4))[int(Hd * S * 0.9):int(Hd * S * 0.9) + int(Hd * S)]
+    bg = backdrop.photo('layers', int(Wd * S), int(Hd * S), focus=(0.5, 0.55))
     bd = glass.Backdrop(np.ascontiguousarray(bg))
     img = bd.img.copy()
     apps = APPS[:9]
@@ -222,8 +247,7 @@ def bar(lang):
 if __name__ == '__main__':
     what = sys.argv[1] if len(sys.argv) > 1 else 'all'
     if what in ('hero', 'all'):
-        for lang in ('zh', 'en'):
-            hero(lang)
+        hero('zh')
     for name, fn in (('material', material), ('ring', ring), ('widgets', widgets), ('bar', bar)):
         if what in (name, 'all'):
             for lang in ('zh', 'en'):
