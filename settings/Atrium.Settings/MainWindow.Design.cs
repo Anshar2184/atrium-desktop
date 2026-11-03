@@ -429,10 +429,13 @@ public sealed partial class MainWindow
             Width = 176, Height = 176, RadiusX = 46, RadiusY = 46,
             Style = StyleOf("GlyphAccentStyle"), HorizontalAlignment = HorizontalAlignment.Center,
         };
-        var face = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
+        var face = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
         face.Children.Add(outline);
-        face.Children.Add(Text("大圆角", "RowTitleStyle"));
-        var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28 };
+        var caption = Text("大圆角", "RowTitleStyle");
+        caption.HorizontalAlignment = HorizontalAlignment.Center;
+        caption.MinHeight = caption.LineHeight = 22;
+        face.Children.Add(caption);
+        var grid = new ResponsiveGrid { MinCellWidth = 300, MaxColumns = 2, Gap = 28 };
         grid.Children.Add(face);
         grid.Children.Add(RadiusDemo());
         return Card(grid);
@@ -440,7 +443,7 @@ public sealed partial class MainWindow
     // The concentric rule in one picture: the bar's capsule radius, a 12 inset, the inner radius.
     private static UIElement RadiusDemo()
     {
-        const double R = 30, P = 12, Ww = 220, Hh = 132;
+        const double R = 30, P = 12, Ww = 220, Hh = 176;
         var demo = new Canvas { Width = Ww, Height = Hh };
         demo.Children.Add(new Rectangle { Width = Ww, Height = Hh, RadiusX = R, RadiusY = R, Style = StyleOf("GlyphInkStyle") });
         var inner = new Rectangle { Width = Ww - 2 * P, Height = Hh - 2 * P, RadiusX = R - P, RadiusY = R - P, Style = StyleOf("GlyphAccentStyle") };
@@ -453,10 +456,11 @@ public sealed partial class MainWindow
         Canvas.SetLeft(label, P);
         Canvas.SetTop(label, Hh / 2 - 10);
         demo.Children.Add(label);
-        var s = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var s = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
         s.Children.Add(demo);
         var why = Text("嵌套：内圆角随边距缩小，保持一致的轮廓。", "RowNoteStyle");
         why.HorizontalAlignment = HorizontalAlignment.Center;
+        why.MinHeight = why.LineHeight = 22;
         s.Children.Add(why);
         return s;
     }
@@ -524,10 +528,20 @@ public sealed partial class MainWindow
         return grid;
     }
 
+    private static Border InteractionFrame(Grid stage, UIElement content)
+    {
+        var frame = Card(content);
+        frame.Padding = new Thickness(16);
+        // The border stroke is part of the inset too: the photo follows the same corner centre.
+        double inset = frame.BorderThickness.Left + frame.Padding.Left;
+        stage.CornerRadius = new CornerRadius(frame.CornerRadius.TopLeft - inset);
+        return frame;
+    }
+
     private FrameworkElement DockDemo()
     {
         const double Icon = 34, Gap = 9, StageH = 190, BarH = 54;
-        var stage = new Grid { Height = StageH, CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
+        var stage = new Grid { Height = StageH, Background = PhotoBrush() };
         var lane = new Canvas { Height = StageH };
         stage.Children.Add(lane);
         var bar = new Border
@@ -623,12 +637,12 @@ public sealed partial class MainWindow
         s.Children.Add(stage);
         s.Children.Add(Text("悬停放大与启动轻跳", "RowTitleStyle"));
         s.Children.Add(Text("波形：(1 + cos πd) / 2，d 为指针到图标的距离（以 2.3 个图标为半径）；放大倍数取“任务栏”页的设置。", "RowNoteStyle"));
-        return Card(s);
+        return InteractionFrame(stage, s);
     }
 
     private FrameworkElement PopDemo()
     {
-        var stage = new Grid { Height = 190, CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
+        var stage = new Grid { Height = 190, Background = PhotoBrush() };
         var card = new Border
         {
             Width = 300, Padding = new Thickness(14, 12, 16, 13), CornerRadius = new CornerRadius(22), HorizontalAlignment = HorizontalAlignment.Center,
@@ -657,7 +671,7 @@ public sealed partial class MainWindow
         s.Children.Add(stage);
         s.Children.Add(Text("通知弹出", "RowTitleStyle"));
         s.Children.Add(Text("弹簧 kPop：从 0.92 倍放大到 1，只越过一点点（峰值 1.0067），同时在 160 ms 内淡入。没有来回弹跳。", "RowNoteStyle"));
-        return Card(s);
+        return InteractionFrame(stage, s);
     }
 
     // ---- Motion ----
