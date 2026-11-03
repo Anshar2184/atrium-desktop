@@ -16,7 +16,7 @@ namespace atrium {
 
 namespace {
 
-constexpr DWORD kPollMs = 400;
+constexpr DWORD kReconcileMs = 5000;
 constexpr ULONGLONG kProcessesMs = 10000; // Feishu's processes are listed again after this
 constexpr ULONGLONG kUnknownMs = 3000;    // or sooner when a popup-like window is not theirs
 
@@ -102,12 +102,15 @@ std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& 
 }
 
 // The popup's texts in order, the empty ones left out.
-std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text, HWND h)
+std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text, HWND h, UiaWatch& watch)
 {
     std::vector<std::wstring> out;
     winrt::com_ptr<IUIAutomationElement> root;
     winrt::com_ptr<IUIAutomationElementArray> all;
-    if (FAILED(uia->ElementFromHandle(h, root.put())) || !root || FAILED(root->FindAll(TreeScope_Descendants, text, all.put())) || !all)
+    if (FAILED(uia->ElementFromHandle(h, root.put())) || !root)
+        return out;
+    watch.Add(h, root.get());
+    if (FAILED(root->FindAll(TreeScope_Descendants, text, all.put())) || !all)
         return out;
     int n = 0;
     all->get_Length(&n);
@@ -129,7 +132,7 @@ std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text
 
 FeishuSource::FeishuSource(HWND notify, UINT msg) : notify_(notify), msg_(msg)
 {
-    wake_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     thread_ = std::thread([this] { Run(); });
 }
 
@@ -157,52 +160,63 @@ void FeishuSource::Run()
     // Listing every process is the costly part of a pass: done every few seconds, not every pass.
     std::map<DWORD, std::wstring> procs;
     ULONGLONG listed = 0;
-    while (!stop_ && uia && text) {
-        try {
-            ULONGLONG tick = GetTickCount64();
-            bool unknown = false;
-            auto popups = Popups(procs, unknown);
-            if (!listed || tick - listed >= kProcessesMs || (unknown && tick - listed >= kUnknownMs)) {
-                procs = FeishuProcesses();
-                listed = tick;
-                popups = Popups(procs, unknown);
-                if (procs.empty() != !running) {
-                    running = !procs.empty();
-                    Log(L"feishu: %s", running ? L"watching Feishu's message popups" : L"Feishu is not running");
+    {
+        UiaWatch watch(uia.get(), wake_);
+        UiaWindowWake windows(wake_, L"Chrome_WidgetWin_1");
+        while (!stop_ && uia && text) {
+            bool loading = false;
+            try {
+                watch.Prune();
+                ULONGLONG tick = GetTickCount64();
+                bool unknown = false;
+                auto popups = Popups(procs, unknown);
+                if (!listed || tick - listed >= kProcessesMs || (unknown && tick - listed >= kUnknownMs)) {
+                    procs = FeishuProcesses();
+                    windows.SetProcesses(procs);
+                    listed = tick;
+                    popups = Popups(procs, unknown);
+                    if (procs.empty() != !running) {
+                        running = !procs.empty();
+                        Log(L"feishu: %s", running ? L"watching Feishu's message popups" : L"Feishu is not running");
+                    }
                 }
+                std::map<HWND, std::wstring> now;
+                for (const auto& [h, pid] : popups) {
+                    const bool firstRead = !watch.Contains(h);
+                    std::vector<std::wstring> t = Texts(uia.get(), text.get(), h, watch);
+                    if (t.empty()) {
+                        loading = loading || firstRead; // one settling pass; later changes wake through UIA
+                        continue; // still loading: read again next time
+                    }
+                    std::wstring key;
+                    for (const auto& s : t)
+                        key += s + L"\n";
+                    now[h] = key;
+                    auto old = seen.find(h);
+                    if (!baseline || (old != seen.end() && old->second == key))
+                        continue;
+                    auto* n = new Notice();
+                    n->source = L"feishu";
+                    n->app = L"飞书";
+                    n->appId = procs.at(pid);
+                    n->title = t[0];
+                    for (size_t i = 1; i < t.size(); ++i)
+                        n->body += (n->body.empty() ? L"" : L" ") + t[i];
+                    if (!n->appId.empty())
+                        n->action = L"app:" + n->appId;
+                    if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(n)))
+                        delete n;
+                    else
+                        Log(L"feishu: new message popup");
+                }
+                seen = std::move(now);
+                baseline = true; // popups on screen when Atrium started are not new
+            } catch (...) {
+                Log(L"feishu: reading failed");
             }
-            std::map<HWND, std::wstring> now;
-            for (const auto& [h, pid] : popups) {
-                std::vector<std::wstring> t = Texts(uia.get(), text.get(), h);
-                if (t.empty())
-                    continue; // still loading: read again next time
-                std::wstring key;
-                for (const auto& s : t)
-                    key += s + L"\n";
-                now[h] = key;
-                auto old = seen.find(h);
-                if (!baseline || (old != seen.end() && old->second == key))
-                    continue;
-                auto* n = new Notice();
-                n->source = L"feishu";
-                n->app = L"飞书";
-                n->appId = procs.at(pid);
-                n->title = t[0];
-                for (size_t i = 1; i < t.size(); ++i)
-                    n->body += (n->body.empty() ? L"" : L" ") + t[i];
-                if (!n->appId.empty())
-                    n->action = L"app:" + n->appId;
-                if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(n)))
-                    delete n;
-                else
-                    Log(L"feishu: new message popup");
-            }
-            seen = std::move(now);
-            baseline = true; // popups on screen when Atrium started are not new
-        } catch (...) {
-            Log(L"feishu: reading failed");
+            if (!stop_)
+                WaitForUiaWake(wake_, loading ? 200 : kReconcileMs);
         }
-        WaitForSingleObject(wake_, kPollMs);
     }
     text = nullptr;
     uia = nullptr;

@@ -317,6 +317,16 @@ void DesktopWidgets::SetMonitor(HMONITOR monitor)
 
 // ---- layout ------------------------------------------------------------------
 
+void DesktopWidgets::SetOnRight(bool onRight)
+{
+    if (onRight == onRight_)
+        return;
+    onRight_ = onRight;
+    if (enabled_)
+        for (auto& w : widgets_)
+            Place(*w, true);
+}
+
 RECT DesktopWidgets::WorkArea() const
 {
     MONITORINFO mi{sizeof(mi)};
@@ -343,15 +353,18 @@ int DesktopWidgets::Rows() const
 // Each half of the grid hugs its own edge (D44): a widget whose middle is left of the grid's
 // middle stands kMargin from the left edge, any other kMargin from the right, so whatever the
 // grid does not fill is left in the middle and both sides have the same margin.
-bool DesktopWidgets::FromRight(int col, WidgetSize size) const { return 2 * col + WidgetCols(size) >= Cols(); }
+int DesktopWidgets::VisualCol(int col, WidgetSize size) const { return onRight_ ? Cols() - col - WidgetCols(size) : col; }
+
+bool DesktopWidgets::FromRight(int col, WidgetSize size) const { return 2 * VisualCol(col, size) + WidgetCols(size) >= Cols(); }
 
 RECT DesktopWidgets::CellRect(int col, int row, WidgetSize size) const
 {
     RECT wa = WorkArea();
     float s = Scale();
     const float step = kWidgetCell + kWidgetGap;
-    float left = FromRight(col, size) ? float(wa.right - wa.left) / s - kMargin - float(Cols() - col - WidgetCols(size)) * step - WidgetWidth(size)
-                                      : kMargin + float(col) * step;
+    const int visualCol = VisualCol(col, size);
+    float left = FromRight(col, size) ? float(wa.right - wa.left) / s - kMargin - float(Cols() - visualCol - WidgetCols(size)) * step - WidgetWidth(size)
+                                      : kMargin + float(visualCol) * step;
     int x = wa.left + int(std::lround(left * s));
     int y = wa.top + int(std::lround((kMargin + float(row) * (kWidgetCell + kWidgetGap)) * s));
     return RECT{x, y, x + int(std::lround(WidgetWidth(size) * s)), y + int(std::lround(WidgetHeight(size) * s))};
@@ -1083,6 +1096,8 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
             float col = (float(cur.left - wa.left) / s - kMargin) / (kWidgetCell + kWidgetGap);
             if (cur.left + cur.right > wa.left + wa.right)
                 col = float(Cols() - WidgetCols(w.size)) - (float(wa.right - cur.right) / s - kMargin) / (kWidgetCell + kWidgetGap);
+            if (onRight_)
+                col = float(Cols() - WidgetCols(w.size)) - col;
             float row = (float(cur.top - wa.top) / s - kMargin) / (kWidgetCell + kWidgetGap);
             int c = w.col, rr = w.row;
             if (FreeCellNear(col, row, w.size, &w, c, rr)) {

@@ -23,6 +23,9 @@
 | `height` | number | 32–160 DIP | 60 | |
 | `margin` | number | 0–400 DIP | 10 | 与工作区底边的距离 |
 | `showClock` | bool | | true | 时钟与日期 |
+| `showTray` | bool | | true | 系统托盘入口 |
+| `showStatus` | bool | | true | 状态环与控制中心入口 |
+| `showNotifications` | bool | | true | 通知入口；关闭入口不关闭通知来源 |
 | `textColor` | string | `auto` / `light` / `dark` | `auto` | 文字颜色；`auto` 按玻璃下方的实际亮度选择 |
 | `iconSize` | number | 16–64 DIP | 30 | 任务栏图标边长 |
 | `magnify` | number | 1–2 | 1.7 | 悬停放大：指针下图标的缩放倍数，相邻图标按波形放大；1 为关闭 |
@@ -34,6 +37,7 @@
 | `notifyWeChat` | bool | | true | 实验：读取微信窗口的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片 |
 | `notifyFeishu` | bool | | true | 读取飞书自己的消息弹窗里的文字（UI 自动化，只读），同时显示为 Atrium 卡片 |
 | `widgets` | bool | | true | 桌面小组件；布局由 Core 存于 `widgets.json`（D35） |
+| `widgetsOnRight` | bool | | false | 小组件逻辑网格从右侧排布；切换时镜像现有列，不改写 `widgets.json` |
 | `widgetBackdrop` | string | `desktop` / `wallpaper` | `desktop` | 小组件玻璃的背景：实时抓取桌面窗口，或直接读取壁纸图片（省电）；都不含上层窗口（D38） |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37） |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |

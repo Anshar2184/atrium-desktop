@@ -26,6 +26,9 @@ internal sealed class BarSettings
     public double Magnify { get; set; } = 1.7;         // icon scale under the pointer, 1 = off
     public bool AutoWidth { get; set; } = true;
     public bool ShowClock { get; set; } = true;
+    public bool ShowTray { get; set; } = true;
+    public bool ShowStatus { get; set; } = true;
+    public bool ShowNotifications { get; set; } = true;
     public bool ShowRunning { get; set; } = true;
     public string TextColor { get; set; } = "auto"; // auto | light | dark
     public double NotifyTimeout { get; set; } = 6;    // seconds a popup stays
@@ -34,6 +37,7 @@ internal sealed class BarSettings
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
     public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
     public bool Widgets { get; set; } = true;          // desktop widgets (their layout is the core's widgets.json)
+    public bool WidgetsOnRight { get; set; }
     public string WidgetBackdrop { get; set; } = "desktop"; // desktop (captured live) | wallpaper (the files, least work)
     public bool HideTaskbar { get; set; }              // the system taskbar is hidden while Atrium runs
     public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
@@ -89,6 +93,9 @@ internal sealed class BarSettings
             ["iconSize"] = IconSize,
             ["magnify"] = Magnify,
             ["showClock"] = ShowClock,
+            ["showTray"] = ShowTray,
+            ["showStatus"] = ShowStatus,
+            ["showNotifications"] = ShowNotifications,
             ["autoWidth"] = AutoWidth,
             ["showRunning"] = ShowRunning,
             ["textColor"] = TextColor,
@@ -98,6 +105,7 @@ internal sealed class BarSettings
             ["notifyWeChat"] = NotifyWeChat,
             ["notifyFeishu"] = NotifyFeishu,
             ["widgets"] = Widgets,
+            ["widgetsOnRight"] = WidgetsOnRight,
             ["widgetBackdrop"] = WidgetBackdrop,
             ["hideTaskbar"] = HideTaskbar,
             ["hideBanners"] = HideBanners,
@@ -138,6 +146,9 @@ internal sealed class BarSettings
             s.Tint = tint;
         bool Flag(string k, bool d) => o?[k] is JsonValue v && v.TryGetValue(out bool b) ? b : d;
         s.ShowClock = Flag("showClock", f.ShowClock);
+        s.ShowTray = Flag("showTray", f.ShowTray);
+        s.ShowStatus = Flag("showStatus", f.ShowStatus);
+        s.ShowNotifications = Flag("showNotifications", f.ShowNotifications);
         s.AutoWidth = Flag("autoWidth", f.AutoWidth);
         s.ShowRunning = Flag("showRunning", f.ShowRunning);
         s.NotifyTimeout = Math.Clamp(Num("notifyTimeout", f.NotifyTimeout), 3, 30);
@@ -148,6 +159,7 @@ internal sealed class BarSettings
         s.NotifyWeChat = Flag("notifyWeChat", f.NotifyWeChat);
         s.NotifyFeishu = Flag("notifyFeishu", f.NotifyFeishu);
         s.Widgets = Flag("widgets", f.Widgets);
+        s.WidgetsOnRight = Flag("widgetsOnRight", f.WidgetsOnRight);
         s.WidgetBackdrop = o?["widgetBackdrop"] is JsonValue wb && wb.TryGetValue(out string? wbs) && wbs != null
             ? (wbs == "wallpaper" ? "wallpaper" : "desktop")
             : f.WidgetBackdrop;
@@ -176,9 +188,10 @@ internal sealed class BarSettings
     public bool SameAs(BarSettings o) =>
         SameMaterial(o) && Preset == o.Preset && CornerRadius == o.CornerRadius && Width == o.Width && Height == o.Height &&
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
+        ShowTray == o.ShowTray && ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications &&
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Widgets == o.Widgets &&
-        WidgetBackdrop == o.WidgetBackdrop && HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners &&
+        WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners &&
         (Pins == o.Pins || (Pins != null && o.Pins != null && Pins.SequenceEqual(o.Pins)));
 
     public bool SameMaterial(BarSettings o) =>

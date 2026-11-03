@@ -6,11 +6,8 @@ using Windows.Storage;
 
 namespace Atrium.Settings;
 
-// The photograph behind every preview (the hero, the preset swatches, the widget gallery):
-// Assets\specimen.jpg when the build has one (a wallpaper kept out of the repository, see
-// .gitignore), else the desktop's own wallpaper, else a quiet grey. The hero may show the
-// user's wallpaper instead (Select). Each is decoded once, on first use, at most 2048 px wide;
-// first use is on a worker (the render thread), never on the UI thread.
+// Bundled, credited photographs. Only the default and current selection retain decoded pixels;
+// switching does not accumulate a full-resolution cache. Decoding stays on the render worker.
 internal sealed class Photo
 {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -18,22 +15,24 @@ internal sealed class Photo
 
     // How far down the photo the crop sits when it is cropped top and bottom (0 top, 1 bottom).
     public const float FocusY = 0.62f;
-    private const int MaxWidth = 2048;
+    private const int MaxDimension = 1600;
 
-    public static string? Path { get; } = Specimen() ?? Wallpaper();
+    public static string? Path { get; } = SamplePath("flow");
     private static readonly Lazy<Photo> s_sample = new(() => Load(Path), LazyThreadSafetyMode.ExecutionAndPublication);
-    private static readonly Lazy<Photo> s_wallpaper = new(() => Load(Wallpaper()), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<Photo> s_selected = s_sample;
 
-    // "specimen" or "wallpaper": what the hero shows; Generation changes with it (the render caches' key).
-    public static string Selected { get; private set; } = "specimen";
+    public static string Selected { get; private set; } = "flow";
     public static int Generation => s_generation;
     private static volatile int s_generation;
-    public static Photo Current => Selected == "wallpaper" ? s_wallpaper.Value : s_sample.Value;
+    public static Photo Default => s_sample.Value;
+    public static Lazy<Photo> Capture() => s_selected;
 
     public static bool Select(string which)
     {
         if (which == Selected) return false;
+        string? path = which == "wallpaper" ? Wallpaper() : SamplePath(which);
         Selected = which;
+        s_selected = which == "flow" ? s_sample : new Lazy<Photo>(() => Load(path), LazyThreadSafetyMode.ExecutionAndPublication);
         s_generation++;
         return true;
     }
@@ -43,9 +42,9 @@ internal sealed class Photo
 
     private Photo(int w, int h, byte[]? bgra) { _w = w; _h = h; _bgra = bgra; }
 
-    private static string? Specimen()
+    private static string? SamplePath(string name)
     {
-        var asset = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "specimen.jpg");
+        var asset = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Backgrounds", name + ".jpg");
         return File.Exists(asset) ? asset : null;
     }
 
@@ -65,7 +64,7 @@ internal sealed class Photo
             var file = StorageFile.GetFileFromPathAsync(path).AsTask().GetAwaiter().GetResult();
             using var stream = file.OpenReadAsync().AsTask().GetAwaiter().GetResult();
             var decoder = BitmapDecoder.CreateAsync(stream).AsTask().GetAwaiter().GetResult();
-            double k = Math.Min(1.0, (double)MaxWidth / decoder.OrientedPixelWidth);
+            double k = Math.Min(1.0, (double)MaxDimension / Math.Max(decoder.OrientedPixelWidth, decoder.OrientedPixelHeight));
             // The transform scales the stored picture and turns it upright afterwards (EXIF).
             var t = new BitmapTransform
             {

@@ -27,6 +27,7 @@ public:
     DesktopWidgets& operator=(const DesktopWidgets&) = delete;
 
     void SetEnabled(bool on);
+    void SetOnRight(bool onRight);
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor);
     // Adds a widget in the first free place; false when there is no room.
@@ -61,6 +62,7 @@ private:
     RECT WorkArea() const;
     int Cols() const;
     int Rows() const;
+    int VisualCol(int col, WidgetSize size) const;
     bool FromRight(int col, WidgetSize size) const;        // placed from the right edge
     RECT CellRect(int col, int row, WidgetSize size) const; // screen px
     bool Fits(int col, int row, WidgetSize size, const Widget* except) const;
@@ -94,6 +96,7 @@ private:
     HWND host_ = nullptr; // timers, the menu's owner
     HWINEVENTHOOK hook_ = nullptr, showHook_ = nullptr, uncloakHook_ = nullptr;
     bool enabled_ = false;
+    bool onRight_ = false;
     HMONITOR monitor_ = nullptr;
     std::vector<std::unique_ptr<Widget>> widgets_;
     // Saved widgets this screen has no room for (JSON): kept in the layout

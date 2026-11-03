@@ -88,6 +88,9 @@ std::wstring Settings::ToJson() const
     num(L"iconSize", iconSize);
     num(L"magnify", magnify);
     o.SetNamedValue(L"showClock", json::JsonValue::CreateBooleanValue(showClock));
+    o.SetNamedValue(L"showTray", json::JsonValue::CreateBooleanValue(showTray));
+    o.SetNamedValue(L"showStatus", json::JsonValue::CreateBooleanValue(showStatus));
+    o.SetNamedValue(L"showNotifications", json::JsonValue::CreateBooleanValue(showNotifications));
     o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
     o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
     o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
@@ -97,6 +100,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
     o.SetNamedValue(L"notifyFeishu", json::JsonValue::CreateBooleanValue(notifyFeishu));
     o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
+    o.SetNamedValue(L"widgetsOnRight", json::JsonValue::CreateBooleanValue(widgetsOnRight));
     o.SetNamedValue(L"widgetBackdrop", json::JsonValue::CreateStringValue(widgetBackdrop));
     o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
     o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
@@ -150,6 +154,9 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
             v = o.GetNamedBoolean(k);
     };
     flag(L"showClock", s.showClock);
+    flag(L"showTray", s.showTray);
+    flag(L"showStatus", s.showStatus);
+    flag(L"showNotifications", s.showNotifications);
     flag(L"autoWidth", s.autoWidth);
     flag(L"showRunning", s.showRunning);
     num(L"notifyTimeout", s.notifyTimeout);
@@ -162,6 +169,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"notifyWeChat", s.notifyWeChat);
     flag(L"notifyFeishu", s.notifyFeishu);
     flag(L"widgets", s.widgets);
+    flag(L"widgetsOnRight", s.widgetsOnRight);
     flag(L"hideTaskbar", s.hideTaskbar);
     flag(L"hideBanners", s.hideBanners);
     if (o.HasKey(L"widgetBackdrop") && o.GetNamedValue(L"widgetBackdrop").ValueType() == json::JsonValueType::String)

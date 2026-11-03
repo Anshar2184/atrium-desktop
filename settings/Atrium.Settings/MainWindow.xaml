@@ -66,7 +66,7 @@
                       AutomationProperties.Name="导航" VerticalAlignment="Top" ItemContainerStyle="{StaticResource NavItemStyle}">
                 <ListViewItem AutomationProperties.Name="材质"><local:NavLabel Glyph="&#xE790;" Text="材质" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="形状"><local:NavLabel Glyph="&#xE7C9;" Text="形状" /></ListViewItem>
-                <ListViewItem AutomationProperties.Name="程序坞"><local:NavLabel Glyph="&#xE718;" Text="程序坞" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="任务栏"><local:NavLabel Glyph="&#xE718;" Text="任务栏" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="通知"><local:NavLabel Glyph="&#xEA8F;" Text="通知" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="小组件"><local:NavLabel Glyph="&#xE8A9;" Text="小组件" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="系统"><local:NavLabel Glyph="&#xE770;" Text="系统" /></ListViewItem>
@@ -102,7 +102,7 @@
                 <StackPanel x:Name="CenterStack" Style="{StaticResource WorkspaceStackStyle}" SizeChanged="OnCenterSizeChanged">
                     <!-- The live preview: the glass bar over the photo (material, shape, dock) -->
                     <StackPanel x:Name="HeroBlock" Spacing="10">
-                        <Border x:Name="HeroFrame" Height="360" CornerRadius="20" Background="#FFCBD3DD" SizeChanged="OnHeroSizeChanged">
+                        <Border x:Name="HeroFrame" Height="360" CornerRadius="28" Background="#FFCBD3DD" SizeChanged="OnHeroSizeChanged">
                             <Grid>
                                 <Canvas x:Name="HeroCanvas" />
                                 <Border x:Name="Loupe" Width="232" Height="148" HorizontalAlignment="Right" VerticalAlignment="Top"
@@ -114,7 +114,7 @@
                                         </Border>
                                     </Grid>
                                 </Border>
-                                <Border CornerRadius="20" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
+                                <Border CornerRadius="28" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
                             </Grid>
                         </Border>
                         <Grid ColumnSpacing="12">
@@ -125,7 +125,10 @@
                             </Grid.ColumnDefinitions>
                             <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
                                 <StackPanel Orientation="Horizontal">
-                                    <RadioButton x:Name="BgSpecimen" GroupName="herobg" Content="示例照片" Tag="specimen" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
+                                    <RadioButton x:Name="BgSpecimen" GroupName="herobg" Content="流线" Tag="flow" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
+                                    <RadioButton x:Name="BgPaper" GroupName="herobg" Content="纸张" Tag="paper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
+                                    <RadioButton x:Name="BgGeometry" GroupName="herobg" Content="几何" Tag="geometry" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
+                                    <RadioButton x:Name="BgLayers" GroupName="herobg" Content="层叠" Tag="layers" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
                                     <RadioButton x:Name="BgWallpaper" GroupName="herobg" Content="我的壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
                                 </StackPanel>
                             </Border>
@@ -148,21 +151,21 @@
                                 <RadioButton x:Name="PresetLiquid" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="liquid"
                                              AutomationProperties.Name="液态玻璃" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
-                                        <Border x:Name="SwatchLiquid" Height="76" CornerRadius="9" Background="#FFCBD3DD" />
+                                        <Border x:Name="SwatchLiquid" Height="76" CornerRadius="14" Background="#FFCBD3DD" />
                                         <TextBlock Text="液态玻璃" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
                                 <RadioButton x:Name="PresetFrosted" Grid.Column="1" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="frosted"
                                              AutomationProperties.Name="磨砂玻璃" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
-                                        <Border x:Name="SwatchFrosted" Height="76" CornerRadius="9" Background="#FFCBD3DD" />
+                                        <Border x:Name="SwatchFrosted" Height="76" CornerRadius="14" Background="#FFCBD3DD" />
                                         <TextBlock Text="磨砂玻璃" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
                                 <RadioButton x:Name="PresetCustom" Grid.Column="2" GroupName="preset" Style="{StaticResource PresetTileStyle}" Tag="custom"
                                              AutomationProperties.Name="自定义" Checked="OnPresetChecked">
                                     <StackPanel Spacing="10">
-                                        <Border x:Name="SwatchCustom" Height="76" CornerRadius="9" Background="#FFCBD3DD" />
+                                        <Border x:Name="SwatchCustom" Height="76" CornerRadius="14" Background="#FFCBD3DD" />
                                         <TextBlock Text="自定义" Style="{StaticResource RowTitleStyle}" Margin="4,0,4,2" />
                                     </StackPanel>
                                 </RadioButton>
@@ -250,10 +253,7 @@
                                                                   Foreground="{ThemeResource InkSecondaryBrush}" />
                                                         <Image Source="{x:Bind Icon, Mode=OneWay}" Width="36" Height="36" />
                                                     </Grid>
-                                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
-                                                        <TextBlock Text="{x:Bind Title}" Style="{StaticResource RowTitleStyle}" />
-                                                        <TextBlock Text="{x:Bind Detail}" Style="{StaticResource FootnoteStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{x:Bind Title}" Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                                     <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                                                         <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveUp}" IsEnabled="{x:Bind CanUp, Mode=OneWay}"
                                                                 AutomationProperties.Name="{x:Bind UpName}" ToolTipService.ToolTip="上移">
@@ -279,15 +279,14 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
-                        <TextBlock Text="拖动行可以排序，顺序就是它们在玻璃栏上的先后。" Style="{StaticResource FootnoteStyle}" Margin="4,8,0,0" />
                     </StackPanel>
 
                     <!-- ==== Notifications: the cards as they pop up ==== -->
                     <StackPanel x:Name="MainNotify" Visibility="Collapsed" Spacing="10">
-                        <Border x:Name="NotifyStage" Height="340" CornerRadius="20" Background="#FFCBD3DD">
+                        <Border x:Name="NotifyStage" Height="340" CornerRadius="28" Background="#FFCBD3DD">
                             <Grid>
                                 <StackPanel x:Name="NotifyCards" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,28" Spacing="10" Width="360" />
-                                <Border CornerRadius="20" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
+                                <Border CornerRadius="28" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
                             </Grid>
                         </Border>
                         <Grid>
@@ -299,10 +298,10 @@
                     <!-- ==== Widgets: the desktop's layout, and the gallery ==== -->
                     <StackPanel x:Name="MainWidgets" Visibility="Collapsed" Spacing="26">
                         <StackPanel Spacing="10">
-                            <Border x:Name="WidgetStage" Height="320" CornerRadius="20" Background="#FFCBD3DD" SizeChanged="OnWidgetStageSizeChanged">
+                            <Border x:Name="WidgetStage" Height="320" CornerRadius="28" Background="#FFCBD3DD" SizeChanged="OnWidgetStageSizeChanged">
                                 <Grid>
                                     <Canvas x:Name="WidgetMap" />
-                                    <Border CornerRadius="20" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
+                                    <Border CornerRadius="28" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
                                 </Grid>
                             </Border>
                             <TextBlock x:Name="WidgetMapCaption" Style="{StaticResource FootnoteStyle}" Margin="4,0,0,0" />
@@ -339,7 +338,7 @@
                                     <TextBlock Text="Atrium Desktop" Style="{StaticResource LargeTitleStyle}" />
                                     <TextBlock x:Name="VersionText" Style="{StaticResource RowNoteStyle}" Typography.NumeralAlignment="Tabular" />
                                     <TextBlock Style="{StaticResource RowNoteStyle}" Margin="0,6,0,0"
-                                               Text="玻璃程序坞与桌面小组件" />
+                                               Text="玻璃任务栏与桌面小组件" />
                                     <HyperlinkButton NavigateUri="https://github.com/wynter-yaxley/atrium-desktop" Padding="0" Margin="0,6,0,0"
                                                      Content="github.com/wynter-yaxley/atrium-desktop" />
                                 </StackPanel>
@@ -355,6 +354,7 @@
 
                         <TextBlock Style="{StaticResource FootnoteStyle}" Margin="4,0,0,0"
                                    Text="界面字体：MiSans，版权归小米科技有限责任公司，依《MiSans 字体知识产权许可协议》使用。" />
+                        <HyperlinkButton NavigateUri="https://unsplash.com/@martz90" Content="示例照片：Martin Martz / Unsplash" Padding="4,0" />
                     </StackPanel>
 
                     <!-- A narrow window: the inspector's groups come here, under the page (OnContentSizeChanged) -->
@@ -411,6 +411,9 @@
                         <StackPanel x:Name="SideDock" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="栏上显示" Style="{StaticResource SectionStyle}" />
+                                <local:ToggleTile x:Name="TraySwitch" Title="系统托盘" SwitchName="显示系统托盘" Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="StatusSwitch" Title="状态栏" SwitchName="显示状态栏" Toggled="OnBarContentToggled" Flat="True" />
+                                <local:ToggleTile x:Name="NotificationsSwitch" Title="通知" SwitchName="显示通知按钮" Toggled="OnBarContentToggled" Flat="True" />
                                 <local:ToggleTile x:Name="ClockSwitch" Title="时钟和日期" SwitchName="显示时钟和日期" Toggled="OnClockToggled" Flat="True"
                                                   Note="在栏的右端，使用系统的时间与日期格式。" />
                                 <local:ToggleTile x:Name="RunningSwitch" Title="正在运行的应用" SwitchName="显示正在运行的应用" Toggled="OnRunningToggled" Flat="True"
@@ -463,7 +466,16 @@
                             <StackPanel>
                                 <TextBlock Text="桌面" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="WidgetsSwitch" Title="桌面小组件" SwitchName="桌面小组件" Toggled="OnWidgetsToggled" Flat="True"
-                                                  Note="放在桌面上、所有窗口之下。拖动可移动，拖下角可改变大小，右键可移除；靠哪一侧就贴着哪一侧排列。" />
+                                                  Note="拖动可移动，拖下角可改变大小，右键可移除。" />
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="靠边排列" Style="{StaticResource RowTitleStyle}" />
+                                    <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton x:Name="WidgetsLeft" GroupName="widgetside" Content="左侧" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
+                                            <RadioButton x:Name="WidgetsRight" GroupName="widgetside" Content="右侧" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="玻璃映出" Style="{StaticResource RowTitleStyle}" />
                                     <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">

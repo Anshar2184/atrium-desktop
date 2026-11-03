@@ -1,4 +1,5 @@
 #include "bar_painter.h"
+#include "continuous_corners.h"
 
 #include "round_stroke.h"
 #include "ui_font.h"
@@ -389,7 +390,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
             c.a *= motion::EaseOut(m.hover);
             brush->SetColor(c);
             float r = scene.plateRadius;
-            d2d->FillRoundedRectangle(D2D1::RoundedRect(scene.clock, r, r), brush.get());
+            FillContinuousRect(d2d, scene.clock, r, brush.get());
         }
         float lineT = scene.timePx * 1.22f, lineD = scene.datePx * 1.25f;
         float top = (scene.clock.top + scene.clock.bottom) / 2 - (lineT + lineD) / 2;
@@ -435,7 +436,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         brush->SetColor(c);
         float r = scene.plateRadius;
         d2d->SetTransform(D2D1::Matrix3x2F::Scale(grow, grow, D2D1::Point2F(bx, plate.bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, 0));
-        d2d->FillRoundedRectangle(D2D1::RoundedRect(plate, r, r), brush);
+        FillContinuousRect(d2d, plate, r, brush);
     }
 
     // Icon: grows from its bottom edge with the wave, hops when launching,
@@ -475,7 +476,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
         D2D1_COLOR_F c = wash;
         c.a *= 1.4f * m.appear;
         brush->SetColor(c);
-        d2d->FillRoundedRectangle(D2D1::RoundedRect(icon, size * 0.22f, size * 0.22f), brush);
+        FillContinuousRect(d2d, icon, size * 0.22f, brush);
     }
     // Count badge (unread notifications): a small accent disc on the icon's corner.
     if (it.badge > 0) {
@@ -658,7 +659,7 @@ void BarPainter::DrawLogo(ID2D1DeviceContext2* d2d, D2D1_RECT_F r, float opacity
     for (int i = 0; i < 4; ++i) {
         float x = left + float(i % 2) * (pane + gap), y = top + float(i / 2) * (pane + gap);
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(x, y, x + pane, y + pane), corner, corner);
-        d2d->FillRoundedRectangle(rr, grad);
+        FillContinuousRect(d2d, rr.rect, rr.radiusX, grad);
         // A faint lit edge on top of each pane.
         d2d->FillRectangle(D2D1::RectF(x + corner, y, x + pane - corner, y + std::max(0.6f, pane * 0.06f)), sheen);
     }

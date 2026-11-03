@@ -2,6 +2,7 @@
 
 #include "clock.h"
 #include "render/capture.h"
+#include "render/continuous_corners.h"
 #include "log.h"
 #include "render/glass_renderer.h"
 #include "render/round_stroke.h"
@@ -207,7 +208,7 @@ void Canvas::Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c)
     D2D1_COLOR_F unused;
     c = InkAt(r, c, unused);
     if (radius > 0)
-        d2d_->FillRoundedRectangle(D2D1::RoundedRect(Px(r), radius * scale, radius * scale), Brush(c));
+        FillContinuousRect(d2d_, Px(r), radius * scale, Brush(c));
     else
         d2d_->FillRectangle(Px(r), Brush(c));
 }
@@ -219,7 +220,7 @@ void Canvas::Stroke(D2D1_RECT_F r, float radius, D2D1_COLOR_F c, float width)
     float h = width * scale / 2;
     D2D1_RECT_F p = Px(r);
     p = D2D1::RectF(p.left + h, p.top + h, p.right - h, p.bottom - h);
-    d2d_->DrawRoundedRectangle(D2D1::RoundedRect(p, std::max(0.f, radius * scale - h), std::max(0.f, radius * scale - h)), Brush(c), width * scale);
+    StrokeContinuousRect(d2d_, p, std::max(0.f, radius * scale - h), Brush(c), width * scale);
 }
 
 void Canvas::Line(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width)
@@ -419,12 +420,11 @@ D2D1_RECT_F Canvas::Caret(const std::wstring& s, D2D1_RECT_F r, float size, DWRI
 
 void Canvas::ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius)
 {
-    winrt::com_ptr<ID2D1Factory> f;
-    d2d_->GetFactory(f.put());
-    winrt::com_ptr<ID2D1RoundedRectangleGeometry> g;
-    if (FAILED(f->CreateRoundedRectangleGeometry(D2D1::RoundedRect(Px(r), radius * scale, radius * scale), g.put())))
+    const D2D1_RECT_F p = Px(r);
+    auto* g = ContinuousGeometry(d2d_, p.right - p.left, p.bottom - p.top, radius * scale);
+    if (!g)
         return;
-    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
+    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Translation(p.left, p.top)), nullptr);
     Image(key, image, r);
     d2d_->PopLayer();
 }
@@ -447,10 +447,9 @@ void Canvas::ImageCircle(const std::wstring& key, const IconImage& image, D2D1_R
 void Canvas::Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1_COLOR_F c)
 {
     t = std::clamp(t, 0.f, 1.f);
-    winrt::com_ptr<ID2D1Factory> f;
-    d2d_->GetFactory(f.put());
-    winrt::com_ptr<ID2D1RoundedRectangleGeometry> g;
-    if (FAILED(f->CreateRoundedRectangleGeometry(D2D1::RoundedRect(Px(r), radius * scale, radius * scale), g.put())))
+    const D2D1_RECT_F p = Px(r);
+    auto* g = ContinuousGeometry(d2d_, p.right - p.left, p.bottom - p.top, radius * scale);
+    if (!g)
         return;
     float reach = std::hypot(r.right - r.left, r.bottom - r.top) * scale;
     float rr = std::max(1.f, reach * (1 - (1 - t) * (1 - t) * (1 - t)));
@@ -462,7 +461,7 @@ void Canvas::Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1
     if (FAILED(d2d_->CreateGradientStopCollection(stops, 3, coll.put())) ||
         FAILED(d2d_->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(centre, D2D1::Point2F(), rr, rr), coll.get(), brush.put())))
         return;
-    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
+    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Translation(p.left, p.top)), nullptr);
     d2d_->FillEllipse(D2D1::Ellipse(centre, rr, rr), brush.get());
     d2d_->PopLayer();
 }

@@ -23,8 +23,6 @@ public sealed class PinVm : INotifyPropertyChanged
         _owner = owner;
         Pin = pin;
         Title = MainWindow.PinTitle(pin);
-        // Files show their file name; Store and system apps have no path.
-        Detail = pin.Path.Length > 0 ? System.IO.Path.GetFileName(pin.Path) : "已安装的应用";
         UpName = "上移 " + Title;
         DownName = "下移 " + Title;
         RemoveName = "移除 " + Title;
@@ -32,7 +30,6 @@ public sealed class PinVm : INotifyPropertyChanged
 
     internal PinnedApp Pin { get; }
     public string Title { get; }
-    public string Detail { get; }
     public string UpName { get; }
     public string DownName { get; }
     public string RemoveName { get; }
@@ -81,6 +78,11 @@ public sealed partial class MainWindow
 
     private void RebuildPins()
     {
+        if (_pinVms.Select(vm => vm.Pin).SequenceEqual(_current.Pins ?? Enumerable.Empty<PinnedApp>()))
+        {
+            RefreshPins();
+            return;
+        }
         _pinVms.Clear();
         foreach (var pin in _current.Pins ?? new List<PinnedApp>())
         {
@@ -93,6 +95,9 @@ public sealed partial class MainWindow
 
     private void RefreshPins()
     {
+        var names = _pinVms.Select(vm => ShellIcons.ParsingName(vm.Pin)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _iconCache.Keys.Where(key => !names.Contains(key)).ToArray()) _iconCache.Remove(key);
+        _previewPins = _pinVms.Take(MaxPreviewApps - 1).ToArray();
         for (int i = 0; i < _pinVms.Count; i++) _pinVms[i].SetPosition(i, _pinVms.Count);
         bool empty = _pinVms.Count == 0;
         PinsEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
@@ -113,6 +118,7 @@ public sealed partial class MainWindow
         if (!_iconCache.TryGetValue(name, out var source))
         {
             var img = await ShellIcons.LoadAsync(name, 96); // 32 DIP at up to 300 % scale
+            if (!_pinVms.Contains(vm)) return;
             if (img != null)
             {
                 var bmp = new WriteableBitmap(img.Width, img.Height);

@@ -14,7 +14,7 @@ using Windows.UI;
 namespace Atrium.Settings;
 
 // The hero specimen: the glass bar rendered on the CPU (GlassPreview.cs) over the specimen photo
-// (Photo.cs), with mock icons and a clock laid out by the same rules as the real bar, a loupe on
+// (Photo.cs), with real shell icons and taskbar entries laid out by the same rules as the real bar, a loupe on
 // the right end of the bar, and dimension marks for the parameter that is being edited. The photo
 // is uploaded once per size; a frame repaints only the glass, as a transparent layer over it.
 public sealed partial class MainWindow
@@ -29,16 +29,14 @@ public sealed partial class MainWindow
         double S, double BarX, double BarY, double BarW, double BarH, double Radius, double MaxW,
         int N, double Icon, double P, double PlateR, double[] PlateX, double PlateY,
         bool Clock, double ClockX, double ClockW, double TimePx, double DatePx, double SepX,
+        double StartX, double TrayX, double StatusX, double BellX,
         double LoupeX0, double LoupeY0);
 
-    private sealed record RenderJob(BarSettings S, HeroLayout L, double W, double H, double Rs, bool Loupe);
+    private sealed record RenderJob(BarSettings S, HeroLayout L, double W, double H, double Rs, bool Loupe, Lazy<Photo> Photo, int PhotoGeneration);
 
-    private static readonly (string Glyph, uint C1, uint C2, bool Running)[] MockApps =
-    {
-        ("", 0xF8BC4A, 0xE8862B, false), ("", 0x45C4FB, 0x2F6BEB, true), ("", 0xFB7F96, 0xE0315A, false),
-        ("", 0xB69BFF, 0x7A45EA, true), ("", 0x56627A, 0x1B2233, false), ("", 0x3FDBA5, 0x0A9B6C, true),
-        ("", 0xA9B6C9, 0x56657C, true),
-    };
+    private const int MaxPreviewApps = 8;
+    private PinVm _previewRunning = null!;
+    private PinVm[] _previewPins = Array.Empty<PinVm>();
 
     private double _heroW, _heroH;
     private readonly ImageBrush _heroBrush = new() { Stretch = Stretch.Fill };
@@ -58,12 +56,15 @@ public sealed partial class MainWindow
     private Backdrop? _mainBg, _loupeBg;
     private string _mainKey = "", _loupeKey = "";
 
-    private readonly List<Border> _mockIcons = new();
-    private readonly List<FontIcon> _mockGlyphs = new();
+    private readonly List<Image> _previewIcons = new();
     private readonly List<Ellipse> _mockDots = new();
     private Border _plate = null!;
     private Rectangle _sep = null!;
-    private TextBlock _time = null!, _date = null!, _lpTime = null!, _lpDate = null!;
+    private TextBlock _time = null!, _date = null!;
+    private Grid _start = null!;
+    private FontIcon _tray = null!, _bell = null!, _wifi = null!;
+    private Ellipse _statusRing = null!;
+    private Border _bellBadge = null!;
     private readonly List<UIElement> _annotations = new();
 
     private void InitHero()
@@ -72,23 +73,21 @@ public sealed partial class MainWindow
         Loupe.Background = _loupeBrush;
         _renderWorker = new LatestWorker<RenderJob>(RenderFrame);
         _swatchWorker = new LatestWorker<BarSettings>(job => RenderSwatch(job, SwatchCustom));
+        _previewRunning = new PinVm(this, new PinnedApp("Atrium", Environment.ProcessPath!, "", ""))
+        {
+            Icon = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "atrium-256.png"))) { DecodePixelWidth = 96 },
+        };
 
         HeroCanvas.Children.Add(_glass);
         _plate = new Border { Background = new SolidColorBrush(Color.FromArgb(46, 255, 255, 255)), BorderBrush = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255)), BorderThickness = new Thickness(1) };
         HeroCanvas.Children.Add(_plate);
-        for (int i = 0; i < MockApps.Length; i++)
+        for (int i = 0; i < MaxPreviewApps; i++)
         {
-            var app = MockApps[i];
-            var fill = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
-            fill.GradientStops.Add(new GradientStop { Color = RgbColor(app.C1), Offset = 0 });
-            fill.GradientStops.Add(new GradientStop { Color = RgbColor(app.C2), Offset = 1 });
-            var glyph = new FontIcon { Glyph = app.Glyph, Foreground = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)) };
-            var icon = new Border { Background = fill, Child = glyph, BorderBrush = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)), BorderThickness = new Thickness(0.75) };
-            _mockIcons.Add(icon);
-            _mockGlyphs.Add(glyph);
+            var icon = new Image { Stretch = Stretch.Uniform, IsHitTestVisible = false };
+            _previewIcons.Add(icon);
             HeroCanvas.Children.Add(icon);
         }
-        for (int i = 0; i < MockApps.Length; i++)
+        for (int i = 0; i < MaxPreviewApps; i++)
         {
             var dot = new Ellipse { Fill = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)) };
             _mockDots.Add(dot);
@@ -97,13 +96,41 @@ public sealed partial class MainWindow
         _sep = new Rectangle { Width = 1, Fill = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)) };
         HeroCanvas.Children.Add(_sep);
         _time = ClockText("10:24", true);
-        _date = ClockText("2026/10/31", false);
-        _lpTime = ClockText("10:24", true);
-        _lpDate = ClockText("2026/10/31", false);
+        _date = ClockText("2026/11/3", false);
         HeroCanvas.Children.Add(_time);
         HeroCanvas.Children.Add(_date);
-        LoupeCanvas.Children.Add(_lpTime);
-        LoupeCanvas.Children.Add(_lpDate);
+        FontIcon Entry(string glyph)
+        {
+            var view = new FontIcon { Glyph = glyph, IsHitTestVisible = false };
+            HeroCanvas.Children.Add(view);
+            return view;
+        }
+        _start = new Grid { ColumnSpacing = 2, RowSpacing = 2, IsHitTestVisible = false };
+        _start.ColumnDefinitions.Add(new ColumnDefinition());
+        _start.ColumnDefinitions.Add(new ColumnDefinition());
+        _start.RowDefinitions.Add(new RowDefinition());
+        _start.RowDefinitions.Add(new RowDefinition());
+        for (int i = 0; i < 4; i++)
+        {
+            var pane = new Border { Background = new SolidColorBrush(Color.FromArgb(255, 0x30, 0xA8, 0xED)), CornerRadius = new CornerRadius(1) };
+            Grid.SetRow(pane, i / 2);
+            Grid.SetColumn(pane, i % 2);
+            _start.Children.Add(pane);
+        }
+        HeroCanvas.Children.Add(_start);
+        _tray = Entry("\uE70E");
+        _bell = Entry("\uEA8F");
+        _wifi = Entry("\uE701");
+        _statusRing = new Ellipse { StrokeThickness = 2, IsHitTestVisible = false };
+        HeroCanvas.Children.Add(_statusRing);
+        _bellBadge = new Border
+        {
+            Background = Tokens.Brush("AccentBrush"), CornerRadius = new CornerRadius(8),
+            Child = new TextBlock { Text = "3", FontSize = 8, Foreground = new SolidColorBrush(Colors.White),
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+            IsHitTestVisible = false,
+        };
+        HeroCanvas.Children.Add(_bellBadge);
         LoupeCanvas.Clip = new RectangleGeometry { Rect = new Rect(0, 0, LoupeW, LoupeH) };
 
         // The two presets are fixed swatches; the custom one follows the current material.
@@ -149,20 +176,33 @@ public sealed partial class MainWindow
     {
         if (_heroW < 80 || _heroH < 80) return null;
         double S = Math.Min(1.0, (_heroW - 48) / (HeroReferenceW + 2 * GlassSpec.InsetDip));
-        double H = s.Height, I = Math.Min(s.IconSize, H - 10);
-        double P = Math.Max(8, Math.Min(H - 12, Math.Round(s.IconSize * 1.55)));
-        double v = (H - P) / 2, pad = v + 4, gap = Math.Max(4, Math.Round(s.IconSize * 0.18));
+        double H = s.Height, I = Math.Clamp(s.IconSize, 12, H - 16);
+        double P = Math.Max(I + 4, Math.Min(H - 12, Math.Round(I * 1.55)));
+        double v = (H - P) / 2, pad = v + 4, gap = Math.Max(4, Math.Round(I * 0.18));
         double timePx = H * 0.25, datePx = H * 0.19, sepGap = 10;
         double clockW = s.ShowClock ? Math.Max(timePx * 2.75, datePx * 5.7) + 20 : 0;
-        double Content(int n) => Math.Max(2 * H, 2 * pad + n * P + Math.Max(0, n - 1) * gap + (clockW > 0 ? (n > 0 ? 2 * sepGap : 0) + clockW : 0));
+        int rightCount = (s.ShowTray ? 1 : 0) + (s.ShowStatus ? 1 : 0) + (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0);
+        double rightW = (rightCount - (s.ShowClock ? 1 : 0)) * P + clockW + Math.Max(0, rightCount - 1) * gap;
+        double Content(int n) => Math.Max(2 * H, 2 * pad + P + 2 * gap + n * P + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
         double maxW = Math.Max(2 * H, Math.Min(s.Width, (_heroW - 16) / S));
-        int n = s.ShowRunning ? 7 : 6;
+        int n = _previewPins.Length + (s.ShowRunning ? 1 : 0);
         while (n > 0 && Content(n) > maxW) n--;
         double barW = s.AutoWidth ? Math.Min(Content(n), maxW) : maxW;
 
-        double clockRight = barW - pad, clockLeft = clockRight - clockW;
-        double appsSpace = clockW > 0 ? clockLeft - (n > 0 ? 2 * sepGap : 0) - pad : barW - 2 * pad;
-        double appsLeft = pad + Math.Max(0, (appsSpace - (n * P + Math.Max(0, n - 1) * gap)) / 2);
+        double cursor = barW - pad;
+        double Slot(double width, bool on)
+        {
+            if (!on) return -1;
+            cursor -= width;
+            double x = cursor;
+            cursor -= gap;
+            return x;
+        }
+        double bellLeft = Slot(P, s.ShowNotifications), clockLeft = Slot(clockW, s.ShowClock);
+        double statusLeft = Slot(P, s.ShowStatus), trayLeft = Slot(P, s.ShowTray);
+        double rightLeft = rightCount > 0 ? cursor + gap : barW - pad;
+        double appsMin = pad + P + 2 * gap;
+        double appsLeft = appsMin + Math.Max(0, (rightLeft - (rightCount > 0 ? 2 * sepGap : 0) - appsMin - (n * P + Math.Max(0, n - 1) * gap)) / 2);
         double reff = Math.Min(s.CornerRadius, Math.Min(H, barW) / 2);
 
         double bx = (_heroW - barW * S) / 2;
@@ -173,7 +213,8 @@ public sealed partial class MainWindow
         double lw = LoupeW / LoupeZoom, lh = LoupeH / LoupeZoom;
         return new HeroLayout(S, bx, by, barW * S, H * S, reff * S, maxW * S,
             n, I * S, P * S, Math.Max(4, Math.Min(P / 2, reff - v)) * S, plateX, by + v * S,
-            clockW > 0, bx + clockLeft * S, clockW * S, timePx * S, datePx * S, bx + (clockLeft - sepGap) * S,
+            clockW > 0, bx + clockLeft * S, clockW * S, timePx * S, datePx * S, rightCount > 0 ? bx + (rightLeft - sepGap) * S : -1,
+            bx + pad * S, trayLeft < 0 ? -1 : bx + trayLeft * S, statusLeft < 0 ? -1 : bx + statusLeft * S, bellLeft < 0 ? -1 : bx + bellLeft * S,
             bx + barW * S - 0.72 * lw, by + H * S / 2 - lh / 2);
     }
 
@@ -183,9 +224,9 @@ public sealed partial class MainWindow
         if (HeroBlock.Visibility != Visibility.Visible || _renderWorker == null) return;
         var L = ComputeLayout(_current);
         if (L == null) return;
-        PositionMock(L);
+        PositionTaskbar(L);
         DrawAnnotations(L);
-        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale, Loupe.Visibility == Visibility.Visible));
+        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale, Loupe.Visibility == Visibility.Visible, Photo.Capture(), Photo.Generation));
     }
 
     private Brush InkBrush()
@@ -194,25 +235,31 @@ public sealed partial class MainWindow
         return new SolidColorBrush(dark ? Color.FromArgb(235, 22, 24, 29) : Color.FromArgb(245, 255, 255, 255));
     }
 
-    private void PositionMock(HeroLayout L)
+    private void PositionTaskbar(HeroLayout L)
     {
-        for (int i = 0; i < MockApps.Length; i++)
+        var ink = InkBrush();
+        for (int i = 0; i < MaxPreviewApps; i++)
         {
             bool shown = i < L.N;
-            var icon = _mockIcons[i];
+            var icon = _previewIcons[i];
             icon.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
-            _mockDots[i].Visibility = shown && MockApps[i].Running ? Visibility.Visible : Visibility.Collapsed;
+            _mockDots[i].Visibility = shown && i == _previewPins.Length ? Visibility.Visible : Visibility.Collapsed;
+            _mockDots[i].Fill = ink;
             if (!shown) continue;
+            var vm = i < _previewPins.Length ? _previewPins[i] : _previewRunning;
+            if (icon.DataContext != vm)
+            {
+                icon.DataContext = vm;
+                icon.SetBinding(Image.SourceProperty, new Microsoft.UI.Xaml.Data.Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
+            }
             double cx = L.PlateX[i] + L.P / 2, cy = L.PlateY + L.P / 2;
             // As if the pointer rested on the second app: with magnification on,
             // it and its neighbours grow from their bottom edge like a wave.
             double dist = Math.Abs(i - 1) / 2.3, wave = dist < 1 ? (1 + Math.Cos(Math.PI * dist)) / 2 : 0;
             double size = L.Icon * (1 + (_current.Magnify - 1) * wave);
             icon.Width = icon.Height = size;
-            icon.CornerRadius = new CornerRadius(size * 0.26);
             Canvas.SetLeft(icon, cx - size / 2);
             Canvas.SetTop(icon, cy + L.Icon / 2 - size);
-            _mockGlyphs[i].FontSize = Math.Max(6, size * 0.5);
             double d = Math.Max(2.5, L.S * 5);
             _mockDots[i].Width = _mockDots[i].Height = d;
             Canvas.SetLeft(_mockDots[i], cx - d / 2);
@@ -229,15 +276,40 @@ public sealed partial class MainWindow
             Canvas.SetTop(_plate, L.PlateY);
         }
 
-        _sep.Visibility = L.Clock && L.N > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _sep.Visibility = L.SepX >= 0 ? Visibility.Visible : Visibility.Collapsed;
+        _sep.Fill = ink;
+        _sep.Opacity = 0.25;
         _sep.Height = L.BarH * 0.5;
         Canvas.SetLeft(_sep, L.SepX);
         Canvas.SetTop(_sep, L.BarY + L.BarH * 0.25);
 
-        var ink = InkBrush();
         PlaceClock(_time, _date, L, 1, L.ClockX, L.BarY, ink);
-        // The loupe shows only the glass rim; enlarged clock text would cover it.
-        _lpTime.Visibility = _lpDate.Visibility = Visibility.Collapsed;
+        void Entry(FontIcon view, double x, double fontScale)
+        {
+            view.Visibility = x < 0 ? Visibility.Collapsed : Visibility.Visible;
+            view.Width = view.Height = L.P;
+            view.FontSize = Math.Max(8, L.Icon * fontScale);
+            view.Foreground = ink;
+            Canvas.SetLeft(view, x);
+            Canvas.SetTop(view, L.PlateY);
+        }
+        _start.Width = _start.Height = L.Icon * 0.72;
+        Canvas.SetLeft(_start, L.StartX + (L.P - _start.Width) / 2);
+        Canvas.SetTop(_start, L.PlateY + (L.P - _start.Height) / 2);
+        Entry(_tray, L.TrayX, 0.42);
+        Entry(_bell, L.BellX, 0.68);
+        Entry(_wifi, L.StatusX, 0.42);
+        double ring = L.Icon * 1.1;
+        _statusRing.Visibility = L.StatusX < 0 ? Visibility.Collapsed : Visibility.Visible;
+        _statusRing.Width = _statusRing.Height = ring;
+        _statusRing.Stroke = ink;
+        _statusRing.StrokeThickness = Math.Max(1, L.S * 2);
+        Canvas.SetLeft(_statusRing, L.StatusX + (L.P - ring) / 2);
+        Canvas.SetTop(_statusRing, L.PlateY + (L.P - ring) / 2);
+        _bellBadge.Visibility = L.BellX < 0 ? Visibility.Collapsed : Visibility.Visible;
+        _bellBadge.Width = _bellBadge.Height = Math.Max(10, 13 * L.S);
+        Canvas.SetLeft(_bellBadge, L.BellX + L.P * 0.56);
+        Canvas.SetTop(_bellBadge, L.PlateY + L.P * 0.12);
     }
 
     private void PlaceClock(TextBlock time, TextBlock date, HeroLayout L, double zoom, double x, double barTop, Brush ink)
@@ -345,10 +417,10 @@ public sealed partial class MainWindow
         var L = j.L;
 
         // Main view: the photo once per size, then the glass alone, over it.
-        string key = $"{pw}x{ph}/{j.W:F1}x{j.H:F1}/{Photo.Generation}";
+        string key = $"{pw}x{ph}/{j.W:F1}x{j.H:F1}/{j.PhotoGeneration}";
         if (_mainBg == null || key != _mainKey)
         {
-            _mainBg = Backdrop.Create(pw, ph, j.W, j.H, 0, 0, j.Rs);
+            _mainBg = Backdrop.Create(pw, ph, j.W, j.H, 0, 0, j.Rs, j.Photo.Value);
             _mainKey = key;
             Interlocked.Exchange(ref _photoPending, _mainBg);
         }
@@ -371,10 +443,10 @@ public sealed partial class MainWindow
         if (j.Loupe)
         {
             double ppd = LoupeZoom * j.Rs;
-            string lkey = $"{lw}x{lh}/{j.W:F1}x{j.H:F1}/{L.LoupeX0:F2},{L.LoupeY0:F2}/{Photo.Generation}";
+            string lkey = $"{lw}x{lh}/{j.W:F1}x{j.H:F1}/{L.LoupeX0:F2},{L.LoupeY0:F2}/{j.PhotoGeneration}";
             if (_loupeBg == null || lkey != _loupeKey)
             {
-                _loupeBg = Backdrop.Create(lw, lh, j.W, j.H, L.LoupeX0, L.LoupeY0, ppd);
+                _loupeBg = Backdrop.Create(lw, lh, j.W, j.H, L.LoupeX0, L.LoupeY0, ppd, j.Photo.Value);
                 _loupeKey = lkey;
             }
             var lframes = _loupeFrames;

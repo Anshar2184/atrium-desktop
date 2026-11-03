@@ -36,6 +36,9 @@ struct Settings {
     double magnify = 1.7;            // dock magnification under the pointer: icon scale, 1 = off
     bool autoWidth = true;           // shrink to the content
     bool showClock = true;
+    bool showTray = true;
+    bool showStatus = true;
+    bool showNotifications = true;
     bool showRunning = true;
     std::wstring textColor = L"auto"; // auto | light | dark
     // Notifications (Atrium's own cards above the bell).
@@ -45,6 +48,7 @@ struct Settings {
     bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
     bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
     bool widgets = true;             // desktop widgets (their layout is widgets.json)
+    bool widgetsOnRight = false;     // mirror the logical grid without rewriting widgets.json
     std::wstring widgetBackdrop = L"desktop"; // the widgets' glass: desktop (captured live, D38) | wallpaper (the files, least work)
     // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
     bool hideTaskbar = false;        // the system taskbar is hidden while Atrium runs

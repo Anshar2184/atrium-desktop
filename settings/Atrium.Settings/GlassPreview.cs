@@ -29,10 +29,10 @@ internal sealed class Backdrop
 
     // The photo for a pw x ph pixel viewport onto an art of artW x artH DIP whose top-left
     // visible point is (x0, y0) DIP, at ppd pixels per DIP.
-    public static Backdrop Create(int pw, int ph, double artW, double artH, double x0, double y0, double ppd)
+    public static Backdrop Create(int pw, int ph, double artW, double artH, double x0, double y0, double ppd, Photo? photo = null)
     {
         var l0 = new byte[pw * ph * 4];
-        Photo.Current.Paint(l0, pw, ph, (float)artW, (float)artH, (float)x0, (float)y0, (float)ppd);
+        (photo ?? Photo.Default).Paint(l0, pw, ph, (float)artW, (float)artH, (float)x0, (float)y0, (float)ppd);
 
         var mips = new List<byte[]> { l0 };
         var mw = new List<int> { pw };
@@ -251,8 +251,23 @@ internal static class GlassRenderer
     private static float Sd(float x, float y, float bx, float by, float r)
     {
         float qx = MathF.Abs(x) - bx + r, qy = MathF.Abs(y) - by + r;
-        float mx = MathF.Max(qx, 0), my = MathF.Max(qy, 0);
-        return MathF.Sqrt(mx * mx + my * my) + MathF.Min(MathF.Max(qx, qy), 0) - r;
+        if (r >= MathF.Min(bx, by))
+        {
+            float mx = MathF.Max(qx, 0), my = MathF.Max(qy, 0);
+            return MathF.Sqrt(mx * mx + my * my) + MathF.Min(MathF.Max(qx, qy), 0) - r;
+        }
+        if (MathF.Min(qx, qy) <= 0) return MathF.Max(qx, qy) - r;
+        if (r <= 0) return MathF.Sqrt(qx * qx + qy * qy);
+        float n = MathF.Sqrt(qx * qx + qy * qy), vx = 0, vy = 0, fx = 0, fy = 0;
+        for (int i = 0; i < 2; i++)
+        {
+            vx = qx / n; vy = qy / n;
+            float xx = vx * vx, yy = vy * vy, dx = 0.02f + 0.98f * xx, dy = 0.02f + 0.98f * yy;
+            fx = 2 * vx * xx * (0.04f + 0.98f * xx) / (dx * dx);
+            fy = 2 * vy * yy * (0.04f + 0.98f * yy) / (dy * dy);
+            n *= 1 + (xx * xx / dx + yy * yy / dy - 1) / (vx * fx + vy * fy);
+        }
+        return (n - r) * (vx * fx + vy * fy) / MathF.Sqrt(fx * fx + fy * fy);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

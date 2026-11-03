@@ -1,4 +1,5 @@
 #include "bar.h"
+#include "render/continuous_corners.h"
 
 #include "clock.h"
 #include "log.h"
@@ -734,7 +735,8 @@ void Bar::Relayout()
     // Left to right: [logo] [apps ... (overflow)] | [tray] [status] [clock] [bell].
     // The logo, the overflow entry, the tray and the bell use the same plates
     // as the apps; so does the status ring (battery or volume, Wi-Fi).
-    const int statusW = plate; // the status ring is round
+    const int rightCount = int(st.showTray) + int(st.showStatus) + int(st.showNotifications) + int(clockW != 0);
+    const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
     int n = total;
     bool more = false;
@@ -743,8 +745,8 @@ void Bar::Relayout()
         int slots = count + (overflow ? 1 : 0);
         int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
-        w += 2 * sepGap + p + g + statusW + g;            // separator, tray, status
-        w += (clockW ? clockW + g : 0) + p;               // clock, bell
+        if (rightCount)
+            w += 2 * sepGap + p * (int(st.showTray) + int(st.showStatus) + int(st.showNotifications)) + clockW + (rightCount - 1) * g;
         return std::max(w, barH * 2);
     };
     // The magnified bar stretches by up to (mag - 1) * range on top of its width.
@@ -768,6 +770,7 @@ void Bar::Relayout()
     // Never narrower than what is always there (logo, overflow, tray, status, clock, bell).
     const int barW = std::max(st.autoWidth ? std::min(contentWidth(n, plate, gap, more), maxW) : maxW, std::min(contentWidth(0, plate, gap, more), screenW));
     const int pad = padFor(plate);
+    const int statusW = plate;
     const int v = (barH - plate) / 2;
     const int pitch = plate + gap;
     const int radius = std::min(Px(st.cornerRadius, s), std::min(barW, barH) / 2);
@@ -851,20 +854,27 @@ void Bar::Relayout()
         it.glyph = glyph;
         return it;
     };
-    // Right group, from the right edge: bell, clock, separator.
+    // Disabled entries consume neither space nor hit targets.
     const int startLeft = insetX + pad;
-    const int bellLeft = insetX + barW - pad - plate;
-    const int clockRight = bellLeft - (clockW ? gap : 0);
-    const int clockLeft = clockRight - clockW;
-    const int statusRight = (clockW ? clockLeft : bellLeft) - gap;
-    const int statusLeft = statusRight - statusW;
-    const int trayLeft = statusLeft - gap - plate;
-    const int rightLeft = trayLeft;
+    int cursor = insetX + barW - pad;
+    auto rightSlot = [&](int width, bool enabled) {
+        if (!enabled)
+            return cursor;
+        cursor -= width;
+        const int left = cursor;
+        cursor -= gap;
+        return left;
+    };
+    const int bellLeft = rightSlot(plate, st.showNotifications);
+    const int clockLeft = rightSlot(clockW, clockW != 0), clockRight = clockLeft + clockW;
+    const int statusLeft = rightSlot(statusW, st.showStatus), statusRight = statusLeft + statusW;
+    const int trayLeft = rightSlot(plate, st.showTray);
+    const int rightLeft = rightCount ? cursor + gap : insetX + barW - pad;
     const int appsMin = startLeft + plate + 2 * gap;
     const int slots = n + (more ? 1 : 0);
     const int appsW = slots ? slots * plate + (slots - 1) * gap : 0;
     // Apps are centred in the space between the logo and the separator (matters when autoWidth is off).
-    const int appsLeft = appsMin + std::max(0, (rightLeft - 2 * sepGap - appsMin - appsW) / 2);
+    const int appsLeft = appsMin + std::max(0, (rightLeft - 2 * groupGap - appsMin - appsW) / 2);
     scene.extras.push_back(entry(kStartKey, startLeft, L""));
     hits_.push_back({kStartKey, RECT{insetX, hitTop, appsMin - gap / 2, hitBottom}});
     // Icons are rendered for their magnified size, so they stay sharp when they grow.
@@ -905,13 +915,13 @@ void Bar::Relayout()
         scene.items.push_back(std::move(it));
         // Hit cells split the gaps; the last one reaches the separator.
         int hl = k == 0 ? appsMin - gap / 2 : appsLeft + k * pitch - gap / 2;
-        int hr = k == slots - 1 ? rightLeft - sepGap : appsLeft + k * pitch + plate + (gap - gap / 2);
+        int hr = k == slots - 1 ? rightLeft - groupGap : appsLeft + k * pitch + plate + (gap - gap / 2);
         hits_.push_back({t.key, RECT{hl, hitTop, hr, hitBottom}});
     }
     if (more) {
         int left = appsLeft + n * pitch;
         scene.extras.push_back(entry(kMoreKey, left, L"\uE712"));
-        hits_.push_back({kMoreKey, RECT{n ? left - gap / 2 : appsMin - gap / 2, hitTop, rightLeft - sepGap, hitBottom}});
+        hits_.push_back({kMoreKey, RECT{n ? left - gap / 2 : appsMin - gap / 2, hitTop, rightLeft - groupGap, hitBottom}});
     }
     icons_ = std::move(keep);
     appsLeft_ = appsLeft;
@@ -919,25 +929,31 @@ void Bar::Relayout()
     plate_ = plate;
     gap_ = gap;
     shown_ = n;
-    scene.separatorX = float(rightLeft - sepGap);
-    scene.extras.push_back(entry(kTrayKey, trayLeft, L"\uE70E"));
-    hits_.push_back({kTrayKey, RECT{rightLeft - sepGap, hitTop, trayLeft + plate + gap / 2, hitBottom}});
-    SceneItem status = entry(kStatusKey, statusLeft, L"");
-    status.plate = D2D1::RectF(float(statusLeft), plateTop, float(statusRight), plateTop + float(plate));
-    status.icon = D2D1::RectF(float(statusLeft), iconTop, float(statusRight), iconTop + float(icon));
-    scene.extras.push_back(std::move(status));
-    hits_.push_back({kStatusKey, RECT{trayLeft + plate + gap / 2, hitTop, statusRight + gap / 2, hitBottom}});
+    scene.separatorX = rightCount ? float(rightLeft - sepGap) : -1;
+    if (st.showTray) {
+        scene.extras.push_back(entry(kTrayKey, trayLeft, L"\uE70E"));
+        hits_.push_back({kTrayKey, RECT{trayLeft - gap / 2, hitTop, trayLeft + plate + gap / 2, hitBottom}});
+    }
+    if (st.showStatus) {
+        SceneItem status = entry(kStatusKey, statusLeft, L"");
+        status.plate = D2D1::RectF(float(statusLeft), plateTop, float(statusRight), plateTop + float(plate));
+        status.icon = D2D1::RectF(float(statusLeft), iconTop, float(statusRight), iconTop + float(icon));
+        scene.extras.push_back(std::move(status));
+        hits_.push_back({kStatusKey, RECT{statusLeft - gap / 2, hitTop, statusRight + gap / 2, hitBottom}});
+    }
     scene.status = status_;
     if (clockW) {
         scene.clock = D2D1::RectF(float(clockLeft), plateTop, float(clockRight), plateTop + float(plate));
         scene.timePx = timePx;
         scene.datePx = datePx;
-        hits_.push_back({kClockKey, RECT{statusRight + gap / 2, hitTop, clockRight + gap / 2, hitBottom}});
+        hits_.push_back({kClockKey, RECT{clockLeft - gap / 2, hitTop, clockRight + gap / 2, hitBottom}});
     }
-    SceneItem bell = entry(kNotifyKey, bellLeft, L"\uEA8F");
-    bell.badge = unread_;
-    scene.extras.push_back(std::move(bell));
-    hits_.push_back({kNotifyKey, RECT{clockW ? clockRight + gap / 2 : statusRight + gap / 2, hitTop, insetX + barW, hitBottom}});
+    if (st.showNotifications) {
+        SceneItem bell = entry(kNotifyKey, bellLeft, L"\uEA8F");
+        bell.badge = unread_;
+        scene.extras.push_back(std::move(bell));
+        hits_.push_back({kNotifyKey, RECT{bellLeft - gap / 2, hitTop, insetX + barW, hitBottom}});
+    }
     if (!scene.hoverKey.empty() && std::none_of(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == scene.hoverKey; }))
         scene.hoverKey.clear(); // the hovered app went away
     scene_ = std::move(scene);
@@ -977,7 +993,7 @@ void Bar::SetRegion(bool extended)
     if (appliedRgn_[0] == barW && appliedRgn_[1] == barH && appliedRgn_[2] == radius_ && appliedRgn_[3] == insetX_ && appliedRgn_[4] == insetTop_ &&
         appliedRgn_[5] == ext)
         return;
-    HRGN rgn = CreateRoundRectRgn(insetX_, insetTop_, insetX_ + barW + 1, insetTop_ + barH + 1, 2 * radius_, 2 * radius_);
+    HRGN rgn = ContinuousRegion(RECT{insetX_, insetTop_, insetX_ + barW + 1, insetTop_ + barH + 1}, radius_);
     if (ext > 0) {
         // While the pointer is on the bar, the room above it belongs to the
         // magnified icons (clicks there go to the icon below the pointer).
@@ -1305,7 +1321,9 @@ RECT Bar::EntryRect(const std::wstring& key) const
     if (key == kClockKey)
         return RECT{window_.left + LONG(scene_.clock.left), window_.top + LONG(scene_.clock.top), window_.left + LONG(scene_.clock.right),
                     window_.top + LONG(scene_.clock.bottom)};
-    return {};
+    // Toasts still have an anchor when their taskbar entry is hidden.
+    const RECT bar = BarRect();
+    return RECT{bar.right - (bar.bottom - bar.top), bar.top, bar.right, bar.bottom};
 }
 
 RECT Bar::BarRect() const

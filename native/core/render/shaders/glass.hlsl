@@ -48,10 +48,33 @@ VSOut VS(uint id : SV_VertexID)
     return o;
 }
 
+// A rounder G3 profile: f(x) + f(y) = 1, f(t) = t^4 / (0.02 + 0.98 t^2).
+// It follows a circular corner closely; its straight-edge joins remain quartic.
+float sdCorner(float2 q, float r)
+{
+    if (min(q.x, q.y) <= 0)
+        return max(q.x, q.y) - r;
+    if (r <= 0)
+        return length(q);
+    float n = length(q);
+    float2 v, derivative;
+    [unroll] for (int i = 0; i < 2; ++i) {
+        v = q / n;
+        float2 v2 = v * v;
+        float2 denominator = 0.02 + 0.98 * v2;
+        float2 f = v2 * v2 / denominator;
+        derivative = 2 * v * v2 * (0.04 + 0.98 * v2) / (denominator * denominator);
+        n *= 1 + (f.x + f.y - 1) / dot(v, derivative);
+    }
+    return (n - r) * dot(v, derivative) / length(derivative);
+}
+
 float sdRoundRect(float2 p, float2 b, float r)
 {
     float2 q = abs(p) - b + r;
-    return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
+    if (r >= min(b.x, b.y)) // genuine capsules keep circular ends
+        return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
+    return sdCorner(q, r);
 }
 
 // A rounded rectangle whose corners differ (r: top left, top right, bottom right, bottom left; y down).
@@ -60,7 +83,9 @@ float sdRoundRect4(float2 p, float2 b, float4 r)
     float rr = p.x < 0 ? (p.y < 0 ? r.x : r.w) : (p.y < 0 ? r.y : r.z);
     rr = min(rr, min(b.x, b.y));
     float2 q = abs(p) - b + rr;
-    return length(max(q, 0)) + min(max(q.x, q.y), 0) - rr;
+    if (rr >= min(b.x, b.y))
+        return length(max(q, 0)) + min(max(q.x, q.y), 0) - rr;
+    return sdCorner(q, rr);
 }
 
 // Smooth minimum: two shapes melt where they come within k px of each other.

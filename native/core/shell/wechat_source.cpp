@@ -121,7 +121,7 @@ std::vector<HWND> WeChatWindows(DWORD pid)
 
 WeChatSource::WeChatSource(HWND notify, UINT msg) : notify_(notify), msg_(msg)
 {
-    wake_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     thread_ = std::thread([this] { Run(); });
 }
 
@@ -153,96 +153,109 @@ void WeChatSource::Run()
             Log(L"wechat: %s", text);
         state = now;
     };
-    while (!stop_ && uia && cells) {
-        try {
-            std::wstring exe;
-            // Every WeChat process: the chat list is in one of them.
-            std::vector<std::pair<DWORD, std::wstring>> procs;
-            {
-                HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-                PROCESSENTRY32W pe{sizeof(pe)};
-                for (BOOL ok = snap != INVALID_HANDLE_VALUE && Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe))
-                    if (_wcsicmp(pe.szExeFile, L"Weixin.exe") == 0 || _wcsicmp(pe.szExeFile, L"WeChat.exe") == 0)
-                        procs.push_back({pe.th32ProcessID, {}});
-                if (snap != INVALID_HANDLE_VALUE)
-                    CloseHandle(snap);
-            }
-            if (!procs.empty())
-                exe = ProgramPath(procs.front().first);
-            std::vector<std::pair<std::wstring, Row>> rows;
-            bool found = false;
-            for (const auto& [p, unused] : procs) {
-                for (HWND h : WeChatWindows(p)) {
-                    winrt::com_ptr<IUIAutomationElement> root;
-                    winrt::com_ptr<IUIAutomationElementArray> all;
-                    if (FAILED(uia->ElementFromHandle(h, root.put())) || !root || FAILED(root->FindAll(TreeScope_Descendants, cells.get(), all.put())) || !all)
-                        continue;
-                    int n = 0;
-                    all->get_Length(&n);
-                    for (int i = 0; i < n; ++i) {
-                        winrt::com_ptr<IUIAutomationElement> e;
-                        all->GetElement(i, e.put());
-                        BSTR id = nullptr, name = nullptr;
-                        if (!e || FAILED(e->get_CurrentAutomationId(&id)) || FAILED(e->get_CurrentName(&name)) || !name) {
+    std::vector<std::pair<DWORD, std::wstring>> procs;
+    ULONGLONG listed = 0;
+    {
+        UiaWatch watch(uia.get(), wake_);
+        UiaWindowWake windows(wake_, L"QWindowIcon");
+        while (!stop_ && uia && cells) {
+            try {
+                std::wstring exe;
+                // Process discovery is infrequent; message events only re-read the client tree.
+                ULONGLONG tick = GetTickCount64();
+                if (!listed || tick - listed >= 10000 || (state != 2 && tick - listed >= 2000)) {
+                    procs.clear();
+                    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                    PROCESSENTRY32W pe{sizeof(pe)};
+                    for (BOOL ok = snap != INVALID_HANDLE_VALUE && Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe))
+                        if (_wcsicmp(pe.szExeFile, L"Weixin.exe") == 0 || _wcsicmp(pe.szExeFile, L"WeChat.exe") == 0)
+                            procs.push_back({pe.th32ProcessID, ProgramPath(pe.th32ProcessID)});
+                    if (snap != INVALID_HANDLE_VALUE)
+                        CloseHandle(snap);
+                    listed = tick;
+                    windows.SetProcesses(procs);
+                }
+                watch.Prune();
+                std::vector<std::pair<std::wstring, Row>> rows;
+                bool found = false;
+                for (const auto& [p, program] : procs) {
+                    for (HWND h : WeChatWindows(p)) {
+                        winrt::com_ptr<IUIAutomationElement> root;
+                        winrt::com_ptr<IUIAutomationElementArray> all;
+                        if (FAILED(uia->ElementFromHandle(h, root.put())) || !root || FAILED(root->FindAll(TreeScope_Descendants, cells.get(), all.put())) || !all)
+                            continue;
+                        int n = 0;
+                        all->get_Length(&n);
+                        for (int i = 0; i < n; ++i) {
+                            winrt::com_ptr<IUIAutomationElement> e;
+                            all->GetElement(i, e.put());
+                            BSTR id = nullptr, name = nullptr;
+                            if (!e || FAILED(e->get_CurrentAutomationId(&id)) || FAILED(e->get_CurrentName(&name)) || !name) {
+                                SysFreeString(id);
+                                SysFreeString(name);
+                                continue;
+                            }
+                            Row r = Parse(name);
+                            std::wstring key = id && *id ? id : r.chat;
                             SysFreeString(id);
                             SysFreeString(name);
-                            continue;
+                            if (!r.chat.empty())
+                                rows.push_back({key, r});
                         }
-                        Row r = Parse(name);
-                        std::wstring key = id && *id ? id : r.chat;
-                        SysFreeString(id);
-                        SysFreeString(name);
-                        if (!r.chat.empty())
-                            rows.push_back({key, r});
+                        if (n > 0) {
+                            exe = program;
+                            if (!watch.Contains(h)) {
+                                watch.Clear();
+                                watch.Add(h, root.get());
+                            }
+                            found = true;
+                            break;
+                        }
                     }
-                    if (n > 0) {
-                        found = true;
+                    if (found)
                         break;
-                    }
                 }
-                if (found)
-                    break;
-            }
-            if (procs.empty()) {
-                report(0, L"WeChat is not running");
-                baseline = false; // after a restart its list is a new baseline
-            } else if (!found) {
-                report(1, L"WeChat's chat list is not readable (open its window once)");
-                baseline = false;
-            } else {
-                if (state != 2)
-                    Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
-                state = 2;
-                for (size_t i = 0; i < rows.size(); ++i) {
-                    const auto& [key, r] = rows[i];
-                    auto old = unread.find(key);
-                    // A chat not seen before counts only at the top of the list,
-                    // where a new message puts it (scrolling brings old ones in).
-                    bool rose = old != unread.end() ? r.unread > old->second : r.unread > 0 && i < 3;
-                    if (baseline && rose && !r.muted) {
-                        auto* n = new Notice();
-                        n->source = L"wechat";
-                        n->app = L"微信";
-                        n->appId = exe;
-                        n->title = r.chat;
-                        n->body = r.summary;
-                        if (!exe.empty())
-                            n->action = L"app:" + exe;
-                        if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(n)))
-                            delete n;
-                        else
-                            Log(L"wechat: new message (unread %d)", r.unread);
+                if (procs.empty()) {
+                    report(0, L"WeChat is not running");
+                    baseline = false; // after a restart its list is a new baseline
+                } else if (!found) {
+                    report(1, L"WeChat's chat list is not readable (open its window once)");
+                    baseline = false;
+                } else {
+                    if (state != 2)
+                        Log(L"wechat: reading WeChat's chat list (%zu chats in view)", rows.size());
+                    state = 2;
+                    for (size_t i = 0; i < rows.size(); ++i) {
+                        const auto& [key, r] = rows[i];
+                        auto old = unread.find(key);
+                        // A chat not seen before counts only at the top of the list,
+                        // where a new message puts it (scrolling brings old ones in).
+                        bool rose = old != unread.end() ? r.unread > old->second : r.unread > 0 && i < 3;
+                        if (baseline && rose && !r.muted) {
+                            auto* n = new Notice();
+                            n->source = L"wechat";
+                            n->app = L"微信";
+                            n->appId = exe;
+                            n->title = r.chat;
+                            n->body = r.summary;
+                            if (!exe.empty())
+                                n->action = L"app:" + exe;
+                            if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(n)))
+                                delete n;
+                            else
+                                Log(L"wechat: new message (unread %d)", r.unread);
+                        }
+                        unread[key] = r.unread;
                     }
-                    unread[key] = r.unread;
+                    baseline = true;
                 }
-                baseline = true;
+            } catch (...) {
+                Log(L"wechat: reading failed");
             }
-        } catch (...) {
-            Log(L"wechat: reading failed");
+            // Providers can omit UIA events. A slow reconciliation pass covers that case.
+            if (!stop_)
+                WaitForUiaWake(wake_, state == 2 ? 2000 : 6000);
         }
-        // A list it can read is read every 2 s; looking for one (WeChat closed or only in the
-        // tray) costs a search through its windows, so that waits longer.
-        WaitForSingleObject(wake_, state == 2 ? 2000 : 6000);
     }
     cells = nullptr;
     uia = nullptr;

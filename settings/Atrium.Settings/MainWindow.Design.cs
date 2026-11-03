@@ -79,7 +79,7 @@ public sealed partial class MainWindow
         new("EaseOut · 三次缓出", "1 − (1 − t)³ · 320 ms", "1 − (1 − t)³", "换页、淡入、列表依次出现、字色渐变", 0.32, t => Motion.EaseOut(t / 0.32)),
         new("EaseOutBack · 回弹缓出", "s = 1.5 · 260 ms", "1 + (s + 1)(t − 1)³ + s(t − 1)²", "开始菜单的格子出现", 0.26, t => Motion.EaseOutBack(t / 0.26, 1.5)),
         new("Approach · 指数渐近", "进 20/s · 出 11/s", "1 − e^(−rate · t)，每帧从当前值继续", "悬停与按下的底板", 0.3, t => Motion.Approach(t, 20)),
-        new("启动 · 一次轻跳", "sin² · 480 ms · 高 0.32 倍图标", "sin²(πt / 0.48)，起跳与落地都没有速度突变", "点开程序坞上的应用：只跳一次", 0.48, t => Motion.Hop(t, 0.48)),
+        new("启动 · 一次轻跳", "sin² · 480 ms · 高 0.32 倍图标", "sin²(πt / 0.48)，起跳与落地都没有速度突变", "点开任务栏上的应用：只跳一次", 0.48, t => Motion.Hop(t, 0.48)),
     };
 
     // The type ramp (DESIGN.md §1.2): name, size, MiSans file, its weight, macOS counterpart, where.
@@ -172,11 +172,11 @@ public sealed partial class MainWindow
         DesignStack.Children.Add(Principles());
         DesignStack.Children.Add(Section("材质", "同一个着色器、两组参数：液态玻璃只在边缘折射、中间几乎透明；磨砂玻璃把背景磨成色块、几乎不折射。左右拖动分界线对比。",
             MaterialCompare()));
-        DesignStack.Children.Add(Section("几何", "优先使用胶囊形；嵌套的圆角保持同心。Atrium 现在的圆角都是圆弧；右边把它与超椭圆（曲率连续的圆角）叠在一起比较。",
+        DesignStack.Children.Add(Section("几何", "卡片采用大圆角，按钮保持胶囊形，内外边距与圆角保持协调。",
             GeometryCard()));
         DesignStack.Children.Add(Section("排版", "MiSans 三个字重。一个界面最多三档字号；主次先用透明度区分，再用字号，最后才用字重；数字一律等宽。", TypeCard(false)));
         DesignStack.Children.Add(Section("间距与色彩", "间距只用一组刻度；颜色只有一个强调色，其余都是中性灰。玻璃上的字色由背后的亮度决定。", SpaceAndColour()));
-        DesignStack.Children.Add(Section("交互", "把指针移到程序坞上：图标像波浪一样依次变大（倍数取当前设置）；点一个图标，看启动时的一次轻跳。点通知卡片，重新弹出。", InteractionCard()));
+        DesignStack.Children.Add(Section("交互", "把指针移到任务栏上：图标像波浪一样依次变大（倍数取当前设置）；点一个图标，看启动时的一次轻跳。点通知卡片，重新弹出。", InteractionCard()));
         DesignStack.Children.Add(Section("动效", "所有动画都可以中途打断，从当前位置和速度继续；与帧率无关。点卡片播放。", CurveGrid()));
 
         // ---- Second layer: the numbers ----
@@ -239,7 +239,7 @@ public sealed partial class MainWindow
             })));
         into.Children.Add(Section("排版参数", "字重从不合成：样式选择字体文件。MiSans 的字重比名称细一档：Medium 380 当作常规，Demibold 450 当作中等，Semibold 520 当作半粗。",
             TypeCard(true)));
-        into.Children.Add(Section("圆角", "同心规则：r内 = max(r外 − 边距, 6)。圆角是标准圆弧（G1）；改用曲率连续的超椭圆（G2）需要玻璃距离场、Direct2D 几何与点击区域三处同时改，目前没有实现。",
+        into.Children.Add(Section("圆角", "卡片圆角 24，按钮圆角取高度的一半。原生玻璃采用接近圆弧的连续轮廓，胶囊保留圆形端部。",
             Table(new[] { "元素", "圆角", "规则" }, new[] { 1.1, 1.3, 2.2 }, Corners.Select(c => new[] { c.Element, c.Radius, c.Rule }))));
         into.Children.Add(RadiusCard());
         into.Children.Add(Section("间距", null,
@@ -412,70 +412,23 @@ public sealed partial class MainWindow
         return new Rendered(pw, ph, pixels);
     }
 
-    // ---- Geometry: the circular corner and the superellipse, laid over each other ----
+    // ---- Geometry: the same continuous corner profile used by the application ----
 
     private UIElement GeometryCard()
     {
-        const double Side = 176, R = 46; // R: the corner a 176 square gets at about Apple's icon proportion
-        var canvas = new Canvas { Width = Side + 8, Height = Side + 8, HorizontalAlignment = HorizontalAlignment.Center };
-        var rounded = new Rectangle { Width = Side, Height = Side, RadiusX = R, RadiusY = R, Style = StyleOf("GlyphInkStyle"), StrokeDashArray = new DoubleCollection { 3, 3 } };
-        Canvas.SetLeft(rounded, 4);
-        Canvas.SetTop(rounded, 4);
-        var super = new Microsoft.UI.Xaml.Shapes.Path { Style = StyleOf("GlyphAccentStyle") };
-        canvas.Children.Add(rounded);
-        canvas.Children.Add(super);
-        var nText = Tabular(Text("", "RowNoteStyle"));
-        void Draw(double n)
+        var outline = new Rectangle
         {
-            var fig = new PathFigure { IsClosed = true };
-            double a = Side / 2, c = 4 + a;
-            for (int i = 0; i <= 240; i++)
-            {
-                double t = 2 * Math.PI * i / 240, ct = Math.Cos(t), st = Math.Sin(t);
-                double x = c + a * Math.Sign(ct) * Math.Pow(Math.Abs(ct), 2 / n), y = c + a * Math.Sign(st) * Math.Pow(Math.Abs(st), 2 / n);
-                if (i == 0) fig.StartPoint = new Point(x, y);
-                else fig.Segments.Add(new LineSegment { Point = new Point(x, y) });
-            }
-            super.Data = new PathGeometry { Figures = { fig } };
-            nText.Text = $"超椭圆 |x|ⁿ + |y|ⁿ = 1，n = {n:0.0}" + (n < 2.05 ? "（圆）" : n > 4.5 && n < 5.5 ? "（接近 Apple 的图标）" : "");
-        }
-        var slider = new Slider { Style = StyleOf("SliderStyle"), Minimum = 2, Maximum = 10, StepFrequency = 0.1, Value = 5, Width = 220, HorizontalAlignment = HorizontalAlignment.Center };
-        AutomationProperties.SetName(slider, "超椭圆的指数");
-        slider.ValueChanged += (_, e) => Draw(e.NewValue);
-        Draw(5);
-        var left = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
-        left.Children.Add(canvas);
-        left.Children.Add(slider);
-        nText.HorizontalAlignment = HorizontalAlignment.Center;
-        left.Children.Add(nText);
-
-        var notes = new StackPanel { Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
-        void Legend(string swatch, string title, string body)
-        {
-            var row = new Grid { ColumnSpacing = 12 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var line = new Line { X1 = 0, X2 = 22, Y1 = 9, Y2 = 9, Style = StyleOf(swatch) };
-            if (swatch == "GlyphInkStyle") line.StrokeDashArray = new DoubleCollection { 3, 3 };
-            var text = new StackPanel { Spacing = 2 };
-            text.Children.Add(Text(title, "RowTitleStyle"));
-            text.Children.Add(Text(body, "RowNoteStyle"));
-            Grid.SetColumn(text, 1);
-            row.Children.Add(line);
-            row.Children.Add(text);
-            notes.Children.Add(row);
-        }
-        Legend("GlyphInkStyle", "圆弧角（Atrium 现在的圆角）", "直边与圆弧切线连续，曲率在接点处突变（G1）。做成胶囊时圆弧直接连着长边，看不出差别——这是优先用胶囊的原因。");
-        Legend("GlyphAccentStyle", "超椭圆（对比）", "曲率处处连续（G2），轮廓更饱满。拖动滑块改变指数 n：n = 2 是圆，n 越大越接近直角。");
-
-        var concentric = RadiusDemo();
+            Width = 176, Height = 176, RadiusX = 46, RadiusY = 46,
+            Style = StyleOf("GlyphAccentStyle"), HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var face = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
+        face.Children.Add(outline);
+        face.Children.Add(Text("大圆角", "RowTitleStyle"));
         var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28 };
-        grid.Children.Add(left);
-        grid.Children.Add(notes);
-        grid.Children.Add(concentric);
+        grid.Children.Add(face);
+        grid.Children.Add(RadiusDemo());
         return Card(grid);
     }
-
     // The concentric rule in one picture: the bar's capsule radius, a 12 inset, the inner radius.
     private static UIElement RadiusDemo()
     {
@@ -494,7 +447,7 @@ public sealed partial class MainWindow
         demo.Children.Add(label);
         var s = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         s.Children.Add(demo);
-        var why = Text("同心：两条弧共用一个圆心，四周边距处处相等。", "RowNoteStyle");
+        var why = Text("嵌套：内圆角随边距缩小，保持一致的轮廓。", "RowNoteStyle");
         why.HorizontalAlignment = HorizontalAlignment.Center;
         s.Children.Add(why);
         return s;
@@ -569,17 +522,17 @@ public sealed partial class MainWindow
             BorderBrush = new SolidColorBrush(Color.FromArgb(170, 255, 255, 255)), BorderThickness = new Thickness(1),
         };
         stage.Children.Insert(0, bar);
-        int n = MockApps.Length;
+        var apps = _previewPins.Append(_previewRunning).ToArray();
+        int n = apps.Length;
         bar.Width = n * Icon + (n - 1) * Gap + 2 * 14;
-        var holders = new List<(Border Holder, Border Icon)>();
+        var holders = new List<(Border Holder, Image Icon)>();
         for (int i = 0; i < n; i++)
         {
-            var app = MockApps[i];
-            var icon = new Border
+            var icon = new Image
             {
-                Width = Icon, Height = Icon, CornerRadius = new CornerRadius(Icon * 0.26), Background = Gradient(app.C1, app.C2),
-                Child = new FontIcon { Glyph = app.Glyph, FontSize = Icon * 0.48, Foreground = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)) },
+                Width = Icon, Height = Icon, Stretch = Stretch.Uniform, DataContext = apps[i],
             };
+            icon.SetBinding(Image.SourceProperty, new Microsoft.UI.Xaml.Data.Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
             var holder = new Border { Width = Icon, Height = Icon, Child = icon };
             holder.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(110) };
             holder.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(110) };
@@ -590,7 +543,7 @@ public sealed partial class MainWindow
             var hop = new Curve("hop", "", "", "", 0.48, t => Motion.Hop(t, 0.48));
             Action<double> show = t => icon.Translation = new Vector3(0, (float)(-Motion.Hop(t, 0.48) * 0.32 * Icon * 1.6), 0);
             holder.PointerPressed += (_, _) => Play(hop, show);
-            AutomationProperties.SetName(holder, "示例应用 " + (i + 1));
+            AutomationProperties.SetName(holder, apps[i].Title);
         }
         double width = 0;
         // The pointer's x in icon units drives the wave, as the bar does (BarPainter, the hero).
@@ -623,7 +576,7 @@ public sealed partial class MainWindow
         var s = new StackPanel { Spacing = 10 };
         s.Children.Add(stage);
         s.Children.Add(Text("悬停放大与启动轻跳", "RowTitleStyle"));
-        s.Children.Add(Text("波形：(1 + cos πd) / 2，d 为指针到图标的距离（以 2.3 个图标为半径）；放大倍数取“程序坞”页的设置。", "RowNoteStyle"));
+        s.Children.Add(Text("波形：(1 + cos πd) / 2，d 为指针到图标的距离（以 2.3 个图标为半径）；放大倍数取“任务栏”页的设置。", "RowNoteStyle"));
         return Card(s);
     }
 

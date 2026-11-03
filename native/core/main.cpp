@@ -579,6 +579,7 @@ void ApplySettings(const Settings& s)
     // Widgets live on the bar's monitor, where its capture gives them glass.
     RECT bar = g_app.bar->BarRect();
     g_app.widgets->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
+    g_app.widgets->SetOnRight(s.widgetsOnRight);
     g_app.widgets->SetEnabled(s.widgets);
     g_app.widgetsOn = s.widgets;
     if (g_app.chrome) {

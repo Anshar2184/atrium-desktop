@@ -175,8 +175,9 @@ public sealed partial class MainWindow
             int wc = size == "small" ? 1 : 2, wr = size == "large" ? 2 : 1;
             if (col < 0 || row < 0 || col + wc > cols || row + wr > rows) continue; // the core keeps it aside on this screen
             double w = wc * WCell + (wc - 1) * WGap, h = wr * WCell + (wr - 1) * WGap;
-            bool fromRight = 2 * col + wc >= cols; // each half of the grid hugs its own edge (D44)
-            double left = fromRight ? W - WMargin - (cols - col - wc) * (WCell + WGap) - w : WMargin + col * (WCell + WGap);
+            int visualCol = _current.WidgetsOnRight ? cols - col - wc : col;
+            bool fromRight = 2 * visualCol + wc >= cols;
+            double left = fromRight ? W - WMargin - (cols - visualCol - wc) * (WCell + WGap) - w : WMargin + visualCol * (WCell + WGap);
             double top = WMargin + row * (WCell + WGap);
             var choice = WidgetChoices.FirstOrDefault(c => c.Kind == kind && c.Size == size) ?? new WidgetChoice(kind, size, "", "");
             var face = new Viewbox { Width = w * k, Height = h * kh, Stretch = Stretch.Uniform, Child = Face(choice, PhotoBrush()) };

@@ -65,7 +65,7 @@ public sealed partial class MainWindow
         // The preview: the widget's own proportions (small 1:1, medium 344:164), scaled into the card.
         var stage = new Border
         {
-            Height = 118, CornerRadius = new CornerRadius(12), Padding = new Thickness(14),
+            Height = 118, CornerRadius = new CornerRadius(14), Padding = new Thickness(14),
             Background = PhotoBrush(),
             Child = new Viewbox { Stretch = Stretch.Uniform, Child = Face(c, PhotoBrush()) },
         };
@@ -78,7 +78,7 @@ public sealed partial class MainWindow
         var body = new StackPanel { Spacing = 10, Children = { stage, name } };
         var button = new Button
         {
-            Content = body, Padding = new Thickness(10), CornerRadius = new CornerRadius(16), HorizontalAlignment = HorizontalAlignment.Stretch,
+            Content = body, Padding = new Thickness(10), CornerRadius = new CornerRadius(24), HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Tokens.Brush("CardBrush"),
             BorderBrush = Tokens.Brush("CardStrokeBrush"), BorderThickness = new Thickness(1),
         };

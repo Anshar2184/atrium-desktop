@@ -56,7 +56,7 @@ public sealed partial class MainWindow : Window
 
     private static readonly string[] PageTitles =
     {
-        "材质", "形状", "程序坞", "通知", "小组件", "系统", "设计语言", "关于",
+        "材质", "形状", "任务栏", "通知", "小组件", "系统", "设计语言", "关于",
     };
     private readonly CoreClient _client = new();
     private readonly List<(SliderDef Def, SliderTile Tile)> _rows = new();
@@ -391,8 +391,11 @@ public sealed partial class MainWindow : Window
         foreach (var (d, card) in _rows)
             card.SetValue(d.Get(_current));
         (_current.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
-        (Photo.Selected == "wallpaper" ? BgWallpaper : BgSpecimen).IsChecked = true;
+        (Photo.Selected switch { "wallpaper" => BgWallpaper, "paper" => BgPaper, "geometry" => BgGeometry, "layers" => BgLayers, _ => BgSpecimen }).IsChecked = true;
         ClockSwitch.IsOn = _current.ShowClock;
+        TraySwitch.IsOn = _current.ShowTray;
+        StatusSwitch.IsOn = _current.ShowStatus;
+        NotificationsSwitch.IsOn = _current.ShowNotifications;
         AutoWidthSwitch.IsOn = _current.AutoWidth;
         RunningSwitch.IsOn = _current.ShowRunning;
         HideBodySwitch.IsOn = _current.NotifyHideBody;
@@ -400,6 +403,7 @@ public sealed partial class MainWindow : Window
         WeChatSwitch.IsOn = _current.NotifyWeChat;
         FeishuSwitch.IsOn = _current.NotifyFeishu;
         WidgetsSwitch.IsOn = _current.Widgets;
+        (_current.WidgetsOnRight ? WidgetsRight : WidgetsLeft).IsChecked = true;
         HideTaskbarSwitch.IsOn = _current.HideTaskbar;
         (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
         HideBannersSwitch.IsOn = _current.HideBanners;
@@ -457,6 +461,23 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.ShowClock = ClockSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnBarContentToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.ShowTray = TraySwitch.IsOn;
+        _current.ShowStatus = StatusSwitch.IsOn;
+        _current.ShowNotifications = NotificationsSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnWidgetAlignmentChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || sender is not RadioButton { Tag: string tag }) return;
+        _current.WidgetsOnRight = tag == "right";
+        ShowWidgetMap();
         Changed();
     }
 

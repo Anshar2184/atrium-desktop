@@ -2,9 +2,10 @@
 // notifications either: it shows its own popup, a small untitled Chromium
 // window (Chrome_WidgetWin_1) at the screen's corner, for about ten seconds.
 // Its text is readable through UI Automation, read only: the first text is
-// the chat or sender, the next the message. A worker thread looks for such a
-// window of Feishu's processes a few times a second and posts a card for each
-// new one (D33). Nothing in Feishu is changed; its popup stays as it is.
+// the chat or sender, the next the message. Window and UIA events wake an MTA
+// reader; a five-second reconciliation covers missed events. A newly shown
+// popup gets one short settling pass if its text is still loading (D33).
+// Nothing in Feishu is changed; its popup stays as it is.
 #pragma once
 
 #include "ui/notifications.h"
@@ -18,7 +19,8 @@ namespace atrium {
 
 class FeishuSource {
 public:
-    // Posts `msg` to `notify` with a heap-allocated Notice* in lParam (the receiver deletes it).
+    // Posts `msg` to `notify` with a heap-allocated Notice* in lParam (the
+    // receiver deletes it).
     FeishuSource(HWND notify, UINT msg);
     ~FeishuSource();
     FeishuSource(const FeishuSource&) = delete;
