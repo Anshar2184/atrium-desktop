@@ -72,9 +72,8 @@ private:
     void Restack();
     void Tick();
     bool IsOurs(HWND h) const;
-    // Resizing by the grip at a widget's bottom corner (nearer the middle of the screen).
-    bool GrowsLeft(const Widget& w) const;
-    bool InGrip(const Widget& w, POINT screen) const;
+    // Bottom corner grips: -1 on the left, 1 on the right, 0 outside either grip.
+    int GripAt(const Widget& w, POINT screen) const;
     void DragSize(Widget& w, POINT screen);
     bool Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r);
     void Menu(Widget& w);

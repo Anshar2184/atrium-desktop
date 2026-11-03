@@ -221,7 +221,7 @@ struct DesktopWidgets::Widget {
     bool hover = false;    // the mouse is over it: the resize grip shows
     bool tracking = false; // TrackMouseEvent asked for its WM_MOUSELEAVE
     bool resizing = false; // dragged by the grip
-    bool growLeft = false; // ... the one at its bottom left (a widget on the right half)
+    bool growLeft = false; // the selected grip is at the bottom left
     WidgetSize downSize = WidgetSize::Small;
     int downCol = 0;
     ULONGLONG activating = 0; // a click activates a note or reminders: it may come forward
@@ -638,17 +638,15 @@ void DesktopWidgets::Resize(Widget& w, WidgetSize size)
     Save();
 }
 
-// The grip is the bottom corner nearer the middle of the screen, the side a widget grows to.
-bool DesktopWidgets::GrowsLeft(const Widget& w) const { return FromRight(w.col, w.size); }
-
-bool DesktopWidgets::InGrip(const Widget& w, POINT screen) const
+int DesktopWidgets::GripAt(const Widget& w, POINT screen) const
 {
     if (!w.surface || !Resizable(w.kind))
-        return false;
+        return 0;
     RECT r = w.surface->Rect();
     int g = int(std::lround(kGrip * Scale()));
-    bool x = GrowsLeft(w) ? screen.x < r.left + g : screen.x >= r.right - g;
-    return x && screen.y >= r.bottom - g && PtInRect(&r, screen);
+    if (screen.y < r.bottom - g || !PtInRect(&r, screen))
+        return 0;
+    return screen.x < r.left + g ? -1 : screen.x >= r.right - g ? 1 : 0;
 }
 
 // Dragging the grip: the size whose corner is nearest the pointer, among those the widget has
@@ -1009,9 +1007,10 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
     case WM_SETCURSOR: {
         POINT p;
         GetCursorPos(&p);
-        if (LOWORD(lp) != HTCLIENT || !(w.resizing || (!w.down && InGrip(w, p))))
+        int grip = w.resizing ? (w.growLeft ? -1 : 1) : w.down ? 0 : GripAt(w, p);
+        if (LOWORD(lp) != HTCLIENT || !grip)
             return false;
-        SetCursor(LoadCursorW(nullptr, (w.resizing ? w.growLeft : GrowsLeft(w)) ? IDC_SIZENESW : IDC_SIZENWSE));
+        SetCursor(LoadCursorW(nullptr, grip < 0 ? IDC_SIZENESW : IDC_SIZENWSE));
         r = TRUE;
         return true;
     }
@@ -1022,19 +1021,21 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
             w.surface->Invalidate();
         }
         return true;
-    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDOWN: {
         w.down = true;
         w.dragging = false;
         GetCursorPos(&w.downAt);
         w.downRect = w.surface->Rect();
-        w.resizing = InGrip(w, w.downAt);
-        w.growLeft = GrowsLeft(w);
+        int grip = GripAt(w, w.downAt);
+        w.growLeft = grip < 0;
+        w.resizing = grip != 0;
         w.downSize = w.size;
         w.downCol = w.col;
         if (w.resizing)
             EndEdit(w);
         SetCapture(w.surface->Hwnd());
         return true;
+    }
     case WM_MOUSEMOVE: {
         if (!w.tracking) {
             TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE, w.surface->Hwnd(), 0};
@@ -1439,11 +1440,10 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
     GetLocalTime(&world_.now);
     PaintWidget(c, w.kind, w.size, w.content, world_, w.hits);
     if ((w.hover || w.resizing) && !w.dragging && Resizable(w.kind)) {
-        // The grip: a short arc along the rounded corner it is in.
+        // Both corners use the same quiet arc; either can be dragged to resize.
         const float r = kWidgetRadius, h = WidgetHeight(w.size);
-        bool left = w.resizing ? w.growLeft : GrowsLeft(w);
-        float cx = left ? r : WidgetWidth(w.size) - r;
-        c.Arc(cx, h - r, r - 6, left ? 100.f : 10.f, left ? 170.f : 80.f, c.theme.subtext, 3.5f);
+        c.Arc(r, h - r, r - 6, 100.f, 170.f, c.theme.subtext, 3.5f);
+        c.Arc(WidgetWidth(w.size) - r, h - r, r - 6, 10.f, 80.f, c.theme.subtext, 3.5f);
     }
     if (w.content.editing)
         PlaceImeWindow(w);

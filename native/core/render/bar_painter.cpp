@@ -6,6 +6,8 @@
 #include "wifi_glyph.h"
 #include "../log.h"
 #include "../motion.h"
+#include "../settings.h"
+#include "glass_renderer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +21,11 @@ namespace {
 
 // Positions (items, the bar's edges) ease towards new places at this rate per second (about 0.3 s).
 constexpr float kSlideRate = 14;
+
+D2D1_COLOR_F InkColor(float dark)
+{
+    return D2D1::ColorF(1.f - 0.93f * dark, 1.f - 0.93f * dark, 1.f - 0.91f * dark, 0.96f - 0.04f * dark);
+}
 
 // motion::Approach, landing on `target` once the rest is invisible: 0..1 values.
 float Approach(float v, float target, double dtMs, float rate)
@@ -304,6 +311,43 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     return moving;
 }
 
+D2D1_ELLIPSE BarPainter::RunningDot(const BarScene& scene, const SceneItem& item, const Motion& motion) const
+{
+    float dx = motion.placed ? motion.x - (item.plate.left + item.plate.right) / 2 : 0;
+    float x = MapX((item.icon.left + item.icon.right) / 2 + dx);
+    float y = (item.icon.bottom + scene.bar.bottom) / 2;
+    float radius = (item.active ? 2.3f : 1.9f) * scene.scale;
+    return D2D1::Ellipse(D2D1::Point2F(x, y), radius, radius);
+}
+
+bool BarPainter::UpdateDotInk(const BarScene& scene, const Readback& backdrop, const Settings& settings, double nowMs)
+{
+    float mix = float(1 - settings.transparency);
+    float tint = (0.2126f * float((settings.tint >> 16) & 255) + 0.7152f * float((settings.tint >> 8) & 255) +
+                  0.0722f * float(settings.tint & 255)) / 255.f;
+    bool moving = false;
+    for (const auto& item : scene.items) {
+        auto& m = motion_[item.key];
+        if (!item.running && m.dot < 0.01f)
+            continue;
+        if (!backdrop.luma.empty()) {
+            auto dot = RunningDot(scene, item, m);
+            float x = dot.point.x + GlassRenderer::kPad;
+            float y = dot.point.y + std::round(frame_.slideY) + GlassRenderer::kPad;
+            float luma = backdrop.RegionLuma(x - dot.radiusX, y - dot.radiusY, x + dot.radiusX, y + dot.radiusY) * (1 - mix) + tint * mix;
+            if (!m.darkDot && luma > 0.50f)
+                m.darkDot = true;
+            else if (m.darkDot && luma < 0.42f)
+                m.darkDot = false;
+        }
+        bool dark = settings.textColor == L"dark" || (settings.textColor == L"auto" && m.darkDot);
+        float before = m.dotInk.Value(nowMs);
+        m.dotInk.Target(dark ? 1.f : 0.f, nowMs);
+        moving |= before != m.dotInk.Value(nowMs) || m.dotInk.Moving(nowMs);
+    }
+    return moving;
+}
+
 void BarPainter::Draw(ID2D1DeviceContext2* d2d, const BarScene& scene, Ink ink, const std::wstring& time, const std::wstring& date,
                       const std::wstring& contentKey, bool animating)
 {
@@ -341,7 +385,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
     auto mix = [](float dark, D2D1_COLOR_F d, D2D1_COLOR_F l) {
         return D2D1::ColorF(l.r + (d.r - l.r) * dark, l.g + (d.g - l.g) * dark, l.b + (d.b - l.b) * dark, l.a + (d.a - l.a) * dark);
     };
-    auto inkFor = [&](float dark) { return mix(dark, D2D1::ColorF(0.07f, 0.07f, 0.09f, 0.92f), D2D1::ColorF(1, 1, 1, 0.96f)); };
+    auto inkFor = InkColor;
     auto haloFor = [&](float dark) { return mix(dark, D2D1::ColorF(1, 1, 1, 0.35f), D2D1::ColorF(0, 0, 0, 0.32f)); };
     auto washFor = [&](float dark) { return mix(dark, D2D1::ColorF(0, 0, 0, 0.10f), D2D1::ColorF(1, 1, 1, 0.20f)); };
     float darkText = inks.darkClock;
@@ -496,14 +540,12 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     // bar's lower edge; full ink for the foreground app, amber when the app
     // asks for attention. It stays on the bar while the icon hops or grows.
     if (m.dot > 0.01f && lift < 0.99f) {
-        float r = (it.active ? 2.3f : 1.9f) * s;
-        float y = (it.icon.bottom + scene.bar.bottom) / 2;
-        D2D1_COLOR_F c = it.attention ? D2D1::ColorF(1.0f, 0.70f, 0.18f, 0.98f) : ink;
+        D2D1_COLOR_F c = it.attention ? D2D1::ColorF(1.0f, 0.70f, 0.18f, 0.98f) : InkColor(m.dotInk.Value(lastMs_));
         if (!it.active && !it.attention)
             c.a *= 0.45f;
         c.a *= (1 - lift) * m.appear * m.dot;
         brush->SetColor(c);
-        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, y), r, r), brush);
+        d2d->FillEllipse(RunningDot(scene, it, m), brush);
     }
 }
 

@@ -493,7 +493,8 @@ public sealed partial class MainWindow
 
         var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28, StretchLastRow = true };
         grid.Children.Add(space);
-        grid.Children.Add(colours);
+        // Bring the outer colour rows in towards xs and xl, leaving room above and below.
+        grid.Children.Add(new Border { Padding = new Thickness(0, 24, 0, 24), Child = colours });
         return Card(grid);
     }
 

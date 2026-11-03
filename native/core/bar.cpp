@@ -1567,6 +1567,7 @@ bool Bar::RenderSession()
     std::wstring drawnText;
     bool darkClock = false, darkApps = false, drawnDark = false, drawnDarkIcons = false, animating = false;
     InkFade clockInk, appsInk; // the inks fade to a new colour, not switch
+    Readback dotBackdrop; // newest completed luminance grid, reused while the desktop is still
     ULONGLONG lastPresent = 0;
     LARGE_INTEGER freq;
     QueryPerformanceFrequency(&freq);
@@ -1984,6 +1985,7 @@ bool Bar::RenderSession()
             if (!snap.scene.items.empty())
                 decide(darkApps, D2D1::RectF(snap.scene.items.front().icon.left, snap.scene.bar.top, snap.scene.items.back().icon.right,
                                              snap.scene.bar.bottom));
+            dotBackdrop = std::move(*rb);
         }
         auto ink = [&](bool autoDark) { return snap.settings.textColor == L"dark" || (snap.settings.textColor == L"auto" && autoDark); };
         bool dark = ink(darkClock), darkIcons = ink(darkApps);
@@ -1994,6 +1996,7 @@ bool Bar::RenderSession()
         std::wstring textKey = time + L"|" + date;
         const double nowMs = ClockMs();
         animating = painter.Animate(snap.scene, nowMs);
+        animating |= painter.UpdateDotInk(snap.scene, dotBackdrop, snap.settings, nowMs);
         clockInk.Target(dark ? 1.f : 0.f, nowMs);
         appsInk.Target(darkIcons ? 1.f : 0.f, nowMs);
         animating |= clockInk.Moving(nowMs) || appsInk.Moving(nowMs);

@@ -7,6 +7,7 @@
 
 #include "../shell/system_status.h"
 #include "../shell/task_model.h"
+#include "glass_panel.h"
 
 #include <d2d1_3.h>
 #include <dwrite_3.h>
@@ -20,6 +21,9 @@
 #include <vector>
 
 namespace atrium {
+
+struct Readback;
+struct Settings;
 
 struct SceneItem {
     std::wstring key;
@@ -88,6 +92,8 @@ public:
 
     // Advances animations to `nowMs` (ClockMs); true while any animation is still moving.
     bool Animate(const BarScene& scene, double nowMs);
+    // Each running dot follows only the backdrop at its displayed position.
+    bool UpdateDotInk(const BarScene& scene, const Readback& backdrop, const Settings& settings, double nowMs);
     const BarFrame& Frame() const { return frame_; }
     // Draws the content. It is rendered into a cached layer and only redrawn
     // when `contentKey` changes or an animation runs; a present caused by the
@@ -116,9 +122,12 @@ private:
         bool placed = false;
         float hop = 0;       // current bounce height, px
         float dot = 0;       // 0..1, the running dot
+        bool darkDot = false;
+        InkFade dotInk;
         bool leaving = false; // the app went away: `ghost` shrinks and fades out where it was
         SceneItem ghost;
     };
+    D2D1_ELLIPSE RunningDot(const BarScene& scene, const SceneItem& item, const Motion& motion) const;
     void DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const SceneItem& it, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
                   D2D1_COLOR_F wash);
     winrt::com_ptr<IDWriteFactory3> dwrite_;
