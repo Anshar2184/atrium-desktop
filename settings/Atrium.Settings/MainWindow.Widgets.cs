@@ -52,20 +52,30 @@ public sealed partial class MainWindow
     }
 
     // A gallery card: the widget on a piece of the bar's glass over the picture, rendered like the hero.
-    private readonly List<(WidgetChoice Choice, Border Stage)> _galleryStages = new();
+    private sealed record GalleryPreview(WidgetChoice Choice, Border Stage, Viewbox Face)
+    {
+        public bool? DarkInk;
+        public long Stamp;
+    }
+
+    private readonly List<GalleryPreview> _galleryStages = new();
     private BarSettings? _galleryMaterial;
     private int _galleryGen = -1;
 
     private FrameworkElement GalleryCard(WidgetChoice c)
     {
         var stage = new Border { Height = 118, CornerRadius = new CornerRadius(14), Background = PhotoBrush() };
-        _galleryStages.Add((c, stage));
+        var face = new Viewbox { Stretch = Stretch.Fill };
+        var holder = new Canvas { IsHitTestVisible = false, Children = { face } };
+        stage.Child = holder;
+        var preview = new GalleryPreview(c, stage, face);
+        _galleryStages.Add(preview);
         double rendered = 0;
         stage.SizeChanged += (_, e) =>
         {
             if (Math.Abs(e.NewSize.Width - rendered) < 16) return;
             rendered = e.NewSize.Width;
-            RenderGalleryCard(c, stage);
+            RenderGalleryCard(preview);
         };
         var name = new TextBlock
         {
@@ -98,11 +108,12 @@ public sealed partial class MainWindow
     private void RefreshGallery()
     {
         if (_galleryMaterial != null && _galleryMaterial.SameMaterial(_current) && _galleryGen == Photo.Generation) return;
-        foreach (var (c, stage) in _galleryStages) RenderGalleryCard(c, stage);
+        foreach (var preview in _galleryStages) RenderGalleryCard(preview);
     }
 
-    private void RenderGalleryCard(WidgetChoice c, Border stage)
+    private void RenderGalleryCard(GalleryPreview preview)
     {
+        var (c, stage, face) = preview;
         double sw = stage.ActualWidth, sh = stage.ActualHeight;
         if (sw < 8 || sh < 8) return;
         _galleryMaterial = _current.Clone();
@@ -111,35 +122,51 @@ public sealed partial class MainWindow
         var (w, h) = WidgetFaces.Size(c.Size);
         double k = Math.Min((sw - 28) / w, (sh - 28) / h);
         var tile = new GlassTile((sw - w * k) / 2, (sh - h * k) / 2, w * k, h * k, 22 * k);
-        PostTiles(stage, sw, sh, k, new[] { tile }, null, (bmp, lumas) =>
+        PostTiles(stage, sw, sh, k, new[] { tile }, null, frame =>
         {
-            stage.Background = new ImageBrush { ImageSource = bmp, Stretch = Stretch.Fill };
-            var face = new Viewbox { Width = tile.W, Height = tile.H, Stretch = Stretch.Fill, Child = WidgetFaces.Face(c.Kind, c.Size, lumas[0] > 0.5f, PhotoBrush()) };
-            var holder = new Canvas { IsHitTestVisible = false };
+            frame.Apply(stage);
+            bool dark = frame.Lumas[0] > 0.5f;
+            long stamp = WidgetFaces.Stamp(c.Kind);
+            if (preview.DarkInk != dark || preview.Stamp != stamp)
+            {
+                face.Child = WidgetFaces.Face(c.Kind, c.Size, dark, PhotoBrush());
+                preview.DarkInk = dark;
+                preview.Stamp = stamp;
+            }
+            face.Width = tile.W;
+            face.Height = tile.H;
             Canvas.SetLeft(face, tile.X);
             Canvas.SetTop(face, tile.Y);
-            holder.Children.Add(face);
-            stage.Child = holder;
         });
     }
 
     // ---- The widgets' glass on the CPU: the picture, the tiles of glass, their mean brightness ----
 
-    private sealed record GlassTile(double X, double Y, double W, double H, double Radius); // stage DIP
-
-    // Renders on the thread pool and hands the bitmap and each tile's brightness (for its ink) to `done`
-    // on the UI thread; a newer request for the same target drops an older result.
+    // One drain for all tile previews, with at most two tiles rendering at once. Pending requests
+    // replace only the same target; equal viewports share a backdrop. No full-size map or obsolete
+    // photo is kept alive after the batch.
+    private sealed record TileJob(object Target, int Id, double W, double H, double K, double Rs,
+                                  IReadOnlyList<GlassTile> Tiles, GlassTile? Bar, BarSettings Material,
+                                  Lazy<Photo> Photo, Action<TileFrame> Done);
+    private readonly object _tileLock = new();
+    private readonly Dictionary<object, TileJob> _pendingTiles = new();
+    private bool _tilesBusy, _tilesStopped;
     private readonly Dictionary<object, int> _tileRequests = new();
 
     // A rendered stage: its pixels (BGRA), and each tile's brightness.
     private sealed record TileFrame(byte[] Px, int PW, int PH, double Rs, float[] Lumas)
     {
-        public WriteableBitmap Bitmap()
+        public void Apply(Border stage)
         {
-            var bmp = new WriteableBitmap(PW, PH);
+            var brush = stage.Background as ImageBrush;
+            var bmp = brush?.ImageSource as WriteableBitmap;
+            if (bmp == null || bmp.PixelWidth != PW || bmp.PixelHeight != PH)
+            {
+                bmp = new WriteableBitmap(PW, PH);
+                stage.Background = new ImageBrush { ImageSource = bmp, Stretch = Stretch.Fill };
+            }
             using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(Px, 0, Px.Length);
             bmp.Invalidate();
-            return bmp;
         }
 
         // The pixels under one tile, for a card that moves with its own piece of glass.
@@ -156,42 +183,67 @@ public sealed partial class MainWindow
     }
 
     private void PostTiles(object target, double w, double h, double k, IReadOnlyList<GlassTile> tiles, GlassTile? bar,
-                           Action<WriteableBitmap, float[]> done) =>
-        PostTiles(target, w, h, k, tiles, bar, f => done(f.Bitmap(), f.Lumas));
-
-    private void PostTiles(object target, double w, double h, double k, IReadOnlyList<GlassTile> tiles, GlassTile? bar,
                            Action<TileFrame> done)
     {
         double rs = Math.Clamp(Content.XamlRoot?.RasterizationScale ?? 1, 1, 2);
         int mine = _tileRequests[target] = (_tileRequests.TryGetValue(target, out int n) ? n : 0) + 1;
-        var material = _current.Clone();
-        var photo = Photo.Capture();
-        Task.Run(() =>
+        lock (_tileLock)
         {
-            int pw = (int)Math.Round(w * rs), ph = (int)Math.Round(h * rs);
-            var bg = Backdrop.Create(pw, ph, w, h, 0, 0, rs, photo.Value);
-            var px = new byte[bg.Base.Length];
-            Buffer.BlockCopy(bg.Base, 0, px, 0, px.Length);
-            var lumas = new float[tiles.Count];
-            var all = bar == null ? tiles : tiles.Append(bar).ToList();
-            for (int i = 0; i < all.Count; i++)
+            if (_tilesStopped) return;
+            _pendingTiles[target] = new TileJob(target, mine, w, h, k, rs, tiles, bar, _current.Clone(), Photo.Capture(), done);
+            if (_tilesBusy) return;
+            _tilesBusy = true;
+        }
+        Task.Run(RenderTiles);
+    }
+
+    private void StopTiles()
+    {
+        lock (_tileLock) { _tilesStopped = true; _pendingTiles.Clear(); }
+    }
+
+    private void RenderTiles()
+    {
+        Backdrop? bg = null;
+        (double W, double H, double Rs, Lazy<Photo> Photo)? backdrop = null;
+        while (true)
+        {
+            TileJob[] jobs;
+            lock (_tileLock)
             {
-                var t = all[i];
-                var s = material.Clone();
-                s.CornerRadius = t.Radius / k;
-                var spec = GlassSpec.For(s, k * rs);
-                int inset = (int)spec.Inset;
-                int x = (int)Math.Round(t.X * rs), y = (int)Math.Round(t.Y * rs), tw = (int)Math.Round(t.W * rs), th = (int)Math.Round(t.H * rs);
-                GlassRenderer.Draw(bg, px, x - inset, y - inset, tw + 2 * inset, th + 2 * inset, spec);
-                if (i < tiles.Count)
-                    lumas[i] = GlassRenderer.MeanLuma(px, pw, Math.Clamp(x, 0, pw - 1), Math.Clamp(y, 0, ph - 1),
-                                                      Math.Clamp(x + tw, 1, pw), Math.Clamp(y + th, 1, ph));
+                if (_pendingTiles.Count == 0) { _tilesBusy = false; return; }
+                jobs = _pendingTiles.Values.ToArray();
+                _pendingTiles.Clear();
             }
-            DispatcherQueue.TryEnqueue(() =>
+            foreach (var group in jobs.GroupBy(j => (j.W, j.H, j.Rs, j.Photo)))
             {
-                if (_tileRequests.TryGetValue(target, out int latest) && latest != mine) return;
-                done(new TileFrame(px, pw, ph, rs, lumas));
-            });
-        });
+                var key = group.Key;
+                int pw = (int)Math.Round(key.W * key.Rs), ph = (int)Math.Round(key.H * key.Rs);
+                try
+                {
+                    if (bg == null || backdrop != key)
+                    {
+                        bg = Backdrop.Create(pw, ph, key.W, key.H, 0, 0, key.Rs, key.Photo.Value);
+                        backdrop = key;
+                    }
+                    Parallel.ForEach(group, new ParallelOptions { MaxDegreeOfParallelism = 2 }, job =>
+                    {
+                        lock (_tileLock)
+                            if (_tilesStopped || _pendingTiles.ContainsKey(job.Target)) return;
+                        var px = new byte[bg.Base.Length];
+                        var lumas = GlassRenderer.DrawTiles(bg, px, job.Material, job.K, job.Rs, job.Tiles, job.Bar);
+                        var frame = new TileFrame(px, pw, ph, job.Rs, lumas);
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            if (!_tilesStopped && _tileRequests[job.Target] == job.Id) job.Done(frame);
+                        });
+                    });
+                }
+                catch (Exception e)
+                {
+                    System.Diagnostics.Debug.WriteLine("tile preview render failed: " + e);
+                }
+            }
+        }
     }
 }

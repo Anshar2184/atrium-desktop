@@ -32,12 +32,14 @@ internal sealed class BarFace
     private readonly List<Ellipse> _dots = new();
     private readonly Border _plate = new() { IsHitTestVisible = false };
     private readonly Rectangle _sep = new() { IsHitTestVisible = false };
-    private readonly FontIcon _tray = Glyph(""), _bell = Glyph("");
+    private readonly FontIcon _tray = Glyph("\uE70E"), _bell = Glyph("\uEA8F");
     private readonly Border _badge = new() { IsHitTestVisible = false, Background = new SolidColorBrush(Color.FromArgb(255, 10, 133, 255)) };
     private readonly TextBlock _badgeText = new() { Text = "3", Foreground = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Center,
                                                     VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center };
     private readonly StatusGlyph _status = new();
     private readonly TextBlock _time = Clock(true), _date = Clock(false), _timeHalo = Clock(true), _dateHalo = Clock(false);
+    private (MainWindow.BarGeometry Geometry, bool Dark, int Apps, int Running, double Magnify, double Zoom, double X, double Y,
+             (double Fill, bool Charging, bool Low) Battery)? _layout;
 
     public BarFace(Canvas canvas, int maxIcons)
     {
@@ -108,6 +110,11 @@ internal sealed class BarFace
     public void Layout(MainWindow.BarGeometry L, bool darkInk, int shownApps, int runningIndex, double magnify, double zoom, double ox, double oy,
                        (double Fill, bool Charging, bool Low) battery)
     {
+        // Material edits change the rendered glass, not the marks on it. Keep their geometries
+        // and brushes until their layout, ink or battery actually changes; clocks update separately.
+        var layout = (L, darkInk, shownApps, runningIndex, magnify, zoom, ox, oy, battery);
+        if (_layout == layout) return;
+        _layout = layout;
         var inkColor = darkInk ? DarkInk : LightInk;
         var ink = new SolidColorBrush(inkColor);
         double X(double u) => (L.Map(u) - ox) * zoom;
@@ -131,7 +138,7 @@ internal sealed class BarFace
             _plate.Background = new SolidColorBrush(darkInk ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(51, 255, 255, 255));
             _plate.Width = _plate.Height = L.P * zoom;
             _plate.CornerRadius = new CornerRadius(L.PlateR * zoom);
-            Canvas.SetLeft(_plate, X(L.PlateX[1]));
+            Canvas.SetLeft(_plate, X(L.PlateX(1)));
             Canvas.SetTop(_plate, Y(L.PlateY));
         }
 
@@ -153,7 +160,7 @@ internal sealed class BarFace
             _icons[i].Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
             _dots[i].Visibility = shown && i == runningIndex ? Visibility.Visible : Visibility.Collapsed;
             if (!shown) continue;
-            var (x, y, size) = Item(L.PlateX[i]);
+            var (x, y, size) = Item(L.PlateX(i));
             _icons[i].Width = _icons[i].Height = size;
             Canvas.SetLeft(_icons[i], x);
             Canvas.SetTop(_icons[i], y);
@@ -161,7 +168,7 @@ internal sealed class BarFace
             double r = 1.9 * L.S * zoom;
             _dots[i].Width = _dots[i].Height = 2 * r;
             _dots[i].Fill = new SolidColorBrush(Color.FromArgb((byte)(inkColor.A * 0.45), inkColor.R, inkColor.G, inkColor.B));
-            Canvas.SetLeft(_dots[i], X(L.PlateX[i] + L.P / 2) - r);
+            Canvas.SetLeft(_dots[i], X(L.PlateX(i) + L.P / 2) - r);
             Canvas.SetTop(_dots[i], Y((iconBottom + barBottom) / 2) - r);
         }
 

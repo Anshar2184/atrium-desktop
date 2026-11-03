@@ -96,6 +96,7 @@ public sealed partial class MainWindow : Window
             StopDesignAnimations();
             _renderWorker?.Stop();
             _swatchWorker?.Stop();
+            StopTiles();
         };
 
         _mains = new FrameworkElement[] { MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainSystem, DesignStack, MainAbout };

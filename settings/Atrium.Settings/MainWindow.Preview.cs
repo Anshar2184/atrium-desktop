@@ -167,6 +167,8 @@ public sealed partial class MainWindow
         if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.5) ShowWidgetMap();
     }
 
+    private readonly List<(string Kind, string Size, bool Dark, long Stamp, Viewbox View)> _mapFaces = new();
+
     private void ShowWidgetMap()
     {
         if (_widgetWatcher == null && Directory.Exists(System.IO.Path.GetDirectoryName(WidgetsPath)))
@@ -212,18 +214,31 @@ public sealed partial class MainWindow
         var bar = new GlassTile((stageW - barW) / 2, WidgetStage.Height - barH - Math.Max(2, _current.Margin * kh), barW, barH, barH / 2);
         int shown = tiles.Count;
         double stageH = WidgetStage.Height;
-        PostTiles(WidgetMap, stageW, stageH, Math.Min(k, kh), tiles, bar, (bmp, lumas) =>
+        PostTiles(WidgetMap, stageW, stageH, Math.Min(k, kh), tiles, bar, frame =>
         {
-            WidgetStage.Background = new ImageBrush { ImageSource = bmp, Stretch = Stretch.Fill };
-            WidgetMap.Children.Clear();
+            frame.Apply(WidgetStage);
             WidgetMap.Clip = new RectangleGeometry { Rect = new Rect(0, 0, stageW, stageH) };
+            while (_mapFaces.Count > tiles.Count)
+            {
+                WidgetMap.Children.Remove(_mapFaces[^1].View);
+                _mapFaces.RemoveAt(_mapFaces.Count - 1);
+            }
             for (int i = 0; i < tiles.Count; i++)
             {
                 var t = tiles[i];
-                var face = new Viewbox { Width = t.W, Height = t.H, Stretch = Stretch.Fill, Child = WidgetFaces.Face(faces[i].Kind, faces[i].Size, lumas[i] > 0.5f, PhotoBrush()) };
+                var (kind, size) = faces[i];
+                bool dark = frame.Lumas[i] > 0.5f;
+                long stamp = WidgetFaces.Stamp(kind);
+                bool added = i == _mapFaces.Count;
+                var face = added ? new Viewbox { Stretch = Stretch.Fill } : _mapFaces[i].View;
+                if (added || _mapFaces[i].Kind != kind || _mapFaces[i].Size != size || _mapFaces[i].Dark != dark || _mapFaces[i].Stamp != stamp)
+                    face.Child = WidgetFaces.Face(kind, size, dark, PhotoBrush());
+                if (added) { WidgetMap.Children.Insert(i, face); _mapFaces.Add((kind, size, dark, stamp, face)); }
+                else _mapFaces[i] = (kind, size, dark, stamp, face);
+                face.Width = t.W;
+                face.Height = t.H;
                 Canvas.SetLeft(face, t.X);
                 Canvas.SetTop(face, t.Y);
-                WidgetMap.Children.Add(face);
             }
             Ready("widgets");
         });

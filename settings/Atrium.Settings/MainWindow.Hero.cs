@@ -30,12 +30,14 @@ public sealed partial class MainWindow
     // pointer at Centre), BarX/BarW the stretched glass the wave makes.
     internal sealed record BarGeometry(
         double S, double BaseX, double BarX, double BarY, double BarW, double BarH, double Radius, double MaxW,
-        int N, double Icon, double P, double PlateR, double[] PlateX, double PlateY,
+        int N, double Icon, double P, double PlateR, double AppsLeft, double Pitch, double PlateY,
         bool Clock, double ClockX, double ClockW, double TimePx, double DatePx, double SepX,
         double StartX, double TrayX, double StatusX, double BellX,
         double K, double Centre, double Range,
         double LoupeX0, double LoupeY0, double LoupeW, double LoupeH)
     {
+        public double PlateX(int i) => BaseX + (AppsLeft + i * Pitch) * S;
+
         public double Map(double u)
         {
             if (K <= 0) return u;
@@ -169,13 +171,11 @@ public sealed partial class MainWindow
 
         double bx = (_heroW - barW * S) / 2;
         double by = Math.Max(10, _heroH - s.Margin * S - H * S);
-        var plateX = new double[n];
-        for (int i = 0; i < n; i++) plateX[i] = bx + (appsLeft + i * pitch) * S;
         double X(double left) => left < 0 ? -1 : bx + left * S;
 
         // As if the pointer rested on the second app.
         double k = mag > 1.001 ? mag - 1 : 0, range = pitch * 2.3 * S;
-        double centre = n > 1 ? plateX[1] + P * S / 2 : bx + (pad + P / 2) * S;
+        double centre = n > 1 ? bx + (appsLeft + pitch) * S + P * S / 2 : bx + (pad + P / 2) * S;
         double Map(double u)
         {
             if (k <= 0) return u;
@@ -187,7 +187,7 @@ public sealed partial class MainWindow
         // The loupe's view: the whole top right corner and the bell, 10 DIP of air around.
         double lw = Math.Max(64, reff + 34), lh = Math.Max(56, reff + 26);
         return new BarGeometry(S, bx, left, by, right - left, H * S, reff * S, maxW * S,
-            n, I * S, P * S, Math.Max(4, Math.Min(P / 2, reff - v)) * S, plateX, by + v * S,
+            n, I * S, P * S, Math.Max(4, Math.Min(P / 2, reff - v)) * S, appsLeft, pitch, by + v * S,
             clockW > 0, X(clockLeft), clockW * S, timePx * S, datePx * S, rightCount > 0 ? bx + (rightLeft - sepGap) * S : -1,
             bx + pad * S, X(trayLeft), X(statusLeft), X(bellLeft),
             k, centre, range,
@@ -306,9 +306,9 @@ public sealed partial class MainWindow
             case "图标大小":
             {
                 if (L.N == 0) break;
-                double x = L.PlateX[0] + L.P / 2 - L.Icon / 2 - 4, y0 = L.PlateY + L.P / 2 - L.Icon / 2, y1 = y0 + L.Icon;
+                double x = L.PlateX(0) + L.P / 2 - L.Icon / 2 - 4, y0 = L.PlateY + L.P / 2 - L.Icon / 2, y1 = y0 + L.Icon;
                 Line(x, y0, x, y1); Line(x - 3, y0, x + 3, y0); Line(x - 3, y1, x + 3, y1);
-                Chip($"{Math.Round(_current.IconSize)} px", L.PlateX[0] + L.P / 2, L.BarY - 28);
+                Chip($"{Math.Round(_current.IconSize)} px", L.PlateX(0) + L.P / 2, L.BarY - 28);
                 break;
             }
         }

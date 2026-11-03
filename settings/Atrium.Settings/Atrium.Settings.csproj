@@ -18,7 +18,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\atrium.ico</ApplicationIcon>
-    <Version>0.9.12</Version>
+    <Version>0.9.13</Version>
     <Product>Atrium Desktop</Product>
     <Copyright>MIT License</Copyright>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>

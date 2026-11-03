@@ -92,9 +92,34 @@ internal readonly record struct GlassSpec(
     }
 }
 
+// One preview tile in stage DIP; the optional last tile is the bar below the widgets.
+internal readonly record struct GlassTile(double X, double Y, double W, double H, double Radius);
+
 internal static class GlassRenderer
 {
     private static readonly Vector2 Light = new(-0.6f, -0.8f);
+
+    public static float[] DrawTiles(Backdrop bg, byte[] pixels, BarSettings material, double scale, double rs,
+                                    IReadOnlyList<GlassTile> tiles, GlassTile? bar)
+    {
+        Buffer.BlockCopy(bg.Base, 0, pixels, 0, pixels.Length);
+        var lumas = new float[tiles.Count];
+        var spec = GlassSpec.For(material, scale * rs);
+        int inset = (int)spec.Inset;
+        for (int i = 0; i < tiles.Count + (bar.HasValue ? 1 : 0); i++)
+        {
+            var t = i < tiles.Count ? tiles[i] : bar!.Value;
+            // Keep the same DIP-to-pixel arithmetic as GlassSpec.For with this tile's radius.
+            var shape = spec with { Radius = (float)((t.Radius / scale) * (scale * rs)) };
+            int x = (int)Math.Round(t.X * rs), y = (int)Math.Round(t.Y * rs);
+            int w = (int)Math.Round(t.W * rs), h = (int)Math.Round(t.H * rs);
+            Draw(bg, pixels, x - inset, y - inset, w + 2 * inset, h + 2 * inset, shape);
+            if (i < tiles.Count)
+                lumas[i] = MeanLuma(pixels, bg.Width, Math.Clamp(x, 0, bg.Width - 1), Math.Clamp(y, 0, bg.Height - 1),
+                                   Math.Clamp(x + w, 1, bg.Width), Math.Clamp(y + h, 1, bg.Height));
+        }
+        return lumas;
+    }
 
     // Draws the glass window (winW x winH px, top-left at winX,winY; shape inset by p.Inset)
     // over `dst`, which must already hold the backdrop (bg.Base). BGRA8, opaque.

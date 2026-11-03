@@ -185,6 +185,23 @@ internal static class WidgetFaces
         return c;
     }
 
+    // Keep a preview face while its displayed data is unchanged. This only invalidates an
+    // existing render request; it does not add a clock or a polling timer to the gallery.
+    public static long Stamp(string kind) => kind switch
+    {
+        "clock" => DateTime.Now.Ticks / TimeSpan.TicksPerSecond,
+        "digital" => DateTime.Now.Ticks / TimeSpan.TicksPerMinute,
+        "calendar" => DateTime.Today.Ticks,
+        "battery" => BatteryStamp(),
+        _ => 0,
+    };
+
+    private static long BatteryStamp()
+    {
+        var (fill, charging, low) = BarFace.Battery();
+        return (long)Math.Round(fill * 100) | (charging ? 128L : 0) | (low ? 256L : 0);
+    }
+
     // ---- The calendar: small, medium, and the large month with a lunar day under every date ----
 
     private static readonly ChineseLunisolarCalendar Lunar = new();

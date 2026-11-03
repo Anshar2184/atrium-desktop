@@ -137,13 +137,23 @@ void WeChatSource::Run()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     winrt::com_ptr<IUIAutomationCondition> cells;
+    winrt::com_ptr<IUIAutomationCacheRequest> cache;
     winrt::com_ptr<IUIAutomation> uia = CreateUia(stop_, wake_, L"wechat", [&](IUIAutomation* u) {
+        cells = nullptr;
         VARIANT v{};
         v.vt = VT_BSTR;
         v.bstrVal = SysAllocString(L"mmui::ChatSessionCell");
         HRESULT hr = u->CreatePropertyCondition(UIA_ClassNamePropertyId, v, cells.put());
         VariantClear(&v);
-        return hr;
+        if (FAILED(hr))
+            return hr;
+        cache = nullptr;
+        winrt::com_ptr<IUIAutomationCondition> raw;
+        if (FAILED(hr = u->CreateCacheRequest(cache.put())) || FAILED(hr = cache->AddProperty(UIA_AutomationIdPropertyId)) ||
+            FAILED(hr = cache->AddProperty(UIA_NamePropertyId)) || FAILED(hr = cache->put_TreeScope(TreeScope_Element)) ||
+            FAILED(hr = u->get_RawViewCondition(raw.put())) || FAILED(hr = cache->put_TreeFilter(raw.get())))
+            return hr;
+        return cache->put_AutomationElementMode(AutomationElementMode_None);
     });
     std::map<std::wstring, int> unread; // chat row id -> unread count last seen
     bool baseline = false;
@@ -182,7 +192,8 @@ void WeChatSource::Run()
                     for (HWND h : WeChatWindows(p)) {
                         winrt::com_ptr<IUIAutomationElement> root;
                         winrt::com_ptr<IUIAutomationElementArray> all;
-                        if (FAILED(uia->ElementFromHandle(h, root.put())) || !root || FAILED(root->FindAll(TreeScope_Descendants, cells.get(), all.put())) || !all)
+                        if (FAILED(uia->ElementFromHandle(h, root.put())) || !root ||
+                            FAILED(root->FindAllBuildCache(TreeScope_Descendants, cells.get(), cache.get(), all.put())) || !all)
                             continue;
                         int n = 0;
                         all->get_Length(&n);
@@ -190,7 +201,7 @@ void WeChatSource::Run()
                             winrt::com_ptr<IUIAutomationElement> e;
                             all->GetElement(i, e.put());
                             BSTR id = nullptr, name = nullptr;
-                            if (!e || FAILED(e->get_CurrentAutomationId(&id)) || FAILED(e->get_CurrentName(&name)) || !name) {
+                            if (!e || FAILED(e->get_CachedAutomationId(&id)) || FAILED(e->get_CachedName(&name)) || !name) {
                                 SysFreeString(id);
                                 SysFreeString(name);
                                 continue;
@@ -258,6 +269,7 @@ void WeChatSource::Run()
         }
     }
     cells = nullptr;
+    cache = nullptr;
     uia = nullptr;
     winrt::uninit_apartment();
 }

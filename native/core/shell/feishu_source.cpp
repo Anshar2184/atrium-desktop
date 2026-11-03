@@ -102,7 +102,7 @@ std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& 
 }
 
 // The popup's texts in order, the empty ones left out.
-std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text, HWND h, UiaWatch& watch)
+std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text, IUIAutomationCacheRequest* cache, HWND h, UiaWatch& watch)
 {
     std::vector<std::wstring> out;
     winrt::com_ptr<IUIAutomationElement> root;
@@ -110,7 +110,7 @@ std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text
     if (FAILED(uia->ElementFromHandle(h, root.put())) || !root)
         return out;
     watch.Add(h, root.get());
-    if (FAILED(root->FindAll(TreeScope_Descendants, text, all.put())) || !all)
+    if (FAILED(root->FindAllBuildCache(TreeScope_Descendants, text, cache, all.put())) || !all)
         return out;
     int n = 0;
     all->get_Length(&n);
@@ -118,7 +118,7 @@ std::vector<std::wstring> Texts(IUIAutomation* uia, IUIAutomationCondition* text
         winrt::com_ptr<IUIAutomationElement> e;
         all->GetElement(i, e.put());
         BSTR name = nullptr;
-        if (e && SUCCEEDED(e->get_CurrentName(&name)) && name) {
+        if (e && SUCCEEDED(e->get_CachedName(&name)) && name) {
             std::wstring t = Trim(name);
             if (!t.empty())
                 out.push_back(t);
@@ -148,11 +148,22 @@ void FeishuSource::Run()
 {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     winrt::com_ptr<IUIAutomationCondition> text;
+    winrt::com_ptr<IUIAutomationCacheRequest> cache;
     winrt::com_ptr<IUIAutomation> uia = CreateUia(stop_, wake_, L"feishu", [&](IUIAutomation* u) {
+        text = nullptr;
         VARIANT v{};
         v.vt = VT_I4;
         v.lVal = UIA_TextControlTypeId;
-        return u->CreatePropertyCondition(UIA_ControlTypePropertyId, v, text.put());
+        HRESULT hr = u->CreatePropertyCondition(UIA_ControlTypePropertyId, v, text.put());
+        if (FAILED(hr))
+            return hr;
+        cache = nullptr;
+        winrt::com_ptr<IUIAutomationCondition> raw;
+        if (FAILED(hr = u->CreateCacheRequest(cache.put())) || FAILED(hr = cache->AddProperty(UIA_NamePropertyId)) ||
+            FAILED(hr = cache->put_TreeScope(TreeScope_Element)) || FAILED(hr = u->get_RawViewCondition(raw.put())) ||
+            FAILED(hr = cache->put_TreeFilter(raw.get())))
+            return hr;
+        return cache->put_AutomationElementMode(AutomationElementMode_None);
     });
     // Popups already handled, by window and text (a popup may be reused for the next message).
     std::map<HWND, std::wstring> seen;
@@ -183,7 +194,7 @@ void FeishuSource::Run()
                 std::map<HWND, std::wstring> now;
                 for (const auto& [h, pid] : popups) {
                     const bool firstRead = !watch.Contains(h);
-                    std::vector<std::wstring> t = Texts(uia.get(), text.get(), h, watch);
+                    std::vector<std::wstring> t = Texts(uia.get(), text.get(), cache.get(), h, watch);
                     if (t.empty()) {
                         loading = loading || firstRead; // one settling pass; later changes wake through UIA
                         continue; // still loading: read again next time
@@ -219,6 +230,7 @@ void FeishuSource::Run()
         }
     }
     text = nullptr;
+    cache = nullptr;
     uia = nullptr;
     winrt::uninit_apartment();
 }
