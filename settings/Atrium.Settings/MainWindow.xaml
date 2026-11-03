@@ -40,8 +40,6 @@
                         <Image Source="ms-appx:///Assets/atrium-256.png" Width="26" Height="26" />
                         <TextBlock Text="Atrium" FontFamily="{StaticResource TitleFont}" FontSize="16" VerticalAlignment="Center" />
                     </StackPanel>
-                    <TextBlock x:Name="HeaderTitle" Grid.Column="1" Style="{StaticResource TitleStyle}" Margin="32,0,0,0"
-                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                 </Grid>
                 <!-- Outside the draggable element, so both actions receive normal pointer input. -->
                 <Border x:Name="SaveBar" Grid.Column="1" VerticalAlignment="Center" Opacity="0" IsHitTestVisible="False">
@@ -100,6 +98,8 @@
             <!-- ======== Workspace ======== -->
             <ScrollViewer x:Name="CenterScroll" Style="{StaticResource PageStyle}" SizeChanged="OnWorkspaceSizeChanged">
                 <StackPanel x:Name="CenterStack" Style="{StaticResource WorkspaceStackStyle}" SizeChanged="OnCenterSizeChanged">
+                    <!-- The page's title, at the top of the page (not in the window's title bar) -->
+                    <TextBlock x:Name="PageTitle" Style="{StaticResource LargeTitleStyle}" Margin="2,2,0,-4" />
                     <!-- The live preview: the glass bar over the photo (material, shape, dock) -->
                     <StackPanel x:Name="HeroBlock" Spacing="10">
                         <Border x:Name="HeroFrame" Height="360" CornerRadius="28" Background="#FFCBD3DD" SizeChanged="OnHeroSizeChanged">
@@ -110,7 +110,7 @@
                                     <Grid>
                                         <Canvas x:Name="LoupeCanvas" />
                                         <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8" CornerRadius="6" Padding="6,2,6,3" Background="#80000000">
-                                            <TextBlock Text="3× 放大" FontSize="11" Foreground="#E6FFFFFF" />
+                                            <TextBlock x:Name="LoupeLabel" Text="5× 放大" FontSize="11" Foreground="#E6FFFFFF" />
                                         </Border>
                                     </Grid>
                                 </Border>
@@ -123,15 +123,13 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
-                                <StackPanel Orientation="Horizontal">
+                            <local:SegmentTrack>
                                     <RadioButton x:Name="BgSpecimen" GroupName="herobg" Content="流线" Tag="flow" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
                                     <RadioButton x:Name="BgPaper" GroupName="herobg" Content="纸张" Tag="paper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
                                     <RadioButton x:Name="BgGeometry" GroupName="herobg" Content="几何" Tag="geometry" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
                                     <RadioButton x:Name="BgLayers" GroupName="herobg" Content="层叠" Tag="layers" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
                                     <RadioButton x:Name="BgWallpaper" GroupName="herobg" Content="我的壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
-                                </StackPanel>
-                            </Border>
+                                </local:SegmentTrack>
                             <StackPanel x:Name="LoupeToggle" Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                                 <TextBlock Text="局部放大" Style="{StaticResource RowNoteStyle}" VerticalAlignment="Center" />
                                 <ToggleSwitch x:Name="LoupeSwitch" Style="{StaticResource SwitchStyle}" Toggled="OnLoupeToggled"
@@ -283,9 +281,9 @@
 
                     <!-- ==== Notifications: the cards as they pop up ==== -->
                     <StackPanel x:Name="MainNotify" Visibility="Collapsed" Spacing="10">
-                        <Border x:Name="NotifyStage" Height="340" CornerRadius="28" Background="#FFCBD3DD">
+                        <Border x:Name="NotifyStage" Height="340" CornerRadius="28" Background="#FFCBD3DD" SizeChanged="OnNotifyStageSizeChanged">
                             <Grid>
-                                <StackPanel x:Name="NotifyCards" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,28" Spacing="10" Width="360" />
+                                <Canvas x:Name="NotifyCards" HorizontalAlignment="Left" VerticalAlignment="Top" />
                                 <Border CornerRadius="28" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
                             </Grid>
                         </Border>
@@ -420,13 +418,11 @@
                                                   Note="固定的应用之后，显示正在运行的其他应用，下方带一个小圆点。" />
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="文字颜色" Style="{StaticResource RowTitleStyle}" />
-                                    <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
-                                        <StackPanel Orientation="Horizontal">
+                                    <local:SegmentTrack>
                                             <RadioButton x:Name="TextAuto" GroupName="ink" Content="自动" Tag="auto" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
                                             <RadioButton x:Name="TextLight" GroupName="ink" Content="浅色" Tag="light" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
                                             <RadioButton x:Name="TextDark" GroupName="ink" Content="深色" Tag="dark" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
-                                        </StackPanel>
-                                    </Border>
+                                        </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel>
@@ -469,21 +465,17 @@
                                                   Note="拖动可移动，拖下角可改变大小，右键可移除。" />
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="靠边排列" Style="{StaticResource RowTitleStyle}" />
-                                    <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
-                                        <StackPanel Orientation="Horizontal">
+                                    <local:SegmentTrack>
                                             <RadioButton x:Name="WidgetsLeft" GroupName="widgetside" Content="左侧" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
                                             <RadioButton x:Name="WidgetsRight" GroupName="widgetside" Content="右侧" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
-                                        </StackPanel>
-                                    </Border>
+                                        </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="玻璃映出" Style="{StaticResource RowTitleStyle}" />
-                                    <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
-                                        <StackPanel Orientation="Horizontal">
+                                    <local:SegmentTrack>
                                             <RadioButton x:Name="BackdropDesktop" GroupName="backdrop" Content="实时桌面" Tag="desktop" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
                                             <RadioButton x:Name="BackdropWallpaper" GroupName="backdrop" Content="静态壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
-                                        </StackPanel>
-                                    </Border>
+                                        </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>

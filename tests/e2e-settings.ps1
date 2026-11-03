@@ -138,7 +138,7 @@ try {
     Check "notify-applied" ((NewLog) -match "pipe: commit saved") "the core received the commit"
 
     # Pins list: remove the first pin and save.
-    Navigate $win "程序坞"
+    Navigate $win "任务栏"
     $removes = RemoveButtons $win
     if ($removes.Count -gt 0) {
         $before = $removes.Count

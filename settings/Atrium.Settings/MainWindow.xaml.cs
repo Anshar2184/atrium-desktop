@@ -105,6 +105,11 @@ public sealed partial class MainWindow : Window
         BuildTintSwatches();
         InitPins();
         InitHero();
+        PhotoChanged += () =>
+        {
+            if (_page == 4) { ShowWidgetMap(); RefreshGallery(); }
+            if (_page == 3) ShowNotifyPreview(false);
+        };
         PathText.Text = CoreClient.SettingsPath;
         var v = typeof(MainWindow).Assembly.GetName().Version;
         VersionText.Text = "版本 " + (v?.ToString(3) ?? "0.9");
@@ -142,10 +147,11 @@ public sealed partial class MainWindow : Window
         if (_mains[index] == MainWidgets)
         {
             if (WidgetGallery.Children.Count == 0) BuildWidgetGallery(); // built when first shown
+            else RefreshGallery();
             ShowWidgetMap();
         }
         if (_mains[index] == MainNotify) ShowNotifyPreview(true);
-        HeaderTitle.Text = PageTitles[index];
+        PageTitle.Text = PageTitles[index];
         HeroBlock.Visibility = index < 3 ? Visibility.Visible : Visibility.Collapsed;
         LoupeToggle.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
         Loupe.Visibility = index == 0 && LoupeSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
@@ -211,13 +217,6 @@ public sealed partial class MainWindow : Window
             _loupeBrush.ImageSource = null;
             _loupeBmp = null;
         }
-        UpdateHero();
-    }
-
-    // The preview's photograph: the sample, or the user's own wallpaper (Photo.cs).
-    private void OnHeroBackgroundChecked(object sender, RoutedEventArgs e)
-    {
-        if (sender is not RadioButton { Tag: string tag } || !Photo.Select(tag)) return;
         UpdateHero();
     }
 

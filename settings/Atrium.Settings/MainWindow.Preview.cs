@@ -41,61 +41,95 @@ public sealed partial class MainWindow
         _readout[0].Value.Text = $"{s.Height:0} px";
         _readout[0].Note.Text = $"图标 {s.IconSize:0} px";
         _readout[1].Value.Text = $"{r:0} px";
-        _readout[1].Note.Text = s.CornerRadius > r ? $"设为 {s.CornerRadius:0}，不超过高度的一半" : "圆弧角";
+        _readout[1].Note.Text = s.CornerRadius > r ? $"设为 {s.CornerRadius:0}，不超过高度的一半" : capsule ? "两端为半圆" : "连续曲率圆角（G3）";
         _readout[2].Value.Text = s.AutoWidth ? "自动" : $"{s.Width:0} px";
         _readout[2].Note.Text = s.AutoWidth ? $"最宽 {s.Width:0} px" : "固定宽度";
         _readout[3].Value.Text = capsule ? "胶囊形" : r < 1 ? "直角" : "圆角矩形";
         _readout[3].Note.Text = $"距底边 {s.Margin:0} px";
     }
 
-    // ---- Notifications: two cards over the photo, as the core lays them out ----
+    // ---- Notifications: the popup's stack over the picture, as the core paints it ----
+    // (native/core/ui/notifications.cpp: cards 384 x 112, each its own piece of the bar's glass; the newest
+    // in front with its text, the one behind peeking 10 DIP above, 12 DIP narrower on each side.)
+
+    private const double CardW = 384, CardH = 112, CardPeek = 10, CardInset = 12;
+    private bool _notifyDark;
 
     private void ShowNotifyPreview(bool animate)
     {
         if (NotifyStage.Background is not ImageBrush) NotifyStage.Background = PhotoBrush();
         var s = _current;
-        // A card's corner follows the bar's (D26: between 8 and half the bar's height).
-        double radius = Math.Clamp(s.CornerRadius, 8, Math.Max(8, s.Height / 2));
-        (string App, uint C1, uint C2, string Glyph, string Title, string Body, string When)[] cards =
-        {
-            ("日历", 0xFF6B6B, 0xE0315A, "\uE787", "产品评审", "10:30 · 三号会议室，带上新版设计稿。", "5 分钟前"),
-            ("微信", 0x5BE37D, 0x1AAD19, "\uE8BD", "林晨", "明天的活动时间定了吗？我这边上午都有空。", "现在"),
-        };
+        double radius = Math.Min(Math.Clamp(s.CornerRadius, 8, Math.Max(8, s.Height / 2)), CardH / 2);
+        double W = NotifyStage.ActualWidth, H = NotifyStage.ActualHeight;
+        if (W < CardW + 48 || H < CardH + 60) { W = Math.Max(W, CardW + 48); H = Math.Max(H, CardH + 60); }
+        var front = new GlassTile(W - 24 - CardW, H - 28 - CardH, CardW, CardH, radius);
+        var back = new GlassTile(front.X + CardInset, front.Y - CardPeek, CardW - 2 * CardInset, CardH, radius);
+
         NotifyCards.Children.Clear();
-        for (int i = 0; i < cards.Length; i++)
-        {
-            var c = cards[i];
-            var icon = new Border
-            {
-                Width = 36, Height = 36, CornerRadius = new CornerRadius(9), VerticalAlignment = VerticalAlignment.Top,
-                Background = Gradient(c.C1, c.C2),
-                Child = new FontIcon { Glyph = c.Glyph, FontSize = 17, Foreground = new SolidColorBrush(Colors.White) },
-            };
-            var head = new Grid();
-            head.Children.Add(new TextBlock { Text = c.App, FontSize = 12, Foreground = new SolidColorBrush(Color.FromArgb(150, 0x1D, 0x1D, 0x1F)) });
-            head.Children.Add(new TextBlock { Text = c.When, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Right, Foreground = new SolidColorBrush(Color.FromArgb(130, 0x1D, 0x1D, 0x1F)) });
-            var text = new StackPanel { Spacing = 2 };
-            text.Children.Add(head);
-            text.Children.Add(new TextBlock { Text = c.Title, FontSize = 14, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(240, 0x1D, 0x1D, 0x1F)) });
-            if (!s.NotifyHideBody)
-                text.Children.Add(new TextBlock { Text = c.Body, FontSize = 13, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis,
-                                                  Foreground = new SolidColorBrush(Color.FromArgb(190, 0x1D, 0x1D, 0x1F)) });
-            var row = new Grid { ColumnSpacing = 12 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            Grid.SetColumn(text, 1);
-            row.Children.Add(icon);
-            row.Children.Add(text);
-            var card = new Border
-            {
-                Child = row, Padding = new Thickness(14, 12, 16, 13), CornerRadius = new CornerRadius(radius),
-                Background = new SolidColorBrush(Color.FromArgb(205, 250, 250, 252)), BorderBrush = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)),
-                BorderThickness = new Thickness(1), Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 16),
-            };
-            NotifyCards.Children.Add(card);
-            if (animate) Rise(card, i * 90);
-        }
+        NotifyCards.Width = W;
+        NotifyCards.Height = H;
+        var backCard = new Border { Width = back.W, Height = back.H, CornerRadius = new CornerRadius(radius) };
+        var frontCard = new Border { Width = front.W, Height = front.H, CornerRadius = new CornerRadius(radius), Child = CardText(s, _notifyDark) };
+        Canvas.SetLeft(backCard, back.X); Canvas.SetTop(backCard, back.Y);
+        Canvas.SetLeft(frontCard, front.X); Canvas.SetTop(frontCard, front.Y);
+        NotifyCards.Children.Add(backCard);
+        NotifyCards.Children.Add(frontCard);
+        if (animate) { Rise(backCard, 0); Rise(frontCard, 70); }
         NotifyCaption.Text = $"{s.NotifyTimeout:0} 秒后收起" + (s.NotifyHideBody ? " · 正文已隐藏" : "");
+
+        // Their glass: rendered over the picture where they rest; each card carries its own piece.
+        PostTiles(NotifyCards, W, H, 1, new[] { back, front }, null, f =>
+        {
+            backCard.Background = new ImageBrush { ImageSource = f.Crop(back), Stretch = Stretch.Fill };
+            frontCard.Background = new ImageBrush { ImageSource = f.Crop(front), Stretch = Stretch.Fill };
+            bool dark = _notifyDark ? f.Lumas[1] >= 0.42f : f.Lumas[1] > 0.50f;
+            if (dark != _notifyDark)
+            {
+                _notifyDark = dark;
+                frontCard.Child = CardText(s, dark);
+            }
+        });
+    }
+
+    // PaintCard: the app (12 semibold, secondary ink) after the unread dot, when (12, faint) on the right,
+    // the title (14 semibold), the body (13, secondary ink, two lines) or "content hidden".
+    private static FrameworkElement CardText(BarSettings s, bool dark)
+    {
+        Color ink = dark ? Color.FromArgb(255, 0x11, 0x13, 0x17) : Colors.White;
+        SolidColorBrush A(double a) => new(Color.FromArgb((byte)Math.Round(255 * a), ink.R, ink.G, ink.B));
+        var text = A(dark ? 0.92 : 0.96);
+        var sub = A(dark ? 0.66 : 0.76);
+        var faint = A(dark ? 0.46 : 0.56);
+        var c = new Canvas { IsHitTestVisible = false };
+        TextBlock T(string str, double size, string font, Brush brush, double x, double y, double w, bool wrap = false)
+        {
+            var t = new TextBlock
+            {
+                Text = str, FontSize = size, Foreground = brush, Width = w, FontFamily = (FontFamily)Application.Current.Resources[font],
+                TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = wrap ? 2 : 1, IsTextScaleFactorEnabled = false,
+            };
+            Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(t, Microsoft.UI.Xaml.FontNumeralAlignment.Tabular);
+            Canvas.SetLeft(t, x); Canvas.SetTop(t, y);
+            c.Children.Add(t);
+            return t;
+        }
+        double tx = 20, ty = 16;
+        var dot = new Ellipse { Width = 7, Height = 7, Fill = new SolidColorBrush(Color.FromArgb(255, 0x0A, 0x84, 0xFF)) };
+        Canvas.SetLeft(dot, tx); Canvas.SetTop(dot, ty + 4.5);
+        c.Children.Add(dot);
+        T("微信", 12, "TitleFont", sub, tx + 12, ty - 1, CardW - 170 - tx - 12);
+        var when = T("刚刚", 12, "EmphasisFont", faint, CardW - 170, ty - 1, 120);
+        when.TextAlignment = TextAlignment.Right;
+        T("林晨", 14, "TitleFont", text, tx, ty + 21, CardW - 20 - tx);
+        if (s.NotifyHideBody) T("内容已隐藏", 13, "TextFont", faint, tx, ty + 45, CardW - 20 - tx);
+        else T("明天的活动时间定了吗？我这边上午都有空，下午三点以后也可以。", 13, "TextFont", sub, tx, ty + 45, CardW - 20 - tx, wrap: true);
+        return c;
+    }
+
+    private void OnNotifyStageSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_page == 3 && Math.Abs(e.NewSize.Width - e.PreviousSize.Width) + Math.Abs(e.NewSize.Height - e.PreviousSize.Height) > 0.5) ShowNotifyPreview(false);
     }
 
     private void OnReplayNotify(object sender, RoutedEventArgs e) => ShowNotifyPreview(true);
@@ -104,7 +138,7 @@ public sealed partial class MainWindow
     private void Rise(UIElement e, int delayMs)
     {
         e.Opacity = 0;
-        e.Translation = new Vector3(0, 18, 16);
+        e.Translation = new Vector3(0, 18, 0);
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(30 + delayMs);
         timer.IsRepeating = false;
@@ -113,17 +147,9 @@ public sealed partial class MainWindow
             e.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) };
             e.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(360) };
             e.Opacity = 1;
-            e.Translation = new Vector3(0, 0, 16);
+            e.Translation = Vector3.Zero;
         };
         timer.Start();
-    }
-
-    private static LinearGradientBrush Gradient(uint c1, uint c2)
-    {
-        var g = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
-        g.GradientStops.Add(new GradientStop { Color = RgbColor(c1), Offset = 0 });
-        g.GradientStops.Add(new GradientStop { Color = RgbColor(c2), Offset = 1 });
-        return g;
     }
 
     // ---- Widgets: the desktop, scaled down, with the widgets where the core puts them ----
@@ -167,9 +193,9 @@ public sealed partial class MainWindow
         double k = stageW / W, kh = WidgetStage.Height / H;
         if (WidgetStage.Background is not ImageBrush) WidgetStage.Background = PhotoBrush();
 
-        WidgetMap.Children.Clear();
-        WidgetMap.Clip = new RectangleGeometry { Rect = new Rect(0, 0, stageW, WidgetStage.Height) };
-        int shown = 0;
+        // The tiles where the core puts them, then the bar at the bottom for scale; all glass.
+        var tiles = new List<GlassTile>();
+        var faces = new List<(string Kind, string Size)>();
         foreach (var (kind, size, col, row) in ReadWidgets())
         {
             int wc = size == "small" ? 1 : 2, wr = size == "large" ? 2 : 1;
@@ -179,23 +205,28 @@ public sealed partial class MainWindow
             bool fromRight = 2 * visualCol + wc >= cols;
             double left = fromRight ? W - WMargin - (cols - visualCol - wc) * (WCell + WGap) - w : WMargin + visualCol * (WCell + WGap);
             double top = WMargin + row * (WCell + WGap);
-            var choice = WidgetChoices.FirstOrDefault(c => c.Kind == kind && c.Size == size) ?? new WidgetChoice(kind, size, "", "");
-            var face = new Viewbox { Width = w * k, Height = h * kh, Stretch = Stretch.Uniform, Child = Face(choice, PhotoBrush()) };
-            Canvas.SetLeft(face, left * k);
-            Canvas.SetTop(face, top * kh);
-            WidgetMap.Children.Add(face);
-            shown++;
+            tiles.Add(new GlassTile(left * k, top * kh, w * k, h * kh, 22 * Math.Min(k, kh)));
+            faces.Add((kind, size));
         }
-        // The bar at the bottom, for scale.
         double barW = 560 * k, barH = Math.Max(4, _current.Height * kh);
-        var bar = new Rectangle
+        var bar = new GlassTile((stageW - barW) / 2, WidgetStage.Height - barH - Math.Max(2, _current.Margin * kh), barW, barH, barH / 2);
+        int shown = tiles.Count;
+        double stageH = WidgetStage.Height;
+        PostTiles(WidgetMap, stageW, stageH, Math.Min(k, kh), tiles, bar, (bmp, lumas) =>
         {
-            Width = barW, Height = barH, RadiusX = barH / 2, RadiusY = barH / 2, Fill = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)),
-            Stroke = new SolidColorBrush(Color.FromArgb(170, 255, 255, 255)), StrokeThickness = 1,
-        };
-        Canvas.SetLeft(bar, (stageW - barW) / 2);
-        Canvas.SetTop(bar, WidgetStage.Height - barH - Math.Max(2, _current.Margin * kh));
-        WidgetMap.Children.Add(bar);
+            WidgetStage.Background = new ImageBrush { ImageSource = bmp, Stretch = Stretch.Fill };
+            WidgetMap.Children.Clear();
+            WidgetMap.Clip = new RectangleGeometry { Rect = new Rect(0, 0, stageW, stageH) };
+            for (int i = 0; i < tiles.Count; i++)
+            {
+                var t = tiles[i];
+                var face = new Viewbox { Width = t.W, Height = t.H, Stretch = Stretch.Fill, Child = WidgetFaces.Face(faces[i].Kind, faces[i].Size, lumas[i] > 0.5f, PhotoBrush()) };
+                Canvas.SetLeft(face, t.X);
+                Canvas.SetTop(face, t.Y);
+                WidgetMap.Children.Add(face);
+            }
+            Ready("widgets");
+        });
 
         WidgetMapCaption.Text = !_current.Widgets ? "桌面小组件已关闭"
             : shown == 0 ? "暂无小组件"

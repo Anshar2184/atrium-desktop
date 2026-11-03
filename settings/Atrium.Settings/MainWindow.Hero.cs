@@ -19,20 +19,33 @@ namespace Atrium.Settings;
 // is uploaded once per size; a frame repaints only the glass, as a transparent layer over it.
 public sealed partial class MainWindow
 {
-    private const double LoupeW = 232, LoupeH = 148, LoupeZoom = 3;
+    // The loupe: the bar's top right corner at 5x, the whole corner and the bell beside it.
+    private const double LoupeZoom = 5;
     // The bar's width the preview is scaled for: a default bar (seven apps and the clock) at full size
     // once the preview is this wide (DIP), smaller below it.
     private const double HeroReferenceW = 860;
 
-    // Everything in hero DIP (real DIP * S).
-    private sealed record HeroLayout(
-        double S, double BarX, double BarY, double BarW, double BarH, double Radius, double MaxW,
+    // The bar in hero DIP (real DIP * S). Lefts are base positions; Map() is the magnification wave
+    // (BarPainter::MapX: the local scale 1 + K * (1 + cos(pi x)) / 2 over Range, integrated from the
+    // pointer at Centre), BarX/BarW the stretched glass the wave makes.
+    internal sealed record BarGeometry(
+        double S, double BaseX, double BarX, double BarY, double BarW, double BarH, double Radius, double MaxW,
         int N, double Icon, double P, double PlateR, double[] PlateX, double PlateY,
         bool Clock, double ClockX, double ClockW, double TimePx, double DatePx, double SepX,
         double StartX, double TrayX, double StatusX, double BellX,
-        double LoupeX0, double LoupeY0);
+        double K, double Centre, double Range,
+        double LoupeX0, double LoupeY0, double LoupeW, double LoupeH)
+    {
+        public double Map(double u)
+        {
+            if (K <= 0) return u;
+            double x = (u - Centre) / Range;
+            double area = x >= 1 ? 0.5 : x <= -1 ? -0.5 : x / 2 + Math.Sin(Math.PI * x) / (2 * Math.PI);
+            return u + K * Range * area;
+        }
+    }
 
-    private sealed record RenderJob(BarSettings S, HeroLayout L, double W, double H, double Rs, bool Loupe, Lazy<Photo> Photo, int PhotoGeneration);
+    private sealed record RenderJob(BarSettings S, BarGeometry L, double W, double H, double Rs, bool Loupe, Lazy<Photo> Photo, int PhotoGeneration);
 
     private const int MaxPreviewApps = 8;
     private PinVm _previewRunning = null!;
@@ -48,7 +61,8 @@ public sealed partial class MainWindow
     private LatestWorker<RenderJob>? _renderWorker;
     private LatestWorker<BarSettings>? _swatchWorker;
     private int _uiPending;
-    private float _luma = 0.5f;
+    private float _luma = 0.3f;
+    private bool _darkInk; // the bar's ink over the preview, with the core's hysteresis
     private string? _engaged;
     private bool _heroSized;
 
@@ -56,15 +70,7 @@ public sealed partial class MainWindow
     private Backdrop? _mainBg, _loupeBg;
     private string _mainKey = "", _loupeKey = "";
 
-    private readonly List<Image> _previewIcons = new();
-    private readonly List<Ellipse> _mockDots = new();
-    private Border _plate = null!;
-    private Rectangle _sep = null!;
-    private TextBlock _time = null!, _date = null!;
-    private Grid _start = null!;
-    private FontIcon _tray = null!, _bell = null!, _wifi = null!;
-    private Ellipse _statusRing = null!;
-    private Border _bellBadge = null!;
+    private BarFace _face = null!, _loupeFace = null!;
     private readonly List<UIElement> _annotations = new();
 
     private void InitHero()
@@ -79,70 +85,24 @@ public sealed partial class MainWindow
         };
 
         HeroCanvas.Children.Add(_glass);
-        _plate = new Border { Background = new SolidColorBrush(Color.FromArgb(46, 255, 255, 255)), BorderBrush = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255)), BorderThickness = new Thickness(1) };
-        HeroCanvas.Children.Add(_plate);
+        _face = new BarFace(HeroCanvas, MaxPreviewApps);
+        _loupeFace = new BarFace(LoupeCanvas, MaxPreviewApps);
         for (int i = 0; i < MaxPreviewApps; i++)
-        {
-            var icon = new Image { Stretch = Stretch.Uniform, IsHitTestVisible = false };
-            _previewIcons.Add(icon);
-            HeroCanvas.Children.Add(icon);
-        }
-        for (int i = 0; i < MaxPreviewApps; i++)
-        {
-            var dot = new Ellipse { Fill = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)) };
-            _mockDots.Add(dot);
-            HeroCanvas.Children.Add(dot);
-        }
-        _sep = new Rectangle { Width = 1, Fill = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)) };
-        HeroCanvas.Children.Add(_sep);
-        _time = ClockText("10:24", true);
-        _date = ClockText("2026/11/3", false);
-        HeroCanvas.Children.Add(_time);
-        HeroCanvas.Children.Add(_date);
-        FontIcon Entry(string glyph)
-        {
-            var view = new FontIcon { Glyph = glyph, IsHitTestVisible = false };
-            HeroCanvas.Children.Add(view);
-            return view;
-        }
-        _start = new Grid { ColumnSpacing = 2, RowSpacing = 2, IsHitTestVisible = false };
-        _start.ColumnDefinitions.Add(new ColumnDefinition());
-        _start.ColumnDefinitions.Add(new ColumnDefinition());
-        _start.RowDefinitions.Add(new RowDefinition());
-        _start.RowDefinitions.Add(new RowDefinition());
-        for (int i = 0; i < 4; i++)
-        {
-            var pane = new Border { Background = new SolidColorBrush(Color.FromArgb(255, 0x30, 0xA8, 0xED)), CornerRadius = new CornerRadius(1) };
-            Grid.SetRow(pane, i / 2);
-            Grid.SetColumn(pane, i % 2);
-            _start.Children.Add(pane);
-        }
-        HeroCanvas.Children.Add(_start);
-        _tray = Entry("\uE70E");
-        _bell = Entry("\uEA8F");
-        _wifi = Entry("\uE701");
-        _statusRing = new Ellipse { StrokeThickness = 2, IsHitTestVisible = false };
-        HeroCanvas.Children.Add(_statusRing);
-        _bellBadge = new Border
-        {
-            Background = Tokens.Brush("AccentBrush"), CornerRadius = new CornerRadius(8),
-            Child = new TextBlock { Text = "3", FontSize = 8, Foreground = new SolidColorBrush(Colors.White),
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
-            IsHitTestVisible = false,
-        };
-        HeroCanvas.Children.Add(_bellBadge);
-        LoupeCanvas.Clip = new RectangleGeometry { Rect = new Rect(0, 0, LoupeW, LoupeH) };
+            foreach (var icon in new[] { _face.Icons[i], _loupeFace.Icons[i] })
+                icon.SetBinding(Image.SourceProperty, new Microsoft.UI.Xaml.Data.Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
 
         // The two presets are fixed swatches; the custom one follows the current material.
         var liquid = BarSettings.Liquid();
         var frosted = BarSettings.Frosted();
         Task.Run(() => { RenderSwatch(liquid, SwatchLiquid); RenderSwatch(frosted, SwatchFrosted); });
+        // A new picture: the swatches again, over it.
+        PhotoChanged += () =>
+        {
+            Task.Run(() => { RenderSwatch(liquid, SwatchLiquid); RenderSwatch(frosted, SwatchFrosted); });
+            _swatchSettings = _current.Clone();
+            _swatchWorker?.Post(_swatchSettings);
+        };
     }
-
-    // The bar's clock face (D40): Semibold for the time, Medium for the date.
-    private static TextBlock ClockText(string text, bool strong) =>
-        new() { Text = text, TextAlignment = TextAlignment.Center, IsHitTestVisible = false, IsTextScaleFactorEnabled = false,
-                FontFamily = (FontFamily)Application.Current.Resources[strong ? "TitleFont" : "TextFont"] };
 
     private static Color RgbColor(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
@@ -172,19 +132,21 @@ public sealed partial class MainWindow
 
     // ---- Layout: the same rules as the real bar, scaled to the specimen ----
 
-    private HeroLayout? ComputeLayout(BarSettings s)
+    private BarGeometry? ComputeLayout(BarSettings s)
     {
         if (_heroW < 80 || _heroH < 80) return null;
         double S = Math.Min(1.0, (_heroW - 48) / (HeroReferenceW + 2 * GlassSpec.InsetDip));
         double H = s.Height, I = Math.Clamp(s.IconSize, 12, H - 16);
         double P = Math.Max(I + 4, Math.Min(H - 12, Math.Round(I * 1.55)));
-        double v = (H - P) / 2, pad = v + 4, gap = Math.Max(4, Math.Round(I * 0.18));
-        double timePx = H * 0.25, datePx = H * 0.19, sepGap = 10;
-        double clockW = s.ShowClock ? Math.Max(timePx * 2.75, datePx * 5.7) + 20 : 0;
+        double v = Math.Floor((H - P) / 2), pad = v + 4, gap = Math.Max(4, Math.Round(I * 0.18));
+        double timePx = H * 0.25, datePx = H * 0.19, sepGap = 8;
+        double clockW = s.ShowClock ? Math.Max(timePx * 2.75, datePx * 5.7) + 22 : 0;
         int rightCount = (s.ShowTray ? 1 : 0) + (s.ShowStatus ? 1 : 0) + (s.ShowNotifications ? 1 : 0) + (s.ShowClock ? 1 : 0);
         double rightW = (rightCount - (s.ShowClock ? 1 : 0)) * P + clockW + Math.Max(0, rightCount - 1) * gap;
         double Content(int n) => Math.Max(2 * H, 2 * pad + P + 2 * gap + n * P + Math.Max(0, n - 1) * gap + (rightCount > 0 ? 2 * sepGap + rightW : 0));
-        double maxW = Math.Max(2 * H, Math.Min(s.Width, (_heroW - 16) / S));
+        double mag = Math.Clamp(s.Magnify, 1, 2), pitch = P + gap;
+        double stretch = mag > 1.001 ? Math.Ceiling((mag - 1) * pitch * 2.3) : 0;
+        double maxW = Math.Max(2 * H, Math.Min(s.Width, (_heroW - 16) / S - stretch));
         int n = _previewPins.Length + (s.ShowRunning ? 1 : 0);
         while (n > 0 && Content(n) > maxW) n--;
         double barW = s.AutoWidth ? Math.Min(Content(n), maxW) : maxW;
@@ -208,14 +170,28 @@ public sealed partial class MainWindow
         double bx = (_heroW - barW * S) / 2;
         double by = Math.Max(10, _heroH - s.Margin * S - H * S);
         var plateX = new double[n];
-        for (int i = 0; i < n; i++) plateX[i] = bx + (appsLeft + i * (P + gap)) * S;
+        for (int i = 0; i < n; i++) plateX[i] = bx + (appsLeft + i * pitch) * S;
+        double X(double left) => left < 0 ? -1 : bx + left * S;
 
-        double lw = LoupeW / LoupeZoom, lh = LoupeH / LoupeZoom;
-        return new HeroLayout(S, bx, by, barW * S, H * S, reff * S, maxW * S,
+        // As if the pointer rested on the second app.
+        double k = mag > 1.001 ? mag - 1 : 0, range = pitch * 2.3 * S;
+        double centre = n > 1 ? plateX[1] + P * S / 2 : bx + (pad + P / 2) * S;
+        double Map(double u)
+        {
+            if (k <= 0) return u;
+            double x = (u - centre) / range;
+            return u + k * range * (x >= 1 ? 0.5 : x <= -1 ? -0.5 : x / 2 + Math.Sin(Math.PI * x) / (2 * Math.PI));
+        }
+        double left = Map(bx), right = Map(bx + barW * S);
+
+        // The loupe's view: the whole top right corner and the bell, 10 DIP of air around.
+        double lw = Math.Max(64, reff + 34), lh = Math.Max(56, reff + 26);
+        return new BarGeometry(S, bx, left, by, right - left, H * S, reff * S, maxW * S,
             n, I * S, P * S, Math.Max(4, Math.Min(P / 2, reff - v)) * S, plateX, by + v * S,
-            clockW > 0, bx + clockLeft * S, clockW * S, timePx * S, datePx * S, rightCount > 0 ? bx + (rightLeft - sepGap) * S : -1,
-            bx + pad * S, trayLeft < 0 ? -1 : bx + trayLeft * S, statusLeft < 0 ? -1 : bx + statusLeft * S, bellLeft < 0 ? -1 : bx + bellLeft * S,
-            bx + barW * S - 0.72 * lw, by + H * S / 2 - lh / 2);
+            clockW > 0, X(clockLeft), clockW * S, timePx * S, datePx * S, rightCount > 0 ? bx + (rightLeft - sepGap) * S : -1,
+            bx + pad * S, X(trayLeft), X(statusLeft), X(bellLeft),
+            k, centre, range,
+            right - (lw - 10) * S, by - 10 * S, lw * S, lh * S);
     }
 
     private void UpdateHero()
@@ -224,113 +200,44 @@ public sealed partial class MainWindow
         if (HeroBlock.Visibility != Visibility.Visible || _renderWorker == null) return;
         var L = ComputeLayout(_current);
         if (L == null) return;
-        PositionTaskbar(L);
+        bool loupe = Loupe.Visibility == Visibility.Visible;
+        if (loupe)
+        {
+            Loupe.Width = Math.Round(L.LoupeW * LoupeZoom);
+            Loupe.Height = Math.Round(L.LoupeH * LoupeZoom);
+            LoupeCanvas.Clip = new RectangleGeometry { Rect = new Rect(0, 0, Loupe.Width, Loupe.Height) };
+        }
+        PositionTaskbar(L, loupe);
         DrawAnnotations(L);
-        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale, Loupe.Visibility == Visibility.Visible, Photo.Capture(), Photo.Generation));
+        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale, loupe, Photo.Capture(), Photo.Generation));
     }
 
-    private Brush InkBrush()
-    {
-        bool dark = _current.TextColor == "dark" || (_current.TextColor == "auto" && _luma > 0.6f);
-        return new SolidColorBrush(dark ? Color.FromArgb(235, 22, 24, 29) : Color.FromArgb(245, 255, 255, 255));
-    }
+    private bool DarkInk() => _current.TextColor == "dark" || (_current.TextColor == "auto" && _darkInk);
 
-    private void PositionTaskbar(HeroLayout L)
+    private void PositionTaskbar(BarGeometry L, bool loupe)
     {
-        var ink = InkBrush();
+        int running = _current.ShowRunning && L.N > _previewPins.Length ? _previewPins.Length : -1;
         for (int i = 0; i < MaxPreviewApps; i++)
         {
-            bool shown = i < L.N;
-            var icon = _previewIcons[i];
-            icon.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
-            _mockDots[i].Visibility = shown && i == _previewPins.Length ? Visibility.Visible : Visibility.Collapsed;
-            _mockDots[i].Fill = ink;
-            if (!shown) continue;
             var vm = i < _previewPins.Length ? _previewPins[i] : _previewRunning;
-            if (icon.DataContext != vm)
-            {
-                icon.DataContext = vm;
-                icon.SetBinding(Image.SourceProperty, new Microsoft.UI.Xaml.Data.Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
-            }
-            double cx = L.PlateX[i] + L.P / 2, cy = L.PlateY + L.P / 2;
-            // As if the pointer rested on the second app: with magnification on,
-            // it and its neighbours grow from their bottom edge like a wave.
-            double dist = Math.Abs(i - 1) / 2.3, wave = dist < 1 ? (1 + Math.Cos(Math.PI * dist)) / 2 : 0;
-            double size = L.Icon * (1 + (_current.Magnify - 1) * wave);
-            icon.Width = icon.Height = size;
-            Canvas.SetLeft(icon, cx - size / 2);
-            Canvas.SetTop(icon, cy + L.Icon / 2 - size);
-            double d = Math.Max(2.5, L.S * 5);
-            _mockDots[i].Width = _mockDots[i].Height = d;
-            Canvas.SetLeft(_mockDots[i], cx - d / 2);
-            Canvas.SetTop(_mockDots[i], L.PlateY + L.P - d * 1.9);
+            if (_face.Icons[i].DataContext != vm) _face.Icons[i].DataContext = vm;
+            if (_loupeFace.Icons[i].DataContext != vm) _loupeFace.Icons[i].DataContext = vm;
         }
-        // Without magnification the hovered app shows its plate instead.
-        bool plate = L.N > 1 && _current.Magnify <= 1.001;
-        _plate.Visibility = plate ? Visibility.Visible : Visibility.Collapsed;
-        if (plate)
+        var clock = DateTime.Now;
+        string time = clock.ToString("H:mm"), date = clock.ToString("yyyy/M/d");
+        _face.SetClock(time, date);
+        var battery = BarFace.Battery();
+        _face.Layout(L, DarkInk(), L.N, running, _current.Magnify, 1, 0, 0, battery);
+        if (loupe)
         {
-            _plate.Width = _plate.Height = L.P;
-            _plate.CornerRadius = new CornerRadius(L.PlateR);
-            Canvas.SetLeft(_plate, L.PlateX[1]);
-            Canvas.SetTop(_plate, L.PlateY);
+            _loupeFace.SetClock(time, date);
+            _loupeFace.Layout(L, DarkInk(), L.N, running, _current.Magnify, LoupeZoom, L.LoupeX0, L.LoupeY0, battery);
         }
-
-        _sep.Visibility = L.SepX >= 0 ? Visibility.Visible : Visibility.Collapsed;
-        _sep.Fill = ink;
-        _sep.Opacity = 0.25;
-        _sep.Height = L.BarH * 0.5;
-        Canvas.SetLeft(_sep, L.SepX);
-        Canvas.SetTop(_sep, L.BarY + L.BarH * 0.25);
-
-        PlaceClock(_time, _date, L, 1, L.ClockX, L.BarY, ink);
-        void Entry(FontIcon view, double x, double fontScale)
-        {
-            view.Visibility = x < 0 ? Visibility.Collapsed : Visibility.Visible;
-            view.Width = view.Height = L.P;
-            view.FontSize = Math.Max(8, L.Icon * fontScale);
-            view.Foreground = ink;
-            Canvas.SetLeft(view, x);
-            Canvas.SetTop(view, L.PlateY);
-        }
-        _start.Width = _start.Height = L.Icon * 0.72;
-        Canvas.SetLeft(_start, L.StartX + (L.P - _start.Width) / 2);
-        Canvas.SetTop(_start, L.PlateY + (L.P - _start.Height) / 2);
-        Entry(_tray, L.TrayX, 0.42);
-        Entry(_bell, L.BellX, 0.68);
-        Entry(_wifi, L.StatusX, 0.42);
-        double ring = L.Icon * 1.1;
-        _statusRing.Visibility = L.StatusX < 0 ? Visibility.Collapsed : Visibility.Visible;
-        _statusRing.Width = _statusRing.Height = ring;
-        _statusRing.Stroke = ink;
-        _statusRing.StrokeThickness = Math.Max(1, L.S * 2);
-        Canvas.SetLeft(_statusRing, L.StatusX + (L.P - ring) / 2);
-        Canvas.SetTop(_statusRing, L.PlateY + (L.P - ring) / 2);
-        _bellBadge.Visibility = L.BellX < 0 ? Visibility.Collapsed : Visibility.Visible;
-        _bellBadge.Width = _bellBadge.Height = Math.Max(10, 13 * L.S);
-        Canvas.SetLeft(_bellBadge, L.BellX + L.P * 0.56);
-        Canvas.SetTop(_bellBadge, L.PlateY + L.P * 0.12);
-    }
-
-    private void PlaceClock(TextBlock time, TextBlock date, HeroLayout L, double zoom, double x, double barTop, Brush ink)
-    {
-        time.Visibility = date.Visibility = L.Clock ? Visibility.Visible : Visibility.Collapsed;
-        if (!L.Clock) return;
-        double tp = Math.Max(6, L.TimePx * zoom), dp = Math.Max(5, L.DatePx * zoom);
-        double w = L.ClockW * zoom, total = (tp + dp) * 1.3;
-        double top = barTop + (L.BarH * zoom - total) / 2;
-        time.FontSize = tp; date.FontSize = dp;
-        time.Width = date.Width = w;
-        time.Foreground = ink;
-        date.Foreground = ink;
-        date.Opacity = 0.78;
-        Canvas.SetLeft(time, x); Canvas.SetTop(time, top);
-        Canvas.SetLeft(date, x); Canvas.SetTop(date, top + tp * 1.3);
     }
 
     // ---- Dimension marks for the card in use ----
 
-    private void DrawAnnotations(HeroLayout L)
+    private void DrawAnnotations(BarGeometry L)
     {
         foreach (var a in _annotations) HeroCanvas.Children.Remove(a);
         _annotations.Clear();
@@ -422,6 +329,7 @@ public sealed partial class MainWindow
         {
             _mainBg = Backdrop.Create(pw, ph, j.W, j.H, 0, 0, j.Rs, j.Photo.Value);
             _mainKey = key;
+            _heroPhotoGen = j.PhotoGeneration;
             Interlocked.Exchange(ref _photoPending, _mainBg);
         }
         var spec = GlassSpec.For(j.S, L.S * j.Rs);
@@ -439,7 +347,7 @@ public sealed partial class MainWindow
         frames.Publish(luma, (bx - inset) / j.Rs, (by - inset) / j.Rs, j.Rs);
 
         // Only the material page with the loupe enabled needs its second render.
-        int lw = j.Loupe ? (int)Math.Round(LoupeW * j.Rs) : 0, lh = j.Loupe ? (int)Math.Round(LoupeH * j.Rs) : 0;
+        int lw = j.Loupe ? (int)Math.Round(Math.Round(L.LoupeW * LoupeZoom) * j.Rs) : 0, lh = j.Loupe ? (int)Math.Round(Math.Round(L.LoupeH * LoupeZoom) * j.Rs) : 0;
         if (j.Loupe)
         {
             double ppd = LoupeZoom * j.Rs;
@@ -510,12 +418,18 @@ public sealed partial class MainWindow
             Canvas.SetTop(_glass, at.Y);
             if (Math.Abs(at.Luma - _luma) > 0.001f)
             {
-                bool before = _luma > 0.6f;
                 _luma = at.Luma;
-                if (_current.TextColor == "auto" && before != _luma > 0.6f) UpdateHero();
+                // kDarkInkAbove / kLightInkBelow (bar.cpp): no flicker at the threshold.
+                bool dark = _darkInk ? _luma >= 0.42f : _luma > 0.50f;
+                if (dark != _darkInk)
+                {
+                    _darkInk = dark;
+                    if (_current.TextColor == "auto") UpdateHero();
+                }
             }
         }
         if (Loupe.Visibility == Visibility.Visible && _loupeFrames is { } lf) Upload(lf, ref _loupeBmp, _loupeBrush);
+        if (_heroPhotoGen == Photo.Generation && _heroFrames != null) Ready("hero");
     }
 
     private static void Upload(FrameBuffers f, ref WriteableBitmap? bmp, ImageBrush brush)
@@ -532,7 +446,7 @@ public sealed partial class MainWindow
     // ---- Preset swatches: the same renderer on a small canvas ----
 
     private const double SwatchW = 240, SwatchH = 72;
-    private static Backdrop? s_swatchBg;
+    private static (int Gen, Backdrop Bg)? s_swatchBg;
     private static readonly object s_swatchLock = new();
 
     private BarSettings? _swatchSettings;
@@ -550,8 +464,13 @@ public sealed partial class MainWindow
         const double rs = 2;
         int w = (int)Math.Round(SwatchW * rs), h = (int)Math.Round(SwatchH * rs);
         Backdrop bg;
+        int gen = Photo.Generation;
+        var photo = Photo.Capture();
         lock (s_swatchLock)
-            bg = s_swatchBg ??= Backdrop.Create(w, h, SwatchW, SwatchH, 0, 0, rs);
+        {
+            if (s_swatchBg?.Gen != gen) s_swatchBg = (gen, Backdrop.Create(w, h, SwatchW, SwatchH, 0, 0, rs, photo.Value));
+            bg = s_swatchBg.Value.Bg;
+        }
         // A 60 DIP capsule at 60 %, centred.
         var s = material.Clone();
         s.Height = 60;

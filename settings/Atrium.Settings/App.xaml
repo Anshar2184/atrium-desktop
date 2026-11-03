@@ -2,7 +2,8 @@
 <Application
     x:Class="Atrium.Settings.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Atrium.Settings">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -84,9 +85,95 @@
 
             <CornerRadius x:Key="ControlCornerRadius">17</CornerRadius>
             <CornerRadius x:Key="OverlayCornerRadius">24</CornerRadius>
-            <x:Double x:Key="ScrollBarVerticalThumbMinWidth">3</x:Double>
-            <x:Double x:Key="ScrollBarHorizontalThumbMinHeight">3</x:Double>
-            <x:Double x:Key="ScrollBarThumbStrokeThickness">0</x:Double>
+            <!-- ============ Scroll bars: a 1 DIP hairline that shows while scrolling ============
+                 The thumb's hit area stays 10 DIP wide; only its drawing is thin. -->
+            <Style TargetType="ScrollBar">
+                <Setter Property="MinWidth" Value="10" />
+                <Setter Property="MinHeight" Value="10" />
+                <Setter Property="IsTabStop" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <Grid x:Name="Root" Background="Transparent">
+                                <Grid.Resources>
+                                    <ControlTemplate x:Key="Hidden" TargetType="RepeatButton">
+                                        <Grid Background="Transparent" />
+                                    </ControlTemplate>
+                                    <ControlTemplate x:Key="VLine" TargetType="Thumb">
+                                        <Grid Background="Transparent">
+                                            <Rectangle x:Name="Line" Width="1" HorizontalAlignment="Right" Margin="0,2,3,2" RadiusX="0.5" RadiusY="0.5"
+                                                       Fill="{ThemeResource InkTertiaryBrush}" />
+                                            <VisualStateManager.VisualStateGroups>
+                                                <VisualStateGroup x:Name="CommonStates">
+                                                    <VisualState x:Name="Normal" />
+                                                    <VisualState x:Name="PointerOver">
+                                                        <VisualState.Setters>
+                                                            <Setter Target="Line.Fill" Value="{ThemeResource InkSecondaryBrush}" />
+                                                        </VisualState.Setters>
+                                                    </VisualState>
+                                                    <VisualState x:Name="Pressed">
+                                                        <VisualState.Setters>
+                                                            <Setter Target="Line.Fill" Value="{ThemeResource InkSecondaryBrush}" />
+                                                        </VisualState.Setters>
+                                                    </VisualState>
+                                                    <VisualState x:Name="Disabled" />
+                                                </VisualStateGroup>
+                                            </VisualStateManager.VisualStateGroups>
+                                        </Grid>
+                                    </ControlTemplate>
+                                    <ControlTemplate x:Key="HLine" TargetType="Thumb">
+                                        <Grid Background="Transparent">
+                                            <Rectangle Height="1" VerticalAlignment="Bottom" Margin="2,0,2,3" RadiusX="0.5" RadiusY="0.5"
+                                                       Fill="{ThemeResource InkTertiaryBrush}" />
+                                        </Grid>
+                                    </ControlTemplate>
+                                </Grid.Resources>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="ScrollingIndicatorStates">
+                                        <VisualStateGroup.Transitions>
+                                            <VisualTransition To="NoIndicator" GeneratedDuration="0:0:0.45" />
+                                            <VisualTransition GeneratedDuration="0:0:0.12" />
+                                        </VisualStateGroup.Transitions>
+                                        <VisualState x:Name="TouchIndicator">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="VerticalThumb" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="HorizontalThumb" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="MouseIndicator">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="VerticalThumb" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="HorizontalThumb" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="NoIndicator" />
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Grid x:Name="HorizontalRoot">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <RepeatButton x:Name="HorizontalLargeDecrease" Width="0" IsTabStop="False" Interval="50" Template="{StaticResource Hidden}" />
+                                    <Thumb x:Name="HorizontalThumb" Grid.Column="1" Height="10" MinWidth="32" Opacity="0" Template="{StaticResource HLine}" />
+                                    <RepeatButton x:Name="HorizontalLargeIncrease" Grid.Column="2" IsTabStop="False" Interval="50" Template="{StaticResource Hidden}" />
+                                </Grid>
+                                <Grid x:Name="VerticalRoot" Visibility="Collapsed">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <RepeatButton x:Name="VerticalLargeDecrease" Height="0" IsTabStop="False" Interval="50" Template="{StaticResource Hidden}" />
+                                    <Thumb x:Name="VerticalThumb" Grid.Row="1" Width="10" MinHeight="32" Opacity="0" Template="{StaticResource VLine}" />
+                                    <RepeatButton x:Name="VerticalLargeIncrease" Grid.Row="2" IsTabStop="False" Interval="50" Template="{StaticResource Hidden}" />
+                                </Grid>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
 
             <!-- ============ Type (D40): MiSans, three files, one weight each ============
                  Medium 380 reads as a regular, Demibold 450 as a medium, Semibold 520 as a semibold.
@@ -273,7 +360,9 @@
                                     <Grid.RenderTransform>
                                         <TranslateTransform x:Name="KnobTranslateTransform" />
                                     </Grid.RenderTransform>
-                                    <Ellipse Fill="{ThemeResource KnobBrush}" Stroke="{ThemeResource KnobStrokeBrush}" StrokeThickness="0.5" />
+                                    <local:KnobFace>
+                                        <Rectangle RadiusX="11" RadiusY="11" Fill="{ThemeResource KnobBrush}" Stroke="{ThemeResource KnobStrokeBrush}" StrokeThickness="0.5" />
+                                    </local:KnobFace>
                                 </Grid>
                                 <Thumb x:Name="SwitchThumb" AutomationProperties.AccessibilityView="Raw">
                                     <Thumb.Template>
@@ -303,9 +392,10 @@
                                     </VisualStateGroup>
                                     <VisualStateGroup x:Name="ToggleStates">
                                         <VisualStateGroup.Transitions>
-                                            <VisualTransition GeneratedDuration="0:0:0.22">
+                                            <!-- The knob travels on a slight overshoot (KnobFace adds the stretch). -->
+                                            <VisualTransition GeneratedDuration="0:0:0.36">
                                                 <VisualTransition.GeneratedEasingFunction>
-                                                    <CubicEase EasingMode="EaseOut" />
+                                                    <BackEase EasingMode="EaseOut" Amplitude="0.32" />
                                                 </VisualTransition.GeneratedEasingFunction>
                                             </VisualTransition>
                                         </VisualStateGroup.Transitions>
@@ -384,26 +474,22 @@
                 <Setter Property="HorizontalAlignment" Value="Right" />
             </Style>
             <Style x:Key="SegmentStyle" TargetType="RadioButton">
-                <Setter Property="Foreground" Value="{ThemeResource InkBrush}" />
+                <Setter Property="Foreground" Value="{ThemeResource InkSecondaryBrush}" />
                 <Setter Property="FontSize" Value="13" />
                 <Setter Property="Padding" Value="14,4,14,5" />
                 <Setter Property="MinWidth" Value="0" />
                 <Setter Property="MinHeight" Value="0" />
                 <Setter Property="Template">
                     <Setter.Value>
+                        <!-- The chosen segment's outline is SegmentTrack's, gliding between segments. -->
                         <ControlTemplate TargetType="RadioButton">
                             <Grid x:Name="Root" CornerRadius="13" Background="Transparent">
                                 <Grid.BackgroundTransition>
                                     <BrushTransition Duration="0:0:0.16" />
                                 </Grid.BackgroundTransition>
-                                <Border x:Name="SelectedSurface" CornerRadius="13" Background="{ThemeResource SegmentSelectedBrush}"
-                                        BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Opacity="0" />
-                                <StackPanel Orientation="Horizontal" Spacing="6" Padding="{TemplateBinding Padding}" HorizontalAlignment="Center">
-                                    <ContentPresenter x:Name="Content" Content="{TemplateBinding Content}" VerticalAlignment="Center"
-                                                      Foreground="{TemplateBinding Foreground}" FontFamily="{StaticResource TextFont}" />
-                                    <FontIcon x:Name="SelectedCheck" Glyph="&#xE73E;" FontSize="10" Foreground="{StaticResource AccentBrush}"
-                                              Width="12" Opacity="0" />
-                                </StackPanel>
+                                <ContentPresenter x:Name="Content" Content="{TemplateBinding Content}" Padding="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center" HorizontalContentAlignment="Center"
+                                                  Foreground="{TemplateBinding Foreground}" FontFamily="{StaticResource TextFont}" />
                                 <VisualStateManager.VisualStateGroups>
                                     <VisualStateGroup x:Name="CommonStates">
                                         <VisualState x:Name="Normal" />
@@ -426,9 +512,7 @@
                                     <VisualStateGroup x:Name="CheckStates">
                                         <VisualState x:Name="Checked">
                                             <VisualState.Setters>
-                                                <Setter Target="SelectedSurface.Opacity" Value="1" />
-                                                <Setter Target="SelectedCheck.Opacity" Value="1" />
-                                                <Setter Target="Content.FontFamily" Value="{StaticResource EmphasisFont}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource InkBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Unchecked" />

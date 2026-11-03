@@ -356,29 +356,37 @@ public sealed partial class MainWindow
         stage.PointerReleased += (_, e) => { dragging = false; stage.ReleasePointerCapture(e.Pointer); };
         stage.PointerCaptureLost += (_, _) => dragging = false;
 
-        // Both renders at the stage's size, on the thread pool; redone when the width changes much.
+        // Both renders at the stage's size, on the thread pool; redone when the width changes much,
+        // and over a new picture when another is picked.
         double rendered = 0;
         int request = 0; // the newest render: an older one finishing later is dropped
-        stage.SizeChanged += (_, e) =>
+        void Render()
         {
-            width = e.NewSize.Width;
-            Place();
-            if (Math.Abs(width - rendered) < 48) return;
             rendered = width;
             double rs = Math.Clamp(stage.XamlRoot?.RasterizationScale ?? 1, 1, 2), w = width;
             int mine = ++request;
+            var photo = Photo.Capture();
             Task.Run(() =>
             {
-                var a = RenderMaterial(BarSettings.Liquid(), w, H, rs);
-                var b = RenderMaterial(BarSettings.Frosted(), w, H, rs);
+                var a = RenderMaterial(BarSettings.Liquid(), w, H, rs, photo.Value);
+                var b = RenderMaterial(BarSettings.Frosted(), w, H, rs, photo.Value);
                 DispatcherQueue.TryEnqueue(() =>
                 {
                     if (mine != request) return;
                     liquid.Background = a.Brush();
                     frosted.Background = b.Brush();
+                    Ready("design");
                 });
             });
+        }
+        stage.SizeChanged += (_, e) =>
+        {
+            width = e.NewSize.Width;
+            Place();
+            if (Math.Abs(width - rendered) >= 48) Render();
         };
+        PhotoChanged += () => { if (width > 0) Render(); };
+        _compareBuilt = true;
         return stage;
     }
 
@@ -394,10 +402,10 @@ public sealed partial class MainWindow
     }
 
     // A long capsule of the material across the photo, 84 DIP high (the bar at 1.4×).
-    private static Rendered RenderMaterial(BarSettings material, double w, double h, double rs)
+    private static Rendered RenderMaterial(BarSettings material, double w, double h, double rs, Photo photo)
     {
         int pw = (int)Math.Round(w * rs), ph = (int)Math.Round(h * rs);
-        var bg = Backdrop.Create(pw, ph, w, h, 0, 0, rs);
+        var bg = Backdrop.Create(pw, ph, w, h, 0, 0, rs, photo);
         var s = material.Clone();
         s.Height = 60;
         s.CornerRadius = 30;
@@ -479,8 +487,8 @@ public sealed partial class MainWindow
             ("FillBrush", "填充"), ("SeparatorBrush", "分隔线"), ("CardBrush", "卡片"), ("PageBrush", "页面"),
         };
         foreach (var (key, name) in tokens) colours.Children.Add(Chip(Tokens.Brush(key), name));
-        // The few colours widgets use (MainWindow.Widgets.cs), as on macOS.
-        foreach (var (c, name) in new[] { (Green, "正常 · 绿"), (Orange, "提醒 · 橙"), (Red, "警示 · 红") })
+        // The few colours widgets use (WidgetFaces.cs, widget_faces.cpp), as on macOS.
+        foreach (var (c, name) in new[] { (WidgetFaces.Green, "正常 · 绿"), (WidgetFaces.Orange, "提醒 · 橙"), (WidgetFaces.Red, "警示 · 红"), (WidgetFaces.Blue, "日历 · 蓝") })
             colours.Children.Add(Chip(new SolidColorBrush(c), name));
 
         var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28 };
@@ -534,8 +542,6 @@ public sealed partial class MainWindow
             };
             icon.SetBinding(Image.SourceProperty, new Microsoft.UI.Xaml.Data.Binding { Path = new PropertyPath(nameof(PinVm.Icon)) });
             var holder = new Border { Width = Icon, Height = Icon, Child = icon };
-            holder.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(110) };
-            holder.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(110) };
             holder.CenterPoint = new Vector3((float)(Icon / 2), (float)Icon, 0);
             Canvas.SetTop(holder, StageH - 16 - BarH / 2 - Icon / 2);
             lane.Children.Add(holder);
@@ -545,33 +551,66 @@ public sealed partial class MainWindow
             holder.PointerPressed += (_, _) => Play(hop, show);
             AutomationProperties.SetName(holder, apps[i].Title);
         }
-        double width = 0;
-        // The pointer's x in icon units drives the wave, as the bar does (BarPainter, the hero).
-        void Layout(double? pointer)
+        double width = 0, x0 = 0, row = n * Icon + (n - 1) * Gap;
+        // As the bar does (BarPainter): the pointer drives the wave, its strength follows the pointer
+        // in and out exponentially (20/s in, 11/s out), all on the frame clock with render transforms
+        // only (no layout but the bar's width, no restarted transitions).
+        double? pointer = null;
+        double amount = 0, lastX = 0;
+        long last = 0;
+        bool ticking = false;
+        void Apply()
         {
-            double mag = Math.Max(1, _current.Magnify), row = n * Icon + (n - 1) * Gap, x0 = (width - row) / 2;
-            var scales = new double[n];
+            double mag = Math.Max(1, _current.Magnify), k = (mag - 1) * amount, range = (Icon + Gap) * 2.3;
+            double centre = pointer ?? lastX;
+            double Map(double u)
+            {
+                if (k <= 0) return u;
+                double x = (u - centre) / range;
+                return u + k * range * (x >= 1 ? 0.5 : x <= -1 ? -0.5 : x / 2 + Math.Sin(Math.PI * x) / (2 * Math.PI));
+            }
             for (int i = 0; i < n; i++)
             {
-                double cx = x0 + i * (Icon + Gap) + Icon / 2;
-                double d = pointer is double p ? Math.Abs(p - cx) / (Icon + Gap) / 2.3 : 9;
-                double wave = d < 1 ? (1 + Math.Cos(Math.PI * d)) / 2 : 0;
-                scales[i] = 1 + (mag - 1) * wave;
+                double left = x0 + i * (Icon + Gap), bx = left + Icon / 2;
+                double grow = (Map(bx + Icon / 2) - Map(bx - Icon / 2)) / Icon;
+                holders[i].Holder.Translation = new Vector3((float)(Map(bx) - bx), 0, 0);
+                holders[i].Holder.Scale = new Vector3((float)grow, (float)grow, 1);
             }
-            double extra = scales.Sum(s => (s - 1) * Icon), x = x0 - extra / 2;
-            for (int i = 0; i < n; i++)
-            {
-                double w = scales[i] * Icon;
-                Canvas.SetLeft(holders[i].Holder, x0 + i * (Icon + Gap));
-                holders[i].Holder.Translation = new Vector3((float)(x + (w - Icon) / 2 - (x0 + i * (Icon + Gap))), 0, 0);
-                holders[i].Holder.Scale = new Vector3((float)scales[i], (float)scales[i], 1);
-                x += w + Gap;
-            }
-            bar.Width = row + extra + 2 * 14;
+            bar.Width = Map(x0 + row + 14) - Map(x0 - 14);
+            bar.Translation = new Vector3((float)((Map(x0 - 14) + Map(x0 + row + 14)) / 2 - (x0 + row / 2)), 0, 0);
         }
-        stage.SizeChanged += (_, e) => { width = e.NewSize.Width; Layout(null); };
-        stage.PointerMoved += (_, e) => Layout(e.GetCurrentPoint(lane).Position.X);
-        stage.PointerExited += (_, _) => Layout(null);
+        void Tick(object? sender, object e)
+        {
+            long now = Environment.TickCount64;
+            double dt = Math.Clamp((now - last) / 1000.0, 0, 0.05);
+            last = now;
+            double target = pointer.HasValue ? 1 : 0, rate = pointer.HasValue ? 20 : 11;
+            amount += (target - amount) * (1 - Math.Exp(-dt * rate));
+            if (Math.Abs(target - amount) < 0.002)
+            {
+                amount = target;
+                CompositionTarget.Rendering -= Tick;
+                ticking = false;
+            }
+            Apply();
+        }
+        void Wake()
+        {
+            if (ticking) { Apply(); return; }
+            ticking = true;
+            last = Environment.TickCount64;
+            CompositionTarget.Rendering += Tick;
+        }
+        stage.SizeChanged += (_, e) =>
+        {
+            width = e.NewSize.Width;
+            x0 = (width - row) / 2;
+            for (int i = 0; i < n; i++) Canvas.SetLeft(holders[i].Holder, x0 + i * (Icon + Gap));
+            Apply();
+        };
+        stage.PointerMoved += (_, e) => { pointer = lastX = e.GetCurrentPoint(lane).Position.X; Wake(); };
+        stage.PointerExited += (_, _) => { pointer = null; Wake(); };
+        stage.Unloaded += (_, _) => { if (ticking) { CompositionTarget.Rendering -= Tick; ticking = false; } };
 
         var s = new StackPanel { Spacing = 10 };
         s.Children.Add(stage);

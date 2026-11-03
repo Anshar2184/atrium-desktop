@@ -4,7 +4,7 @@
 
 ## 0. 一句话现状
 
-C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.10**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
+C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.12**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
 
 ## 1. 用户与协作方式（重要）
 
@@ -81,7 +81,7 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 | `shell/notification_listener.*`、`shell/wechat_source.*`、`shell/feishu_source.*` | 通知来源 |
 | `settings.*` | 设置读写（`ReadTextFile` / `WriteTextFile` 原子写） |
 
-设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10；D43）。`App.xaml` 是设计令牌与控件样式（颜色只有一个强调色，字体为三个 MiSans 文件），`MainWindow.xaml` 是三列（侧边栏、工作区、检查器）与八页的工作区和检查器部分，`SliderTile` / `ToggleTile`（`Controls.cs`）是滑块与开关（工作区里是小卡片，检查器里 `Flat` 为不带卡片的行），`ResponsiveGrid` 自动分列，`MainWindow.Widgets.cs` 是小组件画廊（示意图用 XAML 图形画，照片组件用预览照片），`MainWindow.Hero.cs` / `GlassPreview.cs` 是材质、形状、程序坞页的实时预览（照片只画一次，每帧只渲染玻璃叠层），`MainWindow.Preview.cs` 是形状读数、通知卡片预览与小组件布局缩略图，`MainWindow.Design.cs` 是设计语言页，`Photo.cs` 是预览照片（`assets/specimen/specimen.jpg`，苹果壁纸、有版权，已 gitignore、只在本机；没有时用当前桌面壁纸）。WinUI 的坑：控件模板里被视觉状态改动的元素不能挂 `OpacityTransition` 等隐式过渡，否则启动即崩溃（`Microsoft.UI.Xaml.dll` 访问冲突，无托管异常）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)；C++ `settings.h` 与 C# `BarSettings.cs` 必须同步（C# 写回时会丢掉它不认识的键，所以小组件布局单独存 `widgets.json`）。
+设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10；D43）。`App.xaml` 是设计令牌与控件样式（颜色只有一个强调色，字体为三个 MiSans 文件），`MainWindow.xaml` 是三列（侧边栏、工作区、检查器）与八页的工作区和检查器部分，`SliderTile` / `ToggleTile`（`Controls.cs`）是滑块与开关（工作区里是小卡片，检查器里 `Flat` 为不带卡片的行），`ResponsiveGrid` 自动分列，`MainWindow.Widgets.cs` 是小组件画廊与 CPU 玻璃小块渲染（`PostTiles`），`WidgetFaces.cs` 是小组件内容（照 `widget_faces.cpp`），`MainWindow.Hero.cs` / `GlassPreview.cs` 是材质、形状、任务栏页的实时预览（照片只画一次，每帧只渲染玻璃叠层），`BarFace.cs` 是栏上的内容（照 `bar_painter.cpp`，预览与 5 倍放大镜各一份），`MainWindow.Photos.cs` 是各页同步的预览照片与切换时的快照淡出，`Springs.cs` 是开关旋钮的拉伸回弹（`KnobFace`）与滑动的分段控件（`SegmentTrack`），`MainWindow.Preview.cs` 是形状读数、通知卡片预览与小组件布局缩略图，`MainWindow.Design.cs` 是设计语言页，`Photo.cs` 是预览照片（`assets/specimen/specimen.jpg`，苹果壁纸、有版权，已 gitignore、只在本机；没有时用当前桌面壁纸）。WinUI 的坑：控件模板里被视觉状态改动的元素不能挂 `OpacityTransition` 等隐式过渡，否则启动即崩溃（`Microsoft.UI.Xaml.dll` 访问冲突，无托管异常）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)；C++ `settings.h` 与 C# `BarSettings.cs` 必须同步（C# 写回时会丢掉它不认识的键，所以小组件布局单独存 `widgets.json`）。
 
 ## 4. 构建、打包、推送
 

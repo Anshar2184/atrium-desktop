@@ -22,6 +22,8 @@ internal sealed class Photo
     private static Lazy<Photo> s_selected = s_sample;
 
     public static string Selected { get; private set; } = "flow";
+    // The file behind the selection, for the previews that show it as a XAML image.
+    public static string? SelectedPath { get; private set; } = Path;
     public static int Generation => s_generation;
     private static volatile int s_generation;
     public static Photo Default => s_sample.Value;
@@ -32,6 +34,7 @@ internal sealed class Photo
         if (which == Selected) return false;
         string? path = which == "wallpaper" ? Wallpaper() : SamplePath(which);
         Selected = which;
+        SelectedPath = path;
         s_selected = which == "flow" ? s_sample : new Lazy<Photo>(() => Load(path), LazyThreadSafetyMode.ExecutionAndPublication);
         s_generation++;
         return true;

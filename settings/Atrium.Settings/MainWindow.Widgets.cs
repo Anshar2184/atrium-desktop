@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
@@ -35,16 +36,6 @@ public sealed partial class MainWindow
         new("photos", "medium", "照片", "每 10 分钟换一张"),
     };
 
-    private BitmapImage? _galleryPhoto;
-
-    // The specimen photo, decoded small (cards are about 200 DIP wide), shared by every card.
-    private Brush PhotoBrush()
-    {
-        if (Photo.Path == null) return new SolidColorBrush(Color.FromArgb(255, 0xCB, 0xD3, 0xDD));
-        _galleryPhoto ??= new BitmapImage(new Uri(Photo.Path)) { DecodePixelWidth = 640 };
-        return new ImageBrush { ImageSource = _galleryPhoto, Stretch = Stretch.UniformToFill };
-    }
-
     private void BuildWidgetGallery()
     {
         foreach (var choice in WidgetChoices)
@@ -60,14 +51,21 @@ public sealed partial class MainWindow
         else if (WidgetHint.Text == "先打开“桌面小组件”。") WidgetHint.Text = "点按添加到桌面";
     }
 
+    // A gallery card: the widget on a piece of the bar's glass over the picture, rendered like the hero.
+    private readonly List<(WidgetChoice Choice, Border Stage)> _galleryStages = new();
+    private BarSettings? _galleryMaterial;
+    private int _galleryGen = -1;
+
     private FrameworkElement GalleryCard(WidgetChoice c)
     {
-        // The preview: the widget's own proportions (small 1:1, medium 344:164), scaled into the card.
-        var stage = new Border
+        var stage = new Border { Height = 118, CornerRadius = new CornerRadius(14), Background = PhotoBrush() };
+        _galleryStages.Add((c, stage));
+        double rendered = 0;
+        stage.SizeChanged += (_, e) =>
         {
-            Height = 118, CornerRadius = new CornerRadius(14), Padding = new Thickness(14),
-            Background = PhotoBrush(),
-            Child = new Viewbox { Stretch = Stretch.Uniform, Child = Face(c, PhotoBrush()) },
+            if (Math.Abs(e.NewSize.Width - rendered) < 16) return;
+            rendered = e.NewSize.Width;
+            RenderGalleryCard(c, stage);
         };
         var name = new TextBlock
         {
@@ -96,188 +94,104 @@ public sealed partial class MainWindow
         return button;
     }
 
-    // ---- The pictures: a white glass tile at the widget's proportions, its content in ink ----
-
-    private static readonly Color Ink = Color.FromArgb(255, 0x1D, 0x1D, 0x1F);
-    private static readonly Color Soft = Color.FromArgb(150, 0x1D, 0x1D, 0x1F);
-    private static readonly Color Red = Color.FromArgb(255, 0xFF, 0x3B, 0x30);
-    private static readonly Color Orange = Color.FromArgb(255, 0xFF, 0x9F, 0x0A);
-    private static readonly Color Green = Color.FromArgb(255, 0x30, 0xD1, 0x58);
-    private static readonly Color Blue = Color.FromArgb(255, 0x0A, 0x84, 0xFF);
-
-    private static FrameworkElement Face(WidgetChoice c, Brush photo)
+    // The gallery again when the picture or the material changed since it was drawn.
+    private void RefreshGallery()
     {
-        double w = c.Size == "medium" ? 344 : 164, h = c.Size == "small" ? 164 : c.Size == "medium" ? 164 : 344;
-        if (c.Size == "large") w = 344;
-        var canvas = new Canvas { Width = w, Height = h };
-        canvas.Children.Add(new Rectangle
-        {
-            Width = w, Height = h, RadiusX = 30, RadiusY = 30, Fill = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
-            Stroke = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)), StrokeThickness = 1.5,
-        });
-        switch (c.Kind, c.Size)
-        {
-            case ("clock", "small"): Dial(canvas, w / 2, h / 2, 62, true); break;
-            case ("clock", _):
-                for (int i = 0; i < 4; i++) Dial(canvas, 52 + i * 80, 70, 32, false);
-                for (int i = 0; i < 4; i++) Label(canvas, new[] { "北京", "东京", "伦敦", "纽约" }[i], 52 + i * 80 - 30, 112, 60, 15, Ink, true);
-                break;
-            case ("digital", var s):
-                Label(canvas, "星期一", 22, 22, 120, 16, Red, false);
-                Label(canvas, "10:24", 18, 44, 140, 52, Ink, false, "TitleFont");
-                Label(canvas, "11月2日", 22, 112, 120, 15, Soft, false);
-                if (s == "medium")
-                    for (int i = 0; i < 3; i++)
-                    {
-                        Label(canvas, new[] { "东京", "伦敦", "纽约" }[i], 196, 34 + i * 36, 70, 15, Soft, false);
-                        Label(canvas, new[] { "11:24", "02:24", "21:24" }[i], 250, 30 + i * 36, 74, 20, Ink, false, "EmphasisFont", TextAlignment.Right);
-                    }
-                break;
-            case ("calendar", "small"):
-                Label(canvas, "星期一", 22, 20, 120, 16, Red, false);
-                Label(canvas, "2", 20, 38, 120, 64, Ink, false, "TextFont");
-                Label(canvas, "农历九月廿四", 22, 118, 130, 14, Soft, false);
-                break;
-            case ("calendar", "medium"):
-                Label(canvas, "星期一", 22, 20, 120, 16, Red, false);
-                Label(canvas, "2", 20, 38, 120, 64, Ink, false, "TextFont");
-                MonthGrid(canvas, 176, 26, 22, 20, 5);
-                break;
-            case ("calendar", _):
-                Label(canvas, "十一月", 24, 20, 200, 18, Red, false);
-                MonthGrid(canvas, 26, 58, 42, 52, 5);
-                break;
-            case ("battery", _):
-                Ring(canvas, w / 2, 72, 42, 10, 1.0, Green);
-                Label(canvas, "100%", 0, 122, w, 22, Ink, false, "TitleFont", TextAlignment.Center);
-                break;
-            case ("system", "small"):
-                Label(canvas, "系统", 22, 16, 100, 14, Soft, false);
-                for (int i = 0; i < 3; i++)
-                {
-                    Label(canvas, new[] { "CPU", "内存", "磁盘" }[i], 22, 38 + i * 38, 60, 15, Ink, false, "EmphasisFont");
-                    Bar(canvas, 22, 60 + i * 38, 120, new[] { 0.12, 0.66, 0.7 }[i], i == 2 ? Orange : Green);
-                }
-                break;
-            case ("system", _):
-                for (int i = 0; i < 3; i++)
-                {
-                    Ring(canvas, 66 + i * 106, 70, 34, 8, new[] { 0.12, 0.66, 0.7 }[i], i == 2 ? Orange : Green);
-                    Label(canvas, new[] { "CPU", "内存", "磁盘" }[i], 26 + i * 106, 118, 80, 15, Ink, true);
-                }
-                break;
-            case ("notes", _):
-                Label(canvas, "备忘录", 22, 18, 120, 15, Orange, false, "EmphasisFont");
-                for (int i = 0; i < 3; i++) Bar(canvas, 22, 56 + i * 26, i == 2 ? 70 : 118, 0, Soft, 6);
-                break;
-            case ("reminders", _):
-                Label(canvas, "提醒事项", 22, 16, 140, 15, Blue, false, "EmphasisFont");
-                Label(canvas, "2", 290, 10, 32, 30, Blue, false, "TitleFont", TextAlignment.Right);
-                for (int i = 0; i < 3; i++)
-                {
-                    var dot = new Ellipse { Width = 16, Height = 16, Stroke = new SolidColorBrush(i == 2 ? Blue : Soft), StrokeThickness = 1.5,
-                                            Fill = i == 2 ? new SolidColorBrush(Blue) : null };
-                    Canvas.SetLeft(dot, 22); Canvas.SetTop(dot, 52 + i * 34);
-                    canvas.Children.Add(dot);
-                    Bar(canvas, 50, 58 + i * 34, i == 1 ? 150 : 200, 0, Soft, 5);
-                }
-                break;
-            case ("photos", _):
-                canvas.Children.Clear();
-                canvas.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 30, RadiusY = 30, Fill = photo });
-                break;
-        }
-        return canvas;
+        if (_galleryMaterial != null && _galleryMaterial.SameMaterial(_current) && _galleryGen == Photo.Generation) return;
+        foreach (var (c, stage) in _galleryStages) RenderGalleryCard(c, stage);
     }
 
-    private static void Label(Canvas c, string text, double x, double y, double w, double size, Color ink, bool center,
-                              string font = "EmphasisFont", TextAlignment align = TextAlignment.Left)
+    private void RenderGalleryCard(WidgetChoice c, Border stage)
     {
-        var t = new TextBlock
+        double sw = stage.ActualWidth, sh = stage.ActualHeight;
+        if (sw < 8 || sh < 8) return;
+        _galleryMaterial = _current.Clone();
+        _galleryGen = Photo.Generation;
+        // The widget fitted into the card, 14 DIP of air around.
+        var (w, h) = WidgetFaces.Size(c.Size);
+        double k = Math.Min((sw - 28) / w, (sh - 28) / h);
+        var tile = new GlassTile((sw - w * k) / 2, (sh - h * k) / 2, w * k, h * k, 22 * k);
+        PostTiles(stage, sw, sh, k, new[] { tile }, null, (bmp, lumas) =>
         {
-            Text = text, Width = w, FontSize = size, Foreground = new SolidColorBrush(ink),
-            FontFamily = (FontFamily)Application.Current.Resources[font], TextAlignment = center ? TextAlignment.Center : align,
-        };
-        Canvas.SetLeft(t, x);
-        Canvas.SetTop(t, y);
-        c.Children.Add(t);
-    }
-
-    private static void Dial(Canvas c, double cx, double cy, double r, bool numbers)
-    {
-        var face = new Ellipse { Width = 2 * r, Height = 2 * r, Fill = new SolidColorBrush(Colors.White) };
-        Canvas.SetLeft(face, cx - r); Canvas.SetTop(face, cy - r);
-        c.Children.Add(face);
-        for (int i = 0; i < 12; i++)
-        {
-            double a = i * Math.PI / 6, r0 = r * (numbers ? 0.86 : 0.8), r1 = r * 0.94;
-            c.Children.Add(new Line
-            {
-                X1 = cx + r0 * Math.Sin(a), Y1 = cy - r0 * Math.Cos(a), X2 = cx + r1 * Math.Sin(a), Y2 = cy - r1 * Math.Cos(a),
-                Stroke = new SolidColorBrush(Soft), StrokeThickness = i % 3 == 0 ? 2.5 : 1.2,
-            });
-        }
-        void Hand(double turns, double len, double width, Color col)
-        {
-            double a = turns * 2 * Math.PI;
-            c.Children.Add(new Line
-            {
-                X1 = cx, Y1 = cy, X2 = cx + len * Math.Sin(a), Y2 = cy - len * Math.Cos(a), Stroke = new SolidColorBrush(col),
-                StrokeThickness = width, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
-            });
-        }
-        Hand(10.4 / 12, r * 0.5, r * 0.09, Ink);
-        Hand(24.0 / 60, r * 0.74, r * 0.07, Ink);
-        Hand(41.0 / 60, r * 0.84, r * 0.025, Orange);
-    }
-
-    private static void Ring(Canvas c, double cx, double cy, double r, double width, double level, Color col)
-    {
-        var track = new Ellipse { Width = 2 * r, Height = 2 * r, Stroke = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)), StrokeThickness = width };
-        Canvas.SetLeft(track, cx - r); Canvas.SetTop(track, cy - r);
-        c.Children.Add(track);
-        double a = Math.Min(level, 0.999) * 2 * Math.PI, rr = r - width / 2;
-        var fig = new PathFigure { StartPoint = new Windows.Foundation.Point(cx, cy - rr) };
-        fig.Segments.Add(new ArcSegment
-        {
-            Point = new Windows.Foundation.Point(cx + rr * Math.Sin(a), cy - rr * Math.Cos(a)), Size = new Windows.Foundation.Size(rr, rr),
-            SweepDirection = SweepDirection.Clockwise, IsLargeArc = a > Math.PI,
-        });
-        c.Children.Add(new Microsoft.UI.Xaml.Shapes.Path
-        {
-            Data = new PathGeometry { Figures = { fig } }, Stroke = new SolidColorBrush(col), StrokeThickness = width,
-            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            stage.Background = new ImageBrush { ImageSource = bmp, Stretch = Stretch.Fill };
+            var face = new Viewbox { Width = tile.W, Height = tile.H, Stretch = Stretch.Fill, Child = WidgetFaces.Face(c.Kind, c.Size, lumas[0] > 0.5f, PhotoBrush()) };
+            var holder = new Canvas { IsHitTestVisible = false };
+            Canvas.SetLeft(face, tile.X);
+            Canvas.SetTop(face, tile.Y);
+            holder.Children.Add(face);
+            stage.Child = holder;
         });
     }
 
-    private static void Bar(Canvas c, double x, double y, double w, double level, Color col, double h = 6)
+    // ---- The widgets' glass on the CPU: the picture, the tiles of glass, their mean brightness ----
+
+    private sealed record GlassTile(double X, double Y, double W, double H, double Radius); // stage DIP
+
+    // Renders on the thread pool and hands the bitmap and each tile's brightness (for its ink) to `done`
+    // on the UI thread; a newer request for the same target drops an older result.
+    private readonly Dictionary<object, int> _tileRequests = new();
+
+    // A rendered stage: its pixels (BGRA), and each tile's brightness.
+    private sealed record TileFrame(byte[] Px, int PW, int PH, double Rs, float[] Lumas)
     {
-        var track = new Rectangle { Width = w, Height = h, RadiusX = h / 2, RadiusY = h / 2, Fill = new SolidColorBrush(Color.FromArgb(level > 0 ? (byte)36 : (byte)70, col.R, col.G, col.B)) };
-        Canvas.SetLeft(track, x); Canvas.SetTop(track, y);
-        c.Children.Add(track);
-        if (level <= 0) return;
-        var fill = new Rectangle { Width = Math.Max(h, w * level), Height = h, RadiusX = h / 2, RadiusY = h / 2, Fill = new SolidColorBrush(col) };
-        Canvas.SetLeft(fill, x); Canvas.SetTop(fill, y);
-        c.Children.Add(fill);
+        public WriteableBitmap Bitmap()
+        {
+            var bmp = new WriteableBitmap(PW, PH);
+            using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(Px, 0, Px.Length);
+            bmp.Invalidate();
+            return bmp;
+        }
+
+        // The pixels under one tile, for a card that moves with its own piece of glass.
+        public WriteableBitmap Crop(GlassTile t)
+        {
+            int x0 = Math.Clamp((int)Math.Round(t.X * Rs), 0, PW - 1), y0 = Math.Clamp((int)Math.Round(t.Y * Rs), 0, PH - 1);
+            int w = Math.Clamp((int)Math.Round(t.W * Rs), 1, PW - x0), h = Math.Clamp((int)Math.Round(t.H * Rs), 1, PH - y0);
+            var bmp = new WriteableBitmap(w, h);
+            using (var stream = bmp.PixelBuffer.AsStream())
+                for (int y = 0; y < h; y++) stream.Write(Px, ((y0 + y) * PW + x0) * 4, w * 4);
+            bmp.Invalidate();
+            return bmp;
+        }
     }
 
-    // A month: today (the 2nd) on a red disc.
-    private static void MonthGrid(Canvas c, double x, double y, double cell, double row, int rows)
+    private void PostTiles(object target, double w, double h, double k, IReadOnlyList<GlassTile> tiles, GlassTile? bar,
+                           Action<WriteableBitmap, float[]> done) =>
+        PostTiles(target, w, h, k, tiles, bar, f => done(f.Bitmap(), f.Lumas));
+
+    private void PostTiles(object target, double w, double h, double k, IReadOnlyList<GlassTile> tiles, GlassTile? bar,
+                           Action<TileFrame> done)
     {
-        for (int r = 0; r < rows; r++)
-            for (int d = 0; d < 7; d++)
+        double rs = Math.Clamp(Content.XamlRoot?.RasterizationScale ?? 1, 1, 2);
+        int mine = _tileRequests[target] = (_tileRequests.TryGetValue(target, out int n) ? n : 0) + 1;
+        var material = _current.Clone();
+        var photo = Photo.Capture();
+        Task.Run(() =>
+        {
+            int pw = (int)Math.Round(w * rs), ph = (int)Math.Round(h * rs);
+            var bg = Backdrop.Create(pw, ph, w, h, 0, 0, rs, photo.Value);
+            var px = new byte[bg.Base.Length];
+            Buffer.BlockCopy(bg.Base, 0, px, 0, px.Length);
+            var lumas = new float[tiles.Count];
+            var all = bar == null ? tiles : tiles.Append(bar).ToList();
+            for (int i = 0; i < all.Count; i++)
             {
-                int day = r * 7 + d - 5;
-                if (day < 1 || day > 30) continue;
-                if (day == 2)
-                {
-                    var disc = new Ellipse { Width = row, Height = row, Fill = new SolidColorBrush(Red) };
-                    Canvas.SetLeft(disc, x + d * cell + (cell - row) / 2); Canvas.SetTop(disc, y + r * row);
-                    c.Children.Add(disc);
-                }
-                // MiSans' line box is 1.326 em with the figures centred in it: centre the box on the disc.
-                double size = row * 0.6;
-                Label(c, day.ToString(), x + d * cell, y + r * row + (row - 1.326 * size) / 2, cell, size, day == 2 ? Colors.White : Ink, true);
+                var t = all[i];
+                var s = material.Clone();
+                s.CornerRadius = t.Radius / k;
+                var spec = GlassSpec.For(s, k * rs);
+                int inset = (int)spec.Inset;
+                int x = (int)Math.Round(t.X * rs), y = (int)Math.Round(t.Y * rs), tw = (int)Math.Round(t.W * rs), th = (int)Math.Round(t.H * rs);
+                GlassRenderer.Draw(bg, px, x - inset, y - inset, tw + 2 * inset, th + 2 * inset, spec);
+                if (i < tiles.Count)
+                    lumas[i] = GlassRenderer.MeanLuma(px, pw, Math.Clamp(x, 0, pw - 1), Math.Clamp(y, 0, ph - 1),
+                                                      Math.Clamp(x + tw, 1, pw), Math.Clamp(y + th, 1, ph));
             }
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_tileRequests.TryGetValue(target, out int latest) && latest != mine) return;
+                done(new TileFrame(px, pw, ph, rs, lumas));
+            });
+        });
     }
 }
