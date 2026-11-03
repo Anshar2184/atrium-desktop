@@ -154,7 +154,11 @@ void PaintDigital(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p
     const int wd = Weekday(w.now.wYear, w.now.wMonth, w.now.wDay);
     const float leftW = size == WidgetSize::Small ? W - 2 * kPad : 150;
     c.Text(w.city.empty() ? L"本地" : w.city, D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 18), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(HourMinute(w.now), D2D1::RectF(kPad, kPad + 22, kPad + leftW, kPad + 84), 50, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    // The time fits its column with the same margin on both sides: sized for the widest it can be
+    // (figures are tabular, so "00:00" is), centred, never clipped at 23:59.
+    const float fit = c.TextWidth(L"00:00", 50, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float timeSize = fit > leftW ? 50 * leftW / fit : 50.f;
+    c.Text(HourMinute(w.now), D2D1::RectF(kPad, kPad + 22, kPad + leftW, kPad + 84), timeSize, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     c.Text(kWeekLong[wd], D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 13, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(std::to_wstring(w.now.wMonth) + L"月" + std::to_wstring(w.now.wDay) + L"日", D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 13,
            p.text, DWRITE_FONT_WEIGHT_NORMAL);

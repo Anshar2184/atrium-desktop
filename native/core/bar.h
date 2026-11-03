@@ -67,6 +67,9 @@ public:
     void Bounce(const std::wstring& key, int hops);
     // Test hook: logs the stacking state now and the next rendered frame.
     void LogState();
+    // Stops the render thread, pumping this (UI) thread's messages meanwhile, before the popups and
+    // widgets it draws for go. False if it did not stop within `timeoutMs` (a stuck driver call).
+    bool StopRendering(DWORD timeoutMs);
 
     std::function<IconImage(const std::wstring& key, int px)> iconProvider;
     std::function<void(const std::wstring& key)> onActivate;  // left click on an app
@@ -93,6 +96,12 @@ public:
     std::function<void()> onCloseRequest; // WM_CLOSE on a bar window (taskkill, logoff)
     // True while a popup opened from the bar is open: an auto-hidden bar stays up.
     std::function<bool()> keepShown;
+    // The pointer rests on an app with windows: preview them above `anchor` (screen px: the icon's
+    // centre, the top of the magnified icons); onPreviewLeave when it moves off, onPreviewClose on a press.
+    std::function<void(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor)> onPreview;
+    std::function<void()> onPreviewLeave;
+    std::function<void()> onPreviewClose;
+    std::function<bool()> previewOpen; // a preview is up: moving to another app swaps it at once
 
 private:
     struct Snapshot {
@@ -158,6 +167,7 @@ private:
     BarScene scene_;
     std::vector<Hit> hits_;
     bool tooltipShown_ = false;
+    bool previewShown_ = false; // the hovered app's windows are previewed instead of its tooltip
     bool visible_ = true;
     bool tracking_ = false;
     std::wstring pressed_;

@@ -80,6 +80,9 @@ public:
     void Launch(const std::wstring& key);
     // Politely close every window of the group (WM_CLOSE).
     void CloseAll(const std::wstring& key);
+    // One window of a group (the window previews): restore and bring it to the front, or close it.
+    static void ActivateWindow(HWND window);
+    static void CloseWindow(HWND window);
     // A pin for a running unpinned item (to append to settings).
     PinnedApp PinFor(const std::wstring& key) const;
     // Brings the group's most recent window to the front (never minimizes or

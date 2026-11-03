@@ -1468,6 +1468,18 @@ void TaskModel::Activate(const std::wstring& key)
     }
 }
 
+void TaskModel::ActivateWindow(HWND window)
+{
+    if (IsWindow(window))
+        Impl::BringToFront(window);
+}
+
+void TaskModel::CloseWindow(HWND window)
+{
+    if (IsWindow(window))
+        PostMessageW(window, WM_CLOSE, 0, 0);
+}
+
 void TaskModel::Launch(const std::wstring& key)
 {
     try {

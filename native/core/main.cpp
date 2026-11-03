@@ -19,6 +19,7 @@
 #include "ui/control_center.h"
 #include "ui/desktop_widgets.h"
 #include "ui/glass_menu.h"
+#include "ui/window_preview.h"
 #include "ui/notifications.h"
 #include "ui/start_menu.h"
 #include "ui/tray_panel.h"
@@ -80,6 +81,7 @@ struct App {
     std::unique_ptr<DesktopWidgets> widgets;
     std::unique_ptr<SystemChrome> chrome;
     std::unique_ptr<GlassMenu> menu;
+    std::unique_ptr<WindowPreview> preview;
     bool widgetsOn = false;
     int brightness = -1; // the built-in screen's, from GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS
     HPOWERNOTIFY brightnessNotify = nullptr;
@@ -983,6 +985,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.bar->canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
     g_app.bar->onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
     g_app.bar->onContextMenu = ShowMenu;
+    // Pointer on an app with windows: its windows, previewed above it (as the Windows taskbar).
+    g_app.preview = std::make_unique<WindowPreview>(instance);
+    g_app.bar->onPreview = [](const std::wstring& key, const std::vector<HWND>& windows, POINT anchor) {
+        g_app.preview->Show(key, windows, anchor, g_app.tasks->Icon(key, 64));
+    };
+    g_app.bar->onPreviewLeave = [] { g_app.preview->Leave(); };
+    g_app.bar->onPreviewClose = [] { g_app.preview->Close(); };
+    g_app.bar->previewOpen = [] { return g_app.preview->Visible(); };
     g_app.bar->onCloseRequest = [] { PostMessageW(g_app.host, WM_CLOSE, 0, 0); };
     ApplySettings(settings);
     g_app.bar->SetItems(g_app.tasks->Snapshot());
@@ -1008,6 +1018,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    // First the render thread, while every window it draws for is still there; a driver call stuck
+    // in the desktop duplication (it holds the shared device) must not keep Atrium from exiting:
+    // the system taskbar comes back and the process ends.
+    g_app.preview->Close();
+    if (!g_app.bar->StopRendering(3000)) {
+        g_app.chrome.reset();
+        Log(L"core: exited (render thread stuck)");
+        ReleaseMutex(mutex);
+        Sleep(150); // the log line reaches the file
+        // Not ExitProcess: unloading the graphics DLLs would wait for the same stuck call.
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
     g_app.server.reset();
     g_app.listener.reset();
     g_app.wechat.reset();
@@ -1020,6 +1042,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.tray.reset();
     g_app.start.reset();
     g_app.menu.reset();
+    g_app.preview.reset();
     Surface::SetGlassHost(nullptr);
     g_app.catalog.reset();
     g_app.tasks.reset();

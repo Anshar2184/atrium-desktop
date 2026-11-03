@@ -146,6 +146,7 @@ One glyph carries four states, and the bar stays quiet. Click the ring for the c
 - **The wave.** The local scale is a raised cosine 2.3 icon pitches wide; integrating it gives every icon's position. The icon under the pointer therefore stays under the pointer, its neighbours shrink in turn, and the glass stretches with them. The default peak is 1.7×, and a magnified icon is never taller than twice the bar.
 - **Concentric corners.** An icon's plate has the bar's radius minus the gap between them, so the two arcs share a centre. Popups, tray plates and the control centre's modules follow the same rule.
 - **Sized by the screen.** The bar is about 6 % of the logical screen height and the icons are half the bar. Depending on the logical width, the bar is 52, 60, 64 or 68 high.
+- **Window previews.** Rest the pointer on an app with windows and a piece of glass above it shows each of its windows live, with its title (DWM thumbnails). Click one to bring it to the front, middle-click or use its × to close it; a minimized window shows the app's icon. The preview stays while the pointer moves onto it, and moving to another app swaps in that app's windows at once.
 - **One soft hop at launch.** 480 ms, 0.32 of the icon high, on a sin² curve, so it leaves and lands at zero speed.
 - **Out of the way.** When the foreground app is maximised or full screen, the bar slides off the screen and comes back when the pointer reaches the bottom edge.
 

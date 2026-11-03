@@ -51,6 +51,7 @@ constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter ca
 constexpr double kDesktopFollowMs = 100; // widgets follow a changing desktop at most this often
 constexpr UINT_PTR kTooltipTimer = 1;
 constexpr UINT kTooltipDelayMs = 450;
+constexpr UINT kPreviewSwapMs = 60;
 constexpr UINT_PTR kFileHoverTimer = 2;
 constexpr UINT kFileHoverDelayMs = 600;
 constexpr UINT_PTR kGuardTimer = 3;
@@ -344,6 +345,30 @@ Bar::~Bar()
         OleUninitialize();
 }
 
+bool Bar::StopRendering(DWORD timeoutMs)
+{
+    SetEvent(quit_);
+    if (!render_.joinable())
+        return true;
+    // The render thread may wait for this thread (ShowOwnWindowsToCapture, DirectComposition):
+    // keep its messages flowing while waiting, never a bare join.
+    HANDLE thread = render_.native_handle();
+    const ULONGLONG until = GetTickCount64() + timeoutMs;
+    while (MsgWaitForMultipleObjects(1, &thread, FALSE, 50, QS_ALLINPUT) != WAIT_OBJECT_0) {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if (GetTickCount64() > until) {
+            Log(L"core: the render thread did not stop in %lu ms", timeoutMs);
+            return false;
+        }
+    }
+    render_.join();
+    return true;
+}
+
 LRESULT CALLBACK Bar::VisualProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     auto* self = reinterpret_cast<Bar*>(GetWindowLongPtrW(h, GWLP_USERDATA));
@@ -427,9 +452,11 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
         if (hover != scene_.hoverKey || (magnify && scene_.pointerX != float(pt.x))) {
             if (hover != scene_.hoverKey) {
                 scene_.hoverKey = hover;
+                // With a preview up, the next app's windows follow the pointer without the tooltip's delay.
+                bool quick = previewShown_ || (previewOpen && previewOpen());
                 HideTooltip();
                 if (!hover.empty())
-                    SetTimer(h, kTooltipTimer, kTooltipDelayMs, nullptr);
+                    SetTimer(h, kTooltipTimer, quick ? kPreviewSwapMs : kTooltipDelayMs, nullptr);
             }
             scene_.pointerX = float(pt.x);
             Publish();
@@ -481,6 +508,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_LBUTTONDOWN:
     case WM_MBUTTONDOWN:
         HideTooltip();
+        if (onPreviewClose)
+            onPreviewClose(); // a press on the bar: the preview gives way
         pressed_ = HitTest(pt);
         pressedLeft_ = m == WM_LBUTTONDOWN;
         pressPt_ = pt;
@@ -1368,6 +1397,22 @@ void Bar::ShowTooltip()
 {
     const std::wstring& key = scene_.hoverKey;
     auto hit = std::find_if(hits_.begin(), hits_.end(), [&](const Hit& h) { return h.key == key; });
+    // An app with windows: its windows, previewed, instead of the tooltip (as the Windows taskbar).
+    if (onPreview && hit != hits_.end() && !IsEntry(key)) {
+        auto item = std::find_if(items_.begin(), items_.end(), [&](const TaskItem& t) { return t.key == key; });
+        if (item != items_.end() && !item->windows.empty()) {
+            int rise = scene_.magnify > 1.001f ? rise_ : 0;
+            POINT anchor{window_.left + (hit->rect.left + hit->rect.right) / 2, window_.top + int(scene_.bar.top) - rise};
+            previewShown_ = true;
+            onPreview(key, item->windows, anchor);
+            return;
+        }
+    }
+    if (previewShown_) { // its last window went: back to the tooltip
+        previewShown_ = false;
+        if (onPreviewClose)
+            onPreviewClose();
+    }
     std::wstring text = TooltipText(key);
     if (hit == hits_.end() || text.empty())
         return;
@@ -1390,6 +1435,11 @@ void Bar::ShowTooltip()
 void Bar::HideTooltip()
 {
     KillTimer(input_, kTooltipTimer);
+    if (previewShown_) {
+        previewShown_ = false;
+        if (onPreviewLeave)
+            onPreviewLeave();
+    }
     if (!tooltipShown_)
         return;
     TTTOOLINFOW ti{sizeof(ti)};
@@ -1401,7 +1451,7 @@ void Bar::HideTooltip()
 
 void Bar::UpdateTooltips()
 {
-    if (tooltipShown_)
+    if (tooltipShown_ || previewShown_)
         ShowTooltip(); // e.g. the window count changed while hovering
 }
 
@@ -1853,8 +1903,11 @@ bool Bar::RenderSession()
             if (!snap.panels.empty())
                 panelsMs.push_back(elapsedMs() - p0);
             hidden = nullptr;
-            capture->Release();
+            // Submit the copies from the duplicated frame before handing it back: AcquireNextFrame
+            // waits for the GPU to be done with the last frame while it holds the shared device's
+            // lock, so unsubmitted copies would wait for a Flush that can no longer get the lock.
             gpu.context->Flush();
+            capture->Release();
             if (lost)
                 return true;
             animating = barOwed = false; // drawn afresh when the bar shows again
@@ -1899,8 +1952,8 @@ bool Bar::RenderSession()
             }
         }
         source = nullptr;
-        capture->Release();
         gpu.context->Flush(); // the panels' copies and comparisons start now, in one submission
+        capture->Release();   // after the Flush (see above)
 
         bool changed = !renderer.HasPresented();
         if (auto rb = renderer.Poll()) {
