@@ -8,8 +8,9 @@ namespace Atrium.Settings;
 
 // The photograph behind every preview (the hero, the preset swatches, the widget gallery):
 // Assets\specimen.jpg when the build has one (a wallpaper kept out of the repository, see
-// .gitignore), else the desktop's own wallpaper, else a quiet grey. Decoded once, on first use,
-// at most 2048 px wide; first use is on a worker (InitHero), never on the UI thread.
+// .gitignore), else the desktop's own wallpaper, else a quiet grey. The hero may show the
+// user's wallpaper instead (Select). Each is decoded once, on first use, at most 2048 px wide;
+// first use is on a worker (the render thread), never on the UI thread.
 internal sealed class Photo
 {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -19,31 +20,49 @@ internal sealed class Photo
     public const float FocusY = 0.62f;
     private const int MaxWidth = 2048;
 
-    public static string? Path { get; } = Find();
-    private static readonly Lazy<Photo> s_current = new(Load, LazyThreadSafetyMode.ExecutionAndPublication);
-    public static Photo Current => s_current.Value;
+    public static string? Path { get; } = Specimen() ?? Wallpaper();
+    private static readonly Lazy<Photo> s_sample = new(() => Load(Path), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<Photo> s_wallpaper = new(() => Load(Wallpaper()), LazyThreadSafetyMode.ExecutionAndPublication);
+
+    // "specimen" or "wallpaper": what the hero shows; Generation changes with it (the render caches' key).
+    public static string Selected { get; private set; } = "specimen";
+    public static int Generation => s_generation;
+    private static volatile int s_generation;
+    public static Photo Current => Selected == "wallpaper" ? s_wallpaper.Value : s_sample.Value;
+
+    public static bool Select(string which)
+    {
+        if (which == Selected) return false;
+        Selected = which;
+        s_generation++;
+        return true;
+    }
 
     private readonly int _w, _h;
     private readonly byte[]? _bgra; // null: no picture, a flat grey
 
     private Photo(int w, int h, byte[]? bgra) { _w = w; _h = h; _bgra = bgra; }
 
-    private static string? Find()
+    private static string? Specimen()
     {
         var asset = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "specimen.jpg");
-        if (File.Exists(asset)) return asset;
+        return File.Exists(asset) ? asset : null;
+    }
+
+    private static string? Wallpaper()
+    {
         var sb = new StringBuilder(520);
         if (SystemParametersInfoW(0x0073 /* SPI_GETDESKWALLPAPER */, (uint)sb.Capacity, sb, 0) && File.Exists(sb.ToString())) return sb.ToString();
         var transcoded = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
         return File.Exists(transcoded) ? transcoded : null;
     }
 
-    private static Photo Load()
+    private static Photo Load(string? path)
     {
-        if (Path == null) return new Photo(1, 1, null);
+        if (path == null) return new Photo(1, 1, null);
         try
         {
-            var file = StorageFile.GetFileFromPathAsync(Path).AsTask().GetAwaiter().GetResult();
+            var file = StorageFile.GetFileFromPathAsync(path).AsTask().GetAwaiter().GetResult();
             using var stream = file.OpenReadAsync().AsTask().GetAwaiter().GetResult();
             var decoder = BitmapDecoder.CreateAsync(stream).AsTask().GetAwaiter().GetResult();
             double k = Math.Min(1.0, (double)MaxWidth / decoder.OrientedPixelWidth);

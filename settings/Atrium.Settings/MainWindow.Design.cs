@@ -1,19 +1,27 @@
 using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Windows.UI;
 
 namespace Atrium.Settings;
 
-// The design page: docs/DESIGN.md in pictures. The curves are computed with the core's own
-// formulas (native/core/motion.h), so what the page draws and plays is the motion that runs.
+// The design language page, in two layers. First what Atrium looks and moves like, to look at and
+// touch: the two glasses side by side, corners and curvature, type, spacing, colour, the dock and a
+// notification, the curves. Then, behind "查看详细参数", the numbers: every one of them taken from
+// the code (the curves use the core's own formulas, native/core/motion.h; the materials are
+// BarSettings' presets; the colours are this app's resources).
 public sealed partial class MainWindow
 {
     private static class Motion
@@ -51,18 +59,27 @@ public sealed partial class MainWindow
         }
 
         public static double Approach(double t, double rate) => 1 - Math.Exp(-rate * t);
+
+        // The launch hop (render/bar_painter.cpp): sin², no speed at either end.
+        public static double Hop(double t, double seconds)
+        {
+            if (t <= 0 || t >= seconds) return 0;
+            double s = Math.Sin(Math.PI * t / seconds);
+            return s * s;
+        }
     }
 
-    private sealed record Curve(string Name, string Spec, string Use, double Seconds, Func<double, double> At);
+    private sealed record Curve(string Name, string Spec, string Formula, string Use, double Seconds, Func<double, double> At);
 
     private static readonly Curve[] Curves =
     {
-        new("kPop · 弹簧", "时长 0.36 s · 回弹 0.38", "弹出面板出现：缩放 0.92 → 1，峰值 1.0067", 0.6, t => Motion.Spring(t, 0.36, 0.62)),
-        new("kSmooth · 弹簧", "时长 0.48 s · 回弹 0.23", "状态圆环：电量、音量与亮度", 0.8, t => Motion.Spring(t, 0.48, 0.77)),
-        new("堆叠 · 临界阻尼弹簧", "时长 0.60 s · 回弹 0", "滚轮翻看通知后吸附到一张", 1.0, t => Motion.Spring(t, 0.60, 1.0)),
-        new("EaseOut · 三次缓出", "1 − (1 − t)³ · 320 ms", "换页、淡入、列表依次出现、字色渐变", 0.32, t => Motion.EaseOut(t / 0.32)),
-        new("EaseOutBack · 回弹缓出", "s = 1.5 · 260 ms", "开始菜单的格子出现", 0.26, t => Motion.EaseOutBack(t / 0.26, 1.5)),
-        new("Approach · 指数渐近", "进 20/s · 出 11/s", "悬停与按下的底板", 0.3, t => Motion.Approach(t, 20)),
+        new("kPop · 弹簧", "时长 0.36 s · 回弹 0.38", "闭式弹簧，阻尼比 0.62；切成 12 段 Hermite 曲线交给 DirectComposition", "弹出面板出现：缩放 0.92 → 1，峰值 1.0067", 0.6, t => Motion.Spring(t, 0.36, 0.62)),
+        new("kSmooth · 弹簧", "时长 0.48 s · 回弹 0.23", "闭式弹簧，阻尼比 0.77", "状态圆环：电量、音量与亮度", 0.8, t => Motion.Spring(t, 0.48, 0.77)),
+        new("堆叠 · 临界阻尼弹簧", "时长 0.60 s · 回弹 0", "闭式弹簧，阻尼比 1", "滚轮翻看通知后吸附到一张", 1.0, t => Motion.Spring(t, 0.60, 1.0)),
+        new("EaseOut · 三次缓出", "1 − (1 − t)³ · 320 ms", "1 − (1 − t)³", "换页、淡入、列表依次出现、字色渐变", 0.32, t => Motion.EaseOut(t / 0.32)),
+        new("EaseOutBack · 回弹缓出", "s = 1.5 · 260 ms", "1 + (s + 1)(t − 1)³ + s(t − 1)²", "开始菜单的格子出现", 0.26, t => Motion.EaseOutBack(t / 0.26, 1.5)),
+        new("Approach · 指数渐近", "进 20/s · 出 11/s", "1 − e^(−rate · t)，每帧从当前值继续", "悬停与按下的底板", 0.3, t => Motion.Approach(t, 20)),
+        new("启动 · 一次轻跳", "sin² · 480 ms · 高 0.32 倍图标", "sin²(πt / 0.48)，起跳与落地都没有速度突变", "点开程序坞上的应用：只跳一次", 0.48, t => Motion.Hop(t, 0.48)),
     };
 
     // The type ramp (DESIGN.md §1.2): name, size, MiSans file, its weight, macOS counterpart, where.
@@ -87,10 +104,30 @@ public sealed partial class MainWindow
         (2400, "2560×1440 @100%、3840×2160 @150%", 68, 34, 14, 1.6),
     };
 
+    // The spacing scale (DESIGN.md §4.1) and the corner ladder (§2.1).
+    private static readonly (string Name, int Value, string Use)[] Spacing =
+    {
+        ("2xs", 4, "图标与角标、紧贴的元素"), ("xs", 8, "同一组内相邻的元素"), ("s", 10, "面板内卡片之间（kGap）"),
+        ("m", 12, "弹出面板与栏之间（kPopupGapDip）"), ("l", 14, "面板内边距（kPad）、玻璃阴影"), ("xl", 16, "小组件之间的间隙"),
+        ("2xl", 24, "小组件到屏幕边缘、区块之间"),
+    };
+
+    private static readonly (string Element, string Radius, string Rule)[] Corners =
+    {
+        ("栏", "cornerRadius，默认 30", "不超过栏高的一半：默认是胶囊形"),
+        ("弹出面板", "与栏相同，8 到栏高 / 2", "面板与栏是同一种材质、同一种形状"),
+        ("面板内的模块", "min(面板圆角, 22)", "面板很圆时，模块不跟着变成胶囊"),
+        ("托盘图标底板", "clamp(R − m − 2, 6, 12)", "同心：外层圆角减去边距"),
+        ("桌面小组件", "22（格子 164）", "约为边长的 13%，与 macOS 小组件相同"),
+        ("胶囊控件", "高度 / 2", "两端为完整半圆"),
+        ("悬停与按下的底板", "8–12", "不超过所在容器圆角减去边距"),
+    };
+
     private bool _designBuilt;
     private readonly List<(double Start, Curve Curve, Action<double> Show)> _playing = new();
     private bool _designTicking;
     private static readonly Stopwatch DesignClock = Stopwatch.StartNew();
+    private StackPanel? _designDetails;
 
     private static Style StyleOf(string key) => (Style)Application.Current.Resources[key];
     private static Brush BrushOf(string key) => (Brush)Application.Current.Resources[key];
@@ -102,18 +139,26 @@ public sealed partial class MainWindow
         return t;
     }
 
+    private static TextBlock Tabular(TextBlock t)
+    {
+        Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(t, FontNumeralAlignment.Tabular);
+        return t;
+    }
+
     private static Border Card(UIElement child) => new() { Style = StyleOf("TileStyle"), Padding = new Thickness(20, 16, 20, 16), Child = child };
 
     private static StackPanel Section(string label, string? note, UIElement body)
     {
         var s = new StackPanel { Spacing = 12 };
-        var title = Text(label, "SectionStyle");
+        var title = Text(label, "TitleStyle");
         title.Margin = new Thickness(4, 0, 0, 0);
         s.Children.Add(title);
         if (note != null)
         {
             var n = Text(note, "RowNoteStyle");
-            n.Margin = new Thickness(4, -6, 0, 0);
+            n.Margin = new Thickness(4, -4, 0, 2);
+            n.MaxWidth = 760;
+            n.HorizontalAlignment = HorizontalAlignment.Left;
             s.Children.Add(n);
         }
         s.Children.Add(body);
@@ -124,36 +169,140 @@ public sealed partial class MainWindow
     {
         if (_designBuilt) return;
         _designBuilt = true;
+        // ---- First layer: to look at and to touch ----
         DesignStack.Children.Add(Principles());
-        DesignStack.Children.Add(Section("动效", "弹簧参数按 Apple 的方式给出：时长与回弹（= 1 − 阻尼比）。所有动画都可以中途打断，从当前位置和速度继续；与帧率无关。点卡片播放。",
-            CurveGrid()));
-        DesignStack.Children.Add(Section("排版", "MiSans 三个字重（Medium 380、Demibold 450、Semibold 520），字号与 macOS 的文本样式一一对应；数字一律等宽。一个界面最多三档。",
-            TypeCard()));
-        DesignStack.Children.Add(Section("圆角", "同心：内层圆角 = 外层圆角 − 边距（至少 6）。优先使用胶囊形，圆角为高度的一半。", RadiusCard()));
-        DesignStack.Children.Add(Section("尺寸", "先把分辨率换算成逻辑宽度（像素 ÷ 缩放），再查栏的尺寸。图标是栏高的一半，栏高约为逻辑屏幕高度的 6%。", SizeCard()));
-        DesignStack.Children.Add(Section("字色", "由玻璃背后的亮度决定：高于 0.50 用深色字，低于 0.42 换回浅色字，两者之间不切换；切换时 450 ms 缓出渐变。", InkCard()));
+        DesignStack.Children.Add(Section("材质", "同一个着色器、两组参数：液态玻璃只在边缘折射、中间几乎透明；磨砂玻璃把背景磨成色块、几乎不折射。左右拖动分界线对比。",
+            MaterialCompare()));
+        DesignStack.Children.Add(Section("几何", "优先使用胶囊形；嵌套的圆角保持同心。Atrium 现在的圆角都是圆弧；右边把它与超椭圆（曲率连续的圆角）叠在一起比较。",
+            GeometryCard()));
+        DesignStack.Children.Add(Section("排版", "MiSans 三个字重。一个界面最多三档字号；主次先用透明度区分，再用字号，最后才用字重；数字一律等宽。", TypeCard(false)));
+        DesignStack.Children.Add(Section("间距与色彩", "间距只用一组刻度；颜色只有一个强调色，其余都是中性灰。玻璃上的字色由背后的亮度决定。", SpaceAndColour()));
+        DesignStack.Children.Add(Section("交互", "把指针移到程序坞上：图标像波浪一样依次变大（倍数取当前设置）；点一个图标，看启动时的一次轻跳。点通知卡片，重新弹出。", InteractionCard()));
+        DesignStack.Children.Add(Section("动效", "所有动画都可以中途打断，从当前位置和速度继续；与帧率无关。点卡片播放。", CurveGrid()));
+
+        // ---- Second layer: the numbers ----
+        var toggle = new Button { HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(16, 7, 14, 8) };
+        var label = new TextBlock { Text = "查看详细参数" };
+        var chevron = new FontIcon { Glyph = "\uE70D", FontSize = 11, Margin = new Thickness(10, 1, 0, 0) };
+        chevron.RenderTransformOrigin = new Point(0.5, 0.5);
+        chevron.RenderTransform = new RotateTransform();
+        toggle.Content = new StackPanel { Orientation = Orientation.Horizontal, Children = { label, chevron } };
+        AutomationProperties.SetName(toggle, "查看详细参数");
+        _designDetails = new StackPanel { Spacing = 36, Visibility = Visibility.Collapsed };
+        toggle.Click += (_, _) =>
+        {
+            RefreshDesignDetails(true);
+            bool open = _designDetails.Visibility != Visibility.Visible;
+            _designDetails.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            label.Text = open ? "收起详细参数" : "查看详细参数";
+            ((RotateTransform)chevron.RenderTransform).Angle = open ? 180 : 0;
+            if (open) AnimateIn(_designDetails);
+        };
+        var foot = new StackPanel { Spacing = 8 };
+        foot.Children.Add(Text("技术细节", "TitleStyle"));
+        var why = Text("动画的曲线与时长、材质预设的每个参数、字号与字重、圆角与间距：与 Atrium 运行时使用的是同一份数值。", "RowNoteStyle");
+        why.Margin = new Thickness(0, 0, 0, 6);
+        foot.Children.Add(why);
+        foot.Children.Add(toggle);
+        foot.Margin = new Thickness(4, 0, 0, 0);
+        DesignStack.Children.Add(foot);
+        DesignStack.Children.Add(_designDetails);
+    }
+
+    // The details are built when they are opened, and again with the current settings each time the page shows.
+    private void RefreshDesignDetails(bool opening = false)
+    {
+        if (_designDetails == null || (!opening && _designDetails.Visibility != Visibility.Visible)) return;
+        _designDetails.Children.Clear();
+        BuildDesignDetails(_designDetails);
+    }
+
+    private void BuildDesignDetails(StackPanel into)
+    {
+        into.Children.Add(Section("动效参数", "弹簧按 Apple 的方式给出：时长与回弹（= 1 − 阻尼比）。弹出动画由 DirectComposition 在合成器里播放，其余由渲染线程按合成时钟逐帧计算。",
+            Table(new[] { "曲线", "参数", "形式", "用于" }, new[] { 1.2, 1.2, 2.0, 1.6 },
+                Curves.Select(c => new[] { c.Name, c.Spec, c.Formula, c.Use }))));
+        var liquid = BarSettings.Liquid();
+        var frosted = BarSettings.Frosted();
+        string P(double v) => $"{v * 100:0}%";
+        string Hex(uint c) => "#" + c.ToString("X6");
+        into.Children.Add(Section("材质参数", "两个预设与当前设置。栏、弹出面板与小组件用同一个着色器（glass.hlsl）和同一组参数。",
+            Table(new[] { "参数", "液态玻璃", "磨砂玻璃", "当前" }, new[] { 1.4, 1.0, 1.0, 1.0 }, new[]
+            {
+                new[] { "透明度", P(liquid.Transparency), P(frosted.Transparency), P(_current.Transparency) },
+                new[] { "模糊", P(liquid.Blur), P(frosted.Blur), P(_current.Blur) },
+                new[] { "折射强度", $"{liquid.Refraction:0} px", $"{frosted.Refraction:0} px", $"{_current.Refraction:0} px" },
+                new[] { "折射边缘宽度", $"{liquid.Edge:0} px", $"{frosted.Edge:0} px", $"{_current.Edge:0} px" },
+                new[] { "色散", P(liquid.Dispersion), P(frosted.Dispersion), P(_current.Dispersion) },
+                new[] { "高光", P(liquid.Highlight), P(frosted.Highlight), P(_current.Highlight) },
+                new[] { "阴影", P(liquid.Shadow), P(frosted.Shadow), P(_current.Shadow) },
+                new[] { "染色", Hex(liquid.Tint), Hex(frosted.Tint), Hex(_current.Tint) },
+            })));
+        into.Children.Add(Section("排版参数", "字重从不合成：样式选择字体文件。MiSans 的字重比名称细一档：Medium 380 当作常规，Demibold 450 当作中等，Semibold 520 当作半粗。",
+            TypeCard(true)));
+        into.Children.Add(Section("圆角", "同心规则：r内 = max(r外 − 边距, 6)。圆角是标准圆弧（G1）；改用曲率连续的超椭圆（G2）需要玻璃距离场、Direct2D 几何与点击区域三处同时改，目前没有实现。",
+            Table(new[] { "元素", "圆角", "规则" }, new[] { 1.1, 1.3, 2.2 }, Corners.Select(c => new[] { c.Element, c.Radius, c.Rule }))));
+        into.Children.Add(RadiusCard());
+        into.Children.Add(Section("间距", null,
+            Table(new[] { "名称", "值", "用途" }, new[] { 0.6, 0.5, 2.6 }, Spacing.Select(s => new[] { s.Name, s.Value.ToString(), s.Use }))));
+        into.Children.Add(Section("尺寸", "先把分辨率换算成逻辑宽度（像素 ÷ 缩放），再查栏的尺寸。图标是栏高的一半，栏高约为逻辑屏幕高度的 6%。", SizeCard()));
+        into.Children.Add(Section("字色", "由玻璃背后的亮度决定：高于 0.50 用深色字，低于 0.42 换回浅色字，两者之间不切换；切换时 450 ms 缓出渐变。字色分三档透明度。", InkCard()));
         var link = new HyperlinkButton
         {
             Content = "完整规范：docs/DESIGN.md",
             NavigateUri = new Uri("https://github.com/wynter-yaxley/atrium-desktop/blob/main/docs/DESIGN.md"),
             Padding = new Thickness(0),
         };
-        DesignStack.Children.Add(link);
+        into.Children.Add(link);
+    }
+
+    // A plain table on a card: a header in footnote ink, rows split by hairlines, numbers tabular.
+    private static Border Table(string[] head, double[] widths, IEnumerable<string[]> rows)
+    {
+        var g = new Grid { ColumnSpacing = 16 };
+        foreach (var w in widths) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w, GridUnitType.Star) });
+        int r = 0;
+        void Row(string[] cells, bool header)
+        {
+            g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            if (!header && r > 1)
+            {
+                var line = new Rectangle { Height = 1, Fill = Tokens.Brush("SeparatorBrush"), VerticalAlignment = VerticalAlignment.Top };
+                Grid.SetRow(line, r);
+                Grid.SetColumnSpan(line, head.Length);
+                g.Children.Add(line);
+            }
+            for (int c = 0; c < cells.Length && c < head.Length; c++)
+            {
+                var t = Tabular(Text(cells[c], header ? "FootnoteStyle" : c == 0 ? "RowTitleStyle" : "RowNoteStyle"));
+                if (!header && c == 0) t.FontSize = 14;
+                t.TextWrapping = TextWrapping.Wrap;
+                t.Margin = new Thickness(0, header ? 0 : 9, 0, header ? 6 : 9);
+                Grid.SetRow(t, r);
+                Grid.SetColumn(t, c);
+                g.Children.Add(t);
+            }
+            r++;
+        }
+        Row(head, true);
+        foreach (var row in rows) Row(row, false);
+        return Card(g);
     }
 
     private static UIElement Principles()
     {
-        var grid = new ResponsiveGrid { MinCellWidth = 240, Gap = 16 };
+        var grid = new ResponsiveGrid { MinCellWidth = 240, Gap = 16, StretchLastRow = true };
         (string N, string Title, string Body)[] items =
         {
             ("01", "让位于内容", "玻璃是承载内容的介质。字色跟随背后的亮度，装饰的强度以文字始终清晰为限。"),
-            ("02", "运动像真实物体", "可以中途打断，速度不突变，与帧率无关；弹出动画交给合成器播放。"),
+            ("02", "运动像真实物体", "可以中途打断，速度不突变，与帧率无关；不用夸张的弹跳。"),
             ("03", "同类事物，同一种处理", "同一类元素用同一条曲线、同一个圆角、同一档字号。"),
         };
         foreach (var (n, title, body) in items)
         {
             var s = new StackPanel { Spacing = 8 };
             var num = Text(n, "ValueStyle");
+            num.HorizontalAlignment = HorizontalAlignment.Left;
             num.Foreground = Tokens.Brush("AccentBrush");
             s.Children.Add(num);
             s.Children.Add(Text(title, "RowTitleStyle"));
@@ -163,6 +312,356 @@ public sealed partial class MainWindow
         return Section("原则", null, grid);
     }
 
+    // ---- Material: the two presets on one photo, split by a handle the pointer moves ----
+
+    private UIElement MaterialCompare()
+    {
+        const double H = 240;
+        var frosted = new Border { CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
+        var liquid = new Border { CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
+        var split = new Rectangle { Width = 2, Fill = new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)), HorizontalAlignment = HorizontalAlignment.Left };
+        var knob = new Border
+        {
+            Width = 30, Height = 30, CornerRadius = new CornerRadius(15), Background = new SolidColorBrush(Color.FromArgb(240, 255, 255, 255)),
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
+            Child = new FontIcon { Glyph = "\uE76F", FontSize = 12, Foreground = new SolidColorBrush(Color.FromArgb(200, 0x1D, 0x1D, 0x1F)) },
+            Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 8),
+        };
+        Border Tag(string text, HorizontalAlignment side) => new()
+        {
+            HorizontalAlignment = side, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(14), CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(8, 3, 8, 4), Background = new SolidColorBrush(Color.FromArgb(150, 0, 0, 0)),
+            Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(Colors.White) },
+        };
+        var stage = new Grid { Height = H, Background = new SolidColorBrush(Colors.Transparent) };
+        stage.Children.Add(frosted);
+        stage.Children.Add(liquid);
+        stage.Children.Add(split);
+        stage.Children.Add(knob);
+        stage.Children.Add(Tag("液态玻璃", HorizontalAlignment.Left));
+        stage.Children.Add(Tag("磨砂玻璃", HorizontalAlignment.Right));
+        stage.Children.Add(new Border { CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(Color.FromArgb(31, 0, 0, 0)), IsHitTestVisible = false });
+        AutomationProperties.SetName(stage, "材质对比");
+
+        double at = 0.5, width = 0;
+        void Place()
+        {
+            double x = Math.Round(width * at);
+            liquid.Clip = new RectangleGeometry { Rect = new Rect(0, 0, Math.Max(0, x), H) };
+            split.Translation = new Vector3((float)(x - 1), 0, 0);
+            knob.Translation = new Vector3((float)(x - 15), 0, 8);
+        }
+        bool dragging = false;
+        stage.PointerPressed += (_, e) => { dragging = stage.CapturePointer(e.Pointer); at = Math.Clamp(e.GetCurrentPoint(stage).Position.X / Math.Max(1, width), 0.04, 0.96); Place(); };
+        stage.PointerMoved += (_, e) => { if (!dragging) return; at = Math.Clamp(e.GetCurrentPoint(stage).Position.X / Math.Max(1, width), 0.04, 0.96); Place(); };
+        stage.PointerReleased += (_, e) => { dragging = false; stage.ReleasePointerCapture(e.Pointer); };
+        stage.PointerCaptureLost += (_, _) => dragging = false;
+
+        // Both renders at the stage's size, on the thread pool; redone when the width changes much.
+        double rendered = 0;
+        int request = 0; // the newest render: an older one finishing later is dropped
+        stage.SizeChanged += (_, e) =>
+        {
+            width = e.NewSize.Width;
+            Place();
+            if (Math.Abs(width - rendered) < 48) return;
+            rendered = width;
+            double rs = Math.Clamp(stage.XamlRoot?.RasterizationScale ?? 1, 1, 2), w = width;
+            int mine = ++request;
+            Task.Run(() =>
+            {
+                var a = RenderMaterial(BarSettings.Liquid(), w, H, rs);
+                var b = RenderMaterial(BarSettings.Frosted(), w, H, rs);
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (mine != request) return;
+                    liquid.Background = a.Brush();
+                    frosted.Background = b.Brush();
+                });
+            });
+        };
+        return stage;
+    }
+
+    private sealed record Rendered(int W, int H, byte[] Pixels)
+    {
+        public ImageBrush Brush()
+        {
+            var bmp = new WriteableBitmap(W, H);
+            using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(Pixels, 0, Pixels.Length);
+            bmp.Invalidate();
+            return new ImageBrush { ImageSource = bmp, Stretch = Stretch.Fill };
+        }
+    }
+
+    // A long capsule of the material across the photo, 84 DIP high (the bar at 1.4×).
+    private static Rendered RenderMaterial(BarSettings material, double w, double h, double rs)
+    {
+        int pw = (int)Math.Round(w * rs), ph = (int)Math.Round(h * rs);
+        var bg = Backdrop.Create(pw, ph, w, h, 0, 0, rs);
+        var s = material.Clone();
+        s.Height = 60;
+        s.CornerRadius = 30;
+        double k = 1.4;
+        var spec = GlassSpec.For(s, k * rs);
+        int inset = (int)spec.Inset;
+        int bw = (int)Math.Round((w - 80) * rs), bh = (int)Math.Round(60 * k * rs);
+        int bx = (pw - bw) / 2, by = (ph - bh) / 2;
+        var pixels = new byte[bg.Base.Length];
+        Buffer.BlockCopy(bg.Base, 0, pixels, 0, pixels.Length);
+        GlassRenderer.Draw(bg, pixels, bx - inset, by - inset, bw + 2 * inset, bh + 2 * inset, spec);
+        return new Rendered(pw, ph, pixels);
+    }
+
+    // ---- Geometry: the circular corner and the superellipse, laid over each other ----
+
+    private UIElement GeometryCard()
+    {
+        const double Side = 176, R = 46; // R: the corner a 176 square gets at about Apple's icon proportion
+        var canvas = new Canvas { Width = Side + 8, Height = Side + 8, HorizontalAlignment = HorizontalAlignment.Center };
+        var rounded = new Rectangle { Width = Side, Height = Side, RadiusX = R, RadiusY = R, Style = StyleOf("GlyphInkStyle"), StrokeDashArray = new DoubleCollection { 3, 3 } };
+        Canvas.SetLeft(rounded, 4);
+        Canvas.SetTop(rounded, 4);
+        var super = new Microsoft.UI.Xaml.Shapes.Path { Style = StyleOf("GlyphAccentStyle") };
+        canvas.Children.Add(rounded);
+        canvas.Children.Add(super);
+        var nText = Tabular(Text("", "RowNoteStyle"));
+        void Draw(double n)
+        {
+            var fig = new PathFigure { IsClosed = true };
+            double a = Side / 2, c = 4 + a;
+            for (int i = 0; i <= 240; i++)
+            {
+                double t = 2 * Math.PI * i / 240, ct = Math.Cos(t), st = Math.Sin(t);
+                double x = c + a * Math.Sign(ct) * Math.Pow(Math.Abs(ct), 2 / n), y = c + a * Math.Sign(st) * Math.Pow(Math.Abs(st), 2 / n);
+                if (i == 0) fig.StartPoint = new Point(x, y);
+                else fig.Segments.Add(new LineSegment { Point = new Point(x, y) });
+            }
+            super.Data = new PathGeometry { Figures = { fig } };
+            nText.Text = $"超椭圆 |x|ⁿ + |y|ⁿ = 1，n = {n:0.0}" + (n < 2.05 ? "（圆）" : n > 4.5 && n < 5.5 ? "（接近 Apple 的图标）" : "");
+        }
+        var slider = new Slider { Style = StyleOf("SliderStyle"), Minimum = 2, Maximum = 10, StepFrequency = 0.1, Value = 5, Width = 220, HorizontalAlignment = HorizontalAlignment.Center };
+        AutomationProperties.SetName(slider, "超椭圆的指数");
+        slider.ValueChanged += (_, e) => Draw(e.NewValue);
+        Draw(5);
+        var left = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
+        left.Children.Add(canvas);
+        left.Children.Add(slider);
+        nText.HorizontalAlignment = HorizontalAlignment.Center;
+        left.Children.Add(nText);
+
+        var notes = new StackPanel { Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
+        void Legend(string swatch, string title, string body)
+        {
+            var row = new Grid { ColumnSpacing = 12 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var line = new Line { X1 = 0, X2 = 22, Y1 = 9, Y2 = 9, Style = StyleOf(swatch) };
+            if (swatch == "GlyphInkStyle") line.StrokeDashArray = new DoubleCollection { 3, 3 };
+            var text = new StackPanel { Spacing = 2 };
+            text.Children.Add(Text(title, "RowTitleStyle"));
+            text.Children.Add(Text(body, "RowNoteStyle"));
+            Grid.SetColumn(text, 1);
+            row.Children.Add(line);
+            row.Children.Add(text);
+            notes.Children.Add(row);
+        }
+        Legend("GlyphInkStyle", "圆弧角（Atrium 现在的圆角）", "直边与圆弧切线连续，曲率在接点处突变（G1）。做成胶囊时圆弧直接连着长边，看不出差别——这是优先用胶囊的原因。");
+        Legend("GlyphAccentStyle", "超椭圆（对比）", "曲率处处连续（G2），轮廓更饱满。拖动滑块改变指数 n：n = 2 是圆，n 越大越接近直角。");
+
+        var concentric = RadiusDemo();
+        var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28 };
+        grid.Children.Add(left);
+        grid.Children.Add(notes);
+        grid.Children.Add(concentric);
+        return Card(grid);
+    }
+
+    // The concentric rule in one picture: the bar's capsule radius, a 12 inset, the inner radius.
+    private static UIElement RadiusDemo()
+    {
+        const double R = 30, P = 12, Ww = 220, Hh = 132;
+        var demo = new Canvas { Width = Ww, Height = Hh };
+        demo.Children.Add(new Rectangle { Width = Ww, Height = Hh, RadiusX = R, RadiusY = R, Style = StyleOf("GlyphInkStyle") });
+        var inner = new Rectangle { Width = Ww - 2 * P, Height = Hh - 2 * P, RadiusX = R - P, RadiusY = R - P, Style = StyleOf("GlyphAccentStyle") };
+        Canvas.SetLeft(inner, P);
+        Canvas.SetTop(inner, P);
+        demo.Children.Add(inner);
+        var label = Tabular(Text($"R {R} − 边距 {P} = r {R - P}", "RowTitleStyle"));
+        label.Width = Ww - 2 * P;
+        label.TextAlignment = TextAlignment.Center;
+        Canvas.SetLeft(label, P);
+        Canvas.SetTop(label, Hh / 2 - 10);
+        demo.Children.Add(label);
+        var s = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        s.Children.Add(demo);
+        var why = Text("同心：两条弧共用一个圆心，四周边距处处相等。", "RowNoteStyle");
+        why.HorizontalAlignment = HorizontalAlignment.Center;
+        s.Children.Add(why);
+        return s;
+    }
+
+    // ---- Spacing and colour ----
+
+    private static UIElement SpaceAndColour()
+    {
+        var space = new StackPanel { Spacing = 10 };
+        foreach (var (name, value, _) in Spacing)
+        {
+            var row = new Grid { ColumnSpacing = 12 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.Children.Add(Tabular(Text(name, "RowNoteStyle")));
+            var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            bar.Children.Add(new Rectangle { Width = value * 6, Height = 10, RadiusX = 3, RadiusY = 3, Fill = Tokens.Brush("AccentBrush"), Opacity = 0.35 + 0.65 * value / 24.0, VerticalAlignment = VerticalAlignment.Center });
+            bar.Children.Add(Tabular(Text(value.ToString(), "FootnoteStyle")));
+            Grid.SetColumn(bar, 1);
+            row.Children.Add(bar);
+            space.Children.Add(row);
+        }
+
+        var colours = new ResponsiveGrid { MinCellWidth = 120, Gap = 14 };
+        (string Key, string Name)[] tokens =
+        {
+            ("AccentBrush", "强调色"), ("InkBrush", "主文字"), ("InkSecondaryBrush", "次文字"), ("InkTertiaryBrush", "弱文字"),
+            ("FillBrush", "填充"), ("SeparatorBrush", "分隔线"), ("CardBrush", "卡片"), ("PageBrush", "页面"),
+        };
+        foreach (var (key, name) in tokens) colours.Children.Add(Chip(Tokens.Brush(key), name));
+        // The few colours widgets use (MainWindow.Widgets.cs), as on macOS.
+        foreach (var (c, name) in new[] { (Green, "正常 · 绿"), (Orange, "提醒 · 橙"), (Red, "警示 · 红") })
+            colours.Children.Add(Chip(new SolidColorBrush(c), name));
+
+        var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28 };
+        grid.Children.Add(space);
+        grid.Children.Add(colours);
+        return Card(grid);
+    }
+
+    private static UIElement Chip(Brush brush, string name)
+    {
+        var s = new StackPanel { Spacing = 6 };
+        s.Children.Add(new Border { Height = 40, CornerRadius = new CornerRadius(10), Background = brush, BorderBrush = Tokens.Brush("CardStrokeBrush"), BorderThickness = new Thickness(1) });
+        s.Children.Add(Text(name, "RowNoteStyle"));
+        string hex = brush is SolidColorBrush b ? (b.Color.A == 255 ? $"#{b.Color.R:X2}{b.Color.G:X2}{b.Color.B:X2}" : $"#{b.Color.A:X2}{b.Color.R:X2}{b.Color.G:X2}{b.Color.B:X2}") : "";
+        s.Children.Add(Tabular(Text(hex, "FootnoteStyle")));
+        return s;
+    }
+
+    // ---- Interaction: a dock that magnifies under the pointer and hops once, a card that pops ----
+
+    private UIElement InteractionCard()
+    {
+        var grid = new ResponsiveGrid { MinCellWidth = 340, Gap = 16, StretchLastRow = true };
+        grid.Children.Add(DockDemo());
+        grid.Children.Add(PopDemo());
+        return grid;
+    }
+
+    private FrameworkElement DockDemo()
+    {
+        const double Icon = 34, Gap = 9, StageH = 190, BarH = 54;
+        var stage = new Grid { Height = StageH, CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
+        var lane = new Canvas { Height = StageH };
+        stage.Children.Add(lane);
+        var bar = new Border
+        {
+            Height = BarH, CornerRadius = new CornerRadius(BarH / 2), VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 16), Background = new SolidColorBrush(Color.FromArgb(120, 255, 255, 255)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(170, 255, 255, 255)), BorderThickness = new Thickness(1),
+        };
+        stage.Children.Insert(0, bar);
+        int n = MockApps.Length;
+        bar.Width = n * Icon + (n - 1) * Gap + 2 * 14;
+        var holders = new List<(Border Holder, Border Icon)>();
+        for (int i = 0; i < n; i++)
+        {
+            var app = MockApps[i];
+            var icon = new Border
+            {
+                Width = Icon, Height = Icon, CornerRadius = new CornerRadius(Icon * 0.26), Background = Gradient(app.C1, app.C2),
+                Child = new FontIcon { Glyph = app.Glyph, FontSize = Icon * 0.48, Foreground = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)) },
+            };
+            var holder = new Border { Width = Icon, Height = Icon, Child = icon };
+            holder.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(110) };
+            holder.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(110) };
+            holder.CenterPoint = new Vector3((float)(Icon / 2), (float)Icon, 0);
+            Canvas.SetTop(holder, StageH - 16 - BarH / 2 - Icon / 2);
+            lane.Children.Add(holder);
+            holders.Add((holder, icon));
+            var hop = new Curve("hop", "", "", "", 0.48, t => Motion.Hop(t, 0.48));
+            Action<double> show = t => icon.Translation = new Vector3(0, (float)(-Motion.Hop(t, 0.48) * 0.32 * Icon * 1.6), 0);
+            holder.PointerPressed += (_, _) => Play(hop, show);
+            AutomationProperties.SetName(holder, "示例应用 " + (i + 1));
+        }
+        double width = 0;
+        // The pointer's x in icon units drives the wave, as the bar does (BarPainter, the hero).
+        void Layout(double? pointer)
+        {
+            double mag = Math.Max(1, _current.Magnify), row = n * Icon + (n - 1) * Gap, x0 = (width - row) / 2;
+            var scales = new double[n];
+            for (int i = 0; i < n; i++)
+            {
+                double cx = x0 + i * (Icon + Gap) + Icon / 2;
+                double d = pointer is double p ? Math.Abs(p - cx) / (Icon + Gap) / 2.3 : 9;
+                double wave = d < 1 ? (1 + Math.Cos(Math.PI * d)) / 2 : 0;
+                scales[i] = 1 + (mag - 1) * wave;
+            }
+            double extra = scales.Sum(s => (s - 1) * Icon), x = x0 - extra / 2;
+            for (int i = 0; i < n; i++)
+            {
+                double w = scales[i] * Icon;
+                Canvas.SetLeft(holders[i].Holder, x0 + i * (Icon + Gap));
+                holders[i].Holder.Translation = new Vector3((float)(x + (w - Icon) / 2 - (x0 + i * (Icon + Gap))), 0, 0);
+                holders[i].Holder.Scale = new Vector3((float)scales[i], (float)scales[i], 1);
+                x += w + Gap;
+            }
+            bar.Width = row + extra + 2 * 14;
+        }
+        stage.SizeChanged += (_, e) => { width = e.NewSize.Width; Layout(null); };
+        stage.PointerMoved += (_, e) => Layout(e.GetCurrentPoint(lane).Position.X);
+        stage.PointerExited += (_, _) => Layout(null);
+
+        var s = new StackPanel { Spacing = 10 };
+        s.Children.Add(stage);
+        s.Children.Add(Text("悬停放大与启动轻跳", "RowTitleStyle"));
+        s.Children.Add(Text("波形：(1 + cos πd) / 2，d 为指针到图标的距离（以 2.3 个图标为半径）；放大倍数取“程序坞”页的设置。", "RowNoteStyle"));
+        return Card(s);
+    }
+
+    private FrameworkElement PopDemo()
+    {
+        var stage = new Grid { Height = 190, CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
+        var card = new Border
+        {
+            Width = 300, Padding = new Thickness(14, 12, 16, 13), CornerRadius = new CornerRadius(22), HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, Background = new SolidColorBrush(Color.FromArgb(205, 250, 250, 252)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)), BorderThickness = new Thickness(1),
+        };
+        var text = new StackPanel { Spacing = 2 };
+        text.Children.Add(new TextBlock { Text = "日历 · 现在", FontSize = 12, Foreground = new SolidColorBrush(Color.FromArgb(150, 0x1D, 0x1D, 0x1F)) });
+        text.Children.Add(new TextBlock { Text = "产品评审", FontSize = 14, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(240, 0x1D, 0x1D, 0x1F)) });
+        text.Children.Add(new TextBlock { Text = "点我，再弹出一次。", FontSize = 13, Foreground = new SolidColorBrush(Color.FromArgb(190, 0x1D, 0x1D, 0x1F)) });
+        card.Child = text;
+        stage.Children.Add(card);
+        card.SizeChanged += (_, e) => card.CenterPoint = new Vector3((float)(e.NewSize.Width / 2), (float)e.NewSize.Height, 0);
+        // kPop: scale 0.92 -> 1 on the spring, opacity eased in over 160 ms (PopVisual in glass_renderer.cpp).
+        var pop = Curves[0];
+        Action<double> show = t =>
+        {
+            float sc = (float)(0.92 + 0.08 * pop.At(t));
+            card.Scale = new Vector3(sc, sc, 1);
+            card.Opacity = Motion.EaseOut(t / 0.16);
+        };
+        stage.PointerPressed += (_, _) => Play(pop, show);
+        AutomationProperties.SetName(stage, "通知弹出示例");
+
+        var s = new StackPanel { Spacing = 10 };
+        s.Children.Add(stage);
+        s.Children.Add(Text("通知弹出", "RowTitleStyle"));
+        s.Children.Add(Text("弹簧 kPop：从 0.92 倍放大到 1，只越过一点点（峰值 1.0067），同时在 160 ms 内淡入。没有来回弹跳。", "RowNoteStyle"));
+        return Card(s);
+    }
+
     // ---- Motion ----
 
     private UIElement CurveGrid()
@@ -170,6 +669,45 @@ public sealed partial class MainWindow
         var grid = new ResponsiveGrid { MinCellWidth = 280, Gap = 16 };
         foreach (var c in Curves) grid.Children.Add(CurveCard(c));
         return grid;
+    }
+
+    // ---- Type: the samples (and in the details, the numbers) ----
+
+    private static UIElement TypeCard(bool detailed)
+    {
+        var rows = new StackPanel { Spacing = 0 };
+        for (int i = 0; i < TypeRamp.Length; i++)
+        {
+            var (name, size, font, weight, mac, use) = TypeRamp[i];
+            var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(0, 10, 0, 10) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(detailed ? 170 : 120) });
+            if (detailed) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+            var sample = new TextBlock
+            {
+                Text = detailed ? name : "玻璃之下，内容优先 Aa 0123",
+                FontFamily = (FontFamily)Application.Current.Resources[font],
+                FontSize = detailed ? 15 : size,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            var spec = Tabular(Text(detailed ? $"{size} · {weight}" : name, "RowNoteStyle"));
+            spec.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(spec, 1);
+            g.Children.Add(sample);
+            g.Children.Add(spec);
+            if (detailed)
+            {
+                var where = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                where.Children.Add(Text("macOS " + mac, "FootnoteStyle"));
+                where.Children.Add(Text(use, "RowNoteStyle"));
+                Grid.SetColumn(where, 2);
+                g.Children.Add(where);
+            }
+            if (i > 0) rows.Children.Add(new Rectangle { Height = 1, Fill = Tokens.Brush("SeparatorBrush") });
+            rows.Children.Add(g);
+        }
+        return Card(rows);
     }
 
     private FrameworkElement CurveCard(Curve c)
@@ -265,42 +803,6 @@ public sealed partial class MainWindow
         if (_playing.Count > 0) return;
         CompositionTarget.Rendering -= OnDesignFrame;
         _designTicking = false;
-    }
-
-    // ---- Type ----
-
-    private static UIElement TypeCard()
-    {
-        var rows = new StackPanel { Spacing = 0 };
-        for (int i = 0; i < TypeRamp.Length; i++)
-        {
-            var (name, size, font, weight, mac, use) = TypeRamp[i];
-            var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(0, 10, 0, 10) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
-            var sample = new TextBlock
-            {
-                Text = "玻璃之下，内容优先 Aa 0123",
-                FontFamily = (FontFamily)Application.Current.Resources[font],
-                FontSize = size,
-                VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            };
-            var spec = Text($"{name} · {size} · {weight}", "RowNoteStyle");
-            spec.VerticalAlignment = VerticalAlignment.Center;
-            var where = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            where.Children.Add(Text("macOS " + mac, "FootnoteStyle"));
-            where.Children.Add(Text(use, "RowNoteStyle"));
-            Grid.SetColumn(spec, 1);
-            Grid.SetColumn(where, 2);
-            g.Children.Add(sample);
-            g.Children.Add(spec);
-            g.Children.Add(where);
-            if (i > 0) rows.Children.Add(new Rectangle { Height = 1, Fill = Tokens.Brush("SeparatorBrush") });
-            rows.Children.Add(g);
-        }
-        return Card(rows);
     }
 
     // ---- Corners ----
@@ -436,7 +938,7 @@ public sealed partial class MainWindow
             s.Children.Add(chips);
             return new Border { Background = new SolidColorBrush(bg), CornerRadius = new CornerRadius(12), Padding = new Thickness(18, 14, 18, 16), Child = s };
         }
-        var grid = new ResponsiveGrid { MinCellWidth = 280, Gap = 16 };
+        var grid = new ResponsiveGrid { MinCellWidth = 280, Gap = 16, StretchLastRow = true };
         grid.Children.Add(Panel(Color.FromArgb(255, 0x24, 0x2A, 0x3A), Colors.White, new[] { ("主文字", 0.96), ("次文字", 0.76), ("弱文字", 0.56) },
             Color.FromArgb(255, 0xFF, 0x45, 0x3A), "浅色字 · 暗背景"));
         grid.Children.Add(Panel(Color.FromArgb(255, 0xEC, 0xEE, 0xF3), Color.FromArgb(255, 0x11, 0x13, 0x17), new[] { ("主文字", 0.92), ("次文字", 0.66), ("弱文字", 0.46) },

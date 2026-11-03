@@ -16,6 +16,20 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+        // A crash leaves its exception in %LOCALAPPDATA%\Atrium\logs\settings.log (WinUI itself reports only 0xc000027b).
+        UnhandledException += (_, e) => LogCrash(e.Exception);
+    }
+
+    public static void LogCrash(Exception e)
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "logs");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "settings.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e}\n");
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -34,7 +48,15 @@ public partial class App : Application
             Exit();
             return;
         }
-        _window = new MainWindow();
-        _window.Activate();
+        try
+        {
+            _window = new MainWindow();
+            _window.Activate();
+        }
+        catch (Exception e)
+        {
+            LogCrash(e);
+            throw;
+        }
     }
 }

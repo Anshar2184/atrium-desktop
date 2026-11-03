@@ -47,19 +47,19 @@ public sealed partial class MainWindow : Window
         new("size", "高度", "玻璃栏的整体厚度，图标的留白与时钟的字号也随之变化。", 32, 120, 1, "px",
             v => v < 44 ? "纤薄" : v <= 68 ? "标准" : "厚实",
             s => s.Height, (s, v) => s.Height = v, false),
-        new("size", "图标大小", "任务栏图标的边长。系统任务栏的图标是 24 px。", 16, 64, 1, "px",
-            v => v < 24 ? "比系统图标小" : v < 25 ? "与系统相同" : v <= 36 ? "略大" : "大图标",
-            s => s.IconSize, (s, v) => s.IconSize = v, false),
         new("size", "圆角", "角的弯曲程度。超过高度的一半时即为胶囊形。", 0, 80, 1, "px",
             v => v < 1 ? "直角" : v >= _current.Height / 2 ? "胶囊形" : v < 12 ? "微圆角" : "圆润",
             s => s.CornerRadius, (s, v) => s.CornerRadius = v, false),
+        new("dock", "图标大小", "任务栏图标的边长。系统任务栏的图标是 24 px。", 16, 64, 1, "px",
+            v => v < 24 ? "比系统图标小" : v < 25 ? "与系统相同" : v <= 36 ? "略大" : "大图标",
+            s => s.IconSize, (s, v) => s.IconSize = v, false),
         new("width", "最大宽度", "开启“自动宽度”时最宽不超过此值；不会超过屏幕工作区。", 300, 2400, 10, "px",
             v => v >= 1920 ? "宽于 1080p 屏幕" : $"约 1080p 宽度的 {Math.Round(v / 19.2)}%",
             s => s.Width, (s, v) => s.Width = v, false),
-        new("place", "底部间距", "与工作区底边的距离。", 0, 200, 1, "px",
+        new("dock", "底部间距", "与工作区底边的距离。", 0, 200, 1, "px",
             v => v < 1 ? "贴着底边" : v <= 16 ? "贴近底边" : v <= 60 ? "悬浮" : "高高悬浮",
             s => s.Margin, (s, v) => s.Margin = v, false),
-        new("place", "悬停放大", "指针下的图标放大到这个倍数，两侧依次变大，玻璃栏随之伸展。100% 即关闭。", 100, 200, 5, "%",
+        new("dock", "悬停放大", "指针下的图标放大到这个倍数，两侧依次变大，玻璃栏随之伸展。100% 即关闭。", 100, 200, 5, "%",
             v => v < 101 ? "关闭" : v < 140 ? "轻轻放大" : v < 180 ? "像 macOS 程序坞" : "夸张",
             s => s.Magnify * 100, (s, v) => s.Magnify = v / 100, false),
 
@@ -76,7 +76,7 @@ public sealed partial class MainWindow : Window
         ("通知", "通知卡片怎样弹出，以及显示哪些应用的消息。"),
         ("小组件", "放在桌面上的玻璃小组件。"),
         ("系统", "Atrium 与 Windows 自带界面的分工。"),
-        ("设计规范", "排版、圆角、动效与尺寸：每个数值都取自 Atrium 的代码。"),
+        ("设计语言", "Atrium 怎样设计：材质、几何、排版、色彩与动效。展开详细参数，可以看到每一个数值，都取自 Atrium 的代码。"),
         ("关于", "一条悬浮在桌面底部的玻璃程序坞。"),
     };
 
@@ -88,7 +88,10 @@ public sealed partial class MainWindow : Window
     private bool _loading;
     private bool _previewBusy, _previewPending;
     private bool _closingConfirmed;
-    private FrameworkElement[] _pages = Array.Empty<FrameworkElement>();
+    private FrameworkElement[] _mains = Array.Empty<FrameworkElement>();
+    private FrameworkElement?[] _sides = Array.Empty<FrameworkElement?>();
+    private int _page;
+    private bool _folded; // a narrow window: the inspector's groups under the workspace
     private int _flashId;
 
     public MainWindow()
@@ -98,7 +101,9 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "atrium.ico"));
         double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
-        AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(1280 * scale), (int)(860 * scale)));
+        // A roomy default (the preview is the centre of the window), never larger than the screen.
+        var work = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(Math.Min((int)(1440 * scale), work.Width * 92 / 100), Math.Min((int)(920 * scale), work.Height * 92 / 100)));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.PreferredMinimumWidth = (int)(980 * scale);
@@ -106,7 +111,9 @@ public sealed partial class MainWindow : Window
         }
         AppWindow.Closing += OnClosing;
 
-        _pages = new FrameworkElement[] { PageMaterial, PageShape, PageDock, PageNotify, PageWidgets, PageSystem, PageDesign, PageAbout };
+        _mains = new FrameworkElement[] { MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainSystem, DesignStack, MainAbout };
+        _sides = new FrameworkElement?[] { SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, null, null, null };
+        LoupeSwitch.IsOn = true;
         BuildRows();
         BuildTintSwatches();
         InitPins();
@@ -129,19 +136,93 @@ public sealed partial class MainWindow : Window
         if (Nav.SelectedIndex >= 0) ShowPage(Nav.SelectedIndex);
     }
 
+    // A page is its workspace part (under the title, with the live preview on the first three) and its
+    // inspector part; pages without parameters of their own (system, design, about) take the full width.
     private void ShowPage(int index)
     {
-        for (int i = 0; i < _pages.Length; i++)
-            _pages[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
-        if (_pages[index] == PageDesign) BuildDesignPage();
-        if (_pages[index] == PageWidgets && WidgetGallery.Children.Count == 0) BuildWidgetGallery(); // built when first shown
+        _page = index;
+        for (int i = 0; i < _mains.Length; i++)
+        {
+            _mains[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+            if (_sides[i] is { } side) side.Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+        }
+        if (_mains[index] == DesignStack)
+        {
+            BuildDesignPage();
+            RefreshDesignDetails(); // the "current" column follows the settings
+        }
+        if (_mains[index] == MainWidgets)
+        {
+            if (WidgetGallery.Children.Count == 0) BuildWidgetGallery(); // built when first shown
+            ShowWidgetMap();
+        }
+        if (_mains[index] == MainNotify) ShowNotifyPreview(true);
         var info = PageInfo[index];
         HeaderTitle.Text = info.Title;
         HeaderSubtitle.Text = info.Subtitle;
-        HeroFrame.Visibility = index < 2 ? Visibility.Visible : Visibility.Collapsed;
-        if (index < 2) UpdateHero();
-        AnimateIn(_pages[index]);
+        HeroBlock.Visibility = index < 3 ? Visibility.Visible : Visibility.Collapsed;
+        LoupeToggle.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
+        Loupe.Visibility = index == 0 && LoupeSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        // The design page reads wider than a settings page.
+        CenterStack.MaxWidth = _mains[index] == DesignStack ? 1280 : 1120;
+        ArrangeInspector();
+        CenterScroll.ChangeView(null, 0, null, true);
+        InspectorScroll.ChangeView(null, 0, null, true);
+        if (index < 3) UpdateHero();
+        AnimateIn(_mains[index]);
         AnimateIn(Header);
+        if (_sides[index] is { } shown) AnimateIn(shown);
+    }
+
+    // The inspector: its own column when there is room for the workspace beside it, else folded
+    // under the workspace (the groups move, keeping their state).
+    private const double FoldBelow = 900;
+
+    private void OnContentSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        bool folded = e.NewSize.Width < FoldBelow;
+        if (folded == _folded && _mains.Length > 0) return;
+        _folded = folded;
+        if (folded)
+        {
+            InspectorScroll.Content = null;
+            InspectorStack.Margin = new Thickness(0, 8, 0, 0);
+            FoldedInspector.Child = InspectorStack;
+        }
+        else
+        {
+            FoldedInspector.Child = null;
+            InspectorStack.ClearValue(FrameworkElement.MarginProperty);
+            InspectorScroll.Content = InspectorStack;
+        }
+        ArrangeInspector();
+    }
+
+    private void ArrangeInspector()
+    {
+        bool has = _sides.Length > _page && _sides[_page] != null;
+        InspectorPane.Visibility = has && !_folded ? Visibility.Visible : Visibility.Collapsed;
+        FoldedInspector.Visibility = has && _folded ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // The previews keep a natural proportion as the workspace widens.
+    private void OnCenterSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        double w = e.NewSize.Width;
+        HeroFrame.Height = Math.Clamp(Math.Round(w * 0.52), 280, 580);
+        NotifyStage.Height = Math.Clamp(Math.Round(w * 0.42), 260, 440);
+    }
+
+    private void OnLoupeToggled(object sender, RoutedEventArgs e)
+    {
+        Loupe.Visibility = _page == 0 && LoupeSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // The preview's photograph: the sample, or the user's own wallpaper (Photo.cs).
+    private void OnHeroBackgroundChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton { Tag: string tag } || !Photo.Select(tag)) return;
+        UpdateHero();
     }
 
     // Fade and rise a few pixels; the transitions are attached one tick later so the start values stick.
@@ -166,16 +247,17 @@ public sealed partial class MainWindow : Window
     // where the sliders lead (the tint, the notification switch).
     private void BuildRows()
     {
-        var groups = new Dictionary<string, (Panel Panel, bool First)>
+        // The basic three are tiles in the workspace; the rest are plain rows in the inspector.
+        var groups = new Dictionary<string, (Panel Panel, bool First, bool Flat)>
         {
-            ["clarity"] = (ClarityTiles, true), ["edge"] = (EdgeTiles, false), ["light"] = (LightTiles, false),
-            ["size"] = (SizeTiles, false), ["width"] = (WidthTiles, false), ["place"] = (PlaceTiles, false), ["notify"] = (NotifyTiles, true),
+            ["clarity"] = (ClarityTiles, true, false), ["edge"] = (EdgeRows, false, true), ["light"] = (LightRows, false, true),
+            ["size"] = (SizeRows, false, true), ["width"] = (WidthRows, false, true), ["dock"] = (DockRows, false, true), ["notify"] = (NotifyRows, true, true),
         };
         var placed = new Dictionary<string, int>();
         foreach (var d in Sliders)
         {
-            var (panel, first) = groups[d.Group];
-            var tile = new SliderTile();
+            var (panel, first, flat) = groups[d.Group];
+            var tile = new SliderTile { Flat = flat };
             tile.Configure(d.Title, d.Description, d.Min, d.Max, d.Step, d.Unit, d.Hint);
             tile.UserValueChanged += v => OnSliderChanged(d, v);
             tile.Engaged += on => OnEngage(d.Title, on);
@@ -313,6 +395,7 @@ public sealed partial class MainWindow : Window
         foreach (var (d, card) in _rows)
             card.SetValue(d.Get(_current));
         (_current.Preset switch { "liquid" => PresetLiquid, "frosted" => PresetFrosted, _ => PresetCustom }).IsChecked = true;
+        (Photo.Selected == "wallpaper" ? BgWallpaper : BgSpecimen).IsChecked = true;
         ClockSwitch.IsOn = _current.ShowClock;
         AutoWidthSwitch.IsOn = _current.AutoWidth;
         RunningSwitch.IsOn = _current.ShowRunning;
@@ -332,6 +415,8 @@ public sealed partial class MainWindow : Window
         _loading = false;
         UpdateHero();
         UpdateCustomSwatch();
+        if (_page == 3) ShowNotifyPreview(false);
+        if (_page == 4) ShowWidgetMap();
     }
 
     private static Color TintColor(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
@@ -461,6 +546,7 @@ public sealed partial class MainWindow : Window
     {
         UpdateButtons();
         UpdateHero();
+        if (_page == 3) ShowNotifyPreview(false);
         SchedulePreview();
     }
 
@@ -550,9 +636,26 @@ public sealed partial class MainWindow : Window
         await _client.CancelAsync();
     }
 
+    // A group's "restore defaults": its parameters (and what goes with them) back to the defaults.
+    private void OnGroupReset(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string group }) return;
+        var d = BarSettings.Liquid();
+        foreach (var (def, _) in _rows)
+            if (def.Group == group) def.Set(_current, def.Get(d));
+        if (group == "clarity") _current.Tint = d.Tint;
+        if (group == "width") _current.AutoWidth = d.AutoWidth;
+        if (group == "notify") _current.NotifyHideBody = d.NotifyHideBody;
+        if (group is "clarity" or "edge" or "light")
+            _current.Preset = _current.SameMaterial(BarSettings.Liquid()) ? "liquid" : _current.SameMaterial(BarSettings.Frosted()) ? "frosted" : "custom";
+        LoadIntoControls();
+        Changed();
+    }
+
+    // The material back to the Liquid preset (layout, apps and sources stay as they are).
     private void OnDefaults(object sender, RoutedEventArgs e)
     {
-        _current = BarSettings.Liquid();
+        _current.ApplyMaterial(BarSettings.Liquid());
         LoadIntoControls();
         Changed();
     }

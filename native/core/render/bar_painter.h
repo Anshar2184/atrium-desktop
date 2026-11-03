@@ -33,7 +33,7 @@ struct SceneItem {
     std::wstring glyph;        // Segoe Fluent Icons glyph instead of an image (bar entries)
     int badge = 0;             // > 0: count badge on the icon (unread notifications)
     double bounceMs = 0;       // ClockMs() when a launch bounce started; 0 = none
-    int bounces = 0;           // at most this many hops (fewer once the app runs)
+    int bounces = 0;           // hops asked for (the painter plays one, v0.9.8)
 };
 
 struct BarScene {
@@ -114,8 +114,6 @@ private:
         float lift = 0;    // 0..1, while dragged
         float x = 0;       // displayed plate centre; slides to the layout position
         bool placed = false;
-        double bounceMs = 0; // the bounce being played
-        int bounceEnd = 0;   // hops to play (shortened when the app starts running)
         float hop = 0;       // current bounce height, px
         float dot = 0;       // 0..1, the running dot
         bool leaving = false; // the app went away: `ghost` shrinks and fades out where it was

@@ -1,10 +1,10 @@
-# 交接文档（2026-11-03，v0.9.8）
+# 交接文档（2026-11-03，v0.9.9）
 
-给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D45，D25 / D30 / D35 在 v0.9.2 修订，D37 为 v0.9.3、D38 为 v0.9.4、D39 为 v0.9.6 新增，D40–D43 为 v0.9.7 新增，D44–D45 为 v0.9.8 新增，D24 / D26 在 v0.9.4 补充，D30 在 v0.9.6 补充）、[DESIGN](DESIGN.md)（设计规范：新界面必须遵守）和 [VERIFICATION](VERIFICATION.md) 第 20–31 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
+给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D45，D25 / D30 / D35 在 v0.9.2 修订，D37 为 v0.9.3、D38 为 v0.9.4、D39 为 v0.9.6 新增，D40–D43 为 v0.9.7 新增，D44–D45 为 v0.9.8 新增，D24 / D26 在 v0.9.4 补充，D30 在 v0.9.6 补充）、[DESIGN](DESIGN.md)（设计规范：新界面必须遵守）和 [VERIFICATION](VERIFICATION.md) 第 20–32 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
 
 ## 0. 一句话现状
 
-C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.8**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
+C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.9**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
 
 ## 1. 用户与协作方式（重要）
 
@@ -38,6 +38,8 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 - v0.9.4：**小组件只映出桌面**（D38，`render/desktop_backdrop.*`：实时抓取桌面窗口 Progman，或设置“静态壁纸（省电）”直接合成壁纸文件；上层窗口不再进入小组件玻璃，小组件玻璃只在桌面变化、拖动时重画）；**文字颜色渐变**（D26，缓出 450 ms，栏与所有弹窗）；**通知动画流畅度**（D24 / D26：内容与玻璃同帧 `WaitGlass`、弹窗玻璃不等垂直同步、弹窗变化不重画栏、着色器按形状剪裁、通知窗口打开期间不改尺寸；实测弹出、展开、关闭、清除 60–70 帧，最长间隔约 20 ms，原来玻璃 30–45 帧、最长 134 ms）；**日志改为后台线程写入**（原来每行开关文件、所有线程共用一把锁，动画会被日志卡住；超过 8 MB 启动时移到 `core.1.log`）。
 
 - v0.9.7：**界面字体 MiSans**（D40，`render/ui_font.*`，栏 / 面板 / 小组件 / 菜单 / 设置中心统一，数字等宽，玻璃上小字自动加重一档）；**玻璃右键菜单**（D41，`ui/glass_menu.*`，替换五处系统菜单）；**新图标**（D42）；**设置中心重构**（D43：macOS 系统设置式的侧边栏 + 分组卡片，自绘开关 / 滑块 / 分段控件，浮起的保存胶囊，新增“小组件”页与画廊，管道操作 `add-widget`）。修复：小组件在新窗口出现或解除隐藏时立即退到窗口下面（不再在设置中心上停留几秒）；触控板慢慢滑通知堆叠时跟手、松手吸附最近一张（不再两张叠在一起），翻页中途的前后遮挡顺序正确；微信 / 飞书读取线程启动时 UI 自动化建条件失败（E_FAIL）会每 2 秒重试（此前失败即整轮不读，飞书消息因此没有接入）；静止桌面上的小组件第一次就测量字色（此前亮壁纸上一直是白字）。
+
+- v0.9.9：**设置中心改为三列设计工作区**（D43：导航 / 以大预览为中心的工作区 / 检查器，窄窗口检查器折到下方，参数组“恢复默认”，预览背景可换成自己的壁纸，通知卡片预览，小组件桌面布局缩略图）；**设计语言页**（可交互展示 + 详细参数表）；**启动只轻跳一次**（D27，sin² 480 ms）；设置中心崩溃日志 `logs\settings.log`。
 
 - v0.9.8：**小组件拖角改尺寸**（D35：悬停出现弧形握把，拖动吸附到最近的尺寸）；**网格两半贴边**（D44，左右边距相等）；**层级守卫**（D35：只有 Restack 与拖动能改组件的 Z 序，窗口改大小、右键菜单不再与组件层级错乱）；**渲染节奏**（D45：动画按 DWM 合成时钟唤醒、每块玻璃每帧最多画一次，交换链帧延迟等待对象让未就绪的玻璃跳过而不阻塞）；Atrium 自己的图标从程序文件读取（D42，程序坞与托盘面板不再是旧图标）；飞书 / 微信轮询降耗（空闲 CPU 约 14% → 1% 单核）；修复退出时的死锁（飞书线程 `GetWindowTextLength` 等界面线程，V31.6）；Release 生成 `.pdb`。设置中心：调节项改为小卡片、页面不再横向偏移、预览改用照片、日历今天的数字居中（D43）。Codex 审查修了 EXIF 旋转照片与预览帧交接两处。
 
@@ -77,7 +79,7 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 | `shell/notification_listener.*`、`shell/wechat_source.*`、`shell/feishu_source.*` | 通知来源 |
 | `settings.*` | 设置读写（`ReadTextFile` / `WriteTextFile` 原子写） |
 
-设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10；D43）。`App.xaml` 是设计令牌与控件样式（颜色只有一个强调色，字体为三个 MiSans 文件），`MainWindow.xaml` 是侧边栏与八页，`SliderTile` / `ToggleTile`（`Controls.cs`）是滑块与开关小卡片，`ResponsiveGrid` 排成三列，`MainWindow.Widgets.cs` 是小组件画廊（示意图用 XAML 图形画，照片组件用预览照片），`MainWindow.Hero.cs` / `GlassPreview.cs` 是材质与形状页顶部的实时预览（照片只画一次，每帧只渲染玻璃叠层），`Photo.cs` 是预览照片（`assets/specimen/specimen.jpg`，苹果壁纸、有版权，已 gitignore、只在本机；没有时用当前桌面壁纸），`MainWindow.Design.cs` 是设计规范页。WinUI 的坑：控件模板里被视觉状态改动的元素不能挂 `OpacityTransition` 等隐式过渡，否则启动即崩溃（`Microsoft.UI.Xaml.dll` 访问冲突，无托管异常）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)；C++ `settings.h` 与 C# `BarSettings.cs` 必须同步（C# 写回时会丢掉它不认识的键，所以小组件布局单独存 `widgets.json`）。
+设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10；D43）。`App.xaml` 是设计令牌与控件样式（颜色只有一个强调色，字体为三个 MiSans 文件），`MainWindow.xaml` 是三列（侧边栏、工作区、检查器）与八页的工作区和检查器部分，`SliderTile` / `ToggleTile`（`Controls.cs`）是滑块与开关（工作区里是小卡片，检查器里 `Flat` 为不带卡片的行），`ResponsiveGrid` 自动分列，`MainWindow.Widgets.cs` 是小组件画廊（示意图用 XAML 图形画，照片组件用预览照片），`MainWindow.Hero.cs` / `GlassPreview.cs` 是材质、形状、程序坞页的实时预览（照片只画一次，每帧只渲染玻璃叠层），`MainWindow.Preview.cs` 是形状读数、通知卡片预览与小组件布局缩略图，`MainWindow.Design.cs` 是设计语言页，`Photo.cs` 是预览照片（`assets/specimen/specimen.jpg`，苹果壁纸、有版权，已 gitignore、只在本机；没有时用当前桌面壁纸）。WinUI 的坑：控件模板里被视觉状态改动的元素不能挂 `OpacityTransition` 等隐式过渡，否则启动即崩溃（`Microsoft.UI.Xaml.dll` 访问冲突，无托管异常）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)；C++ `settings.h` 与 C# `BarSettings.cs` 必须同步（C# 写回时会丢掉它不认识的键，所以小组件布局单独存 `widgets.json`）。
 
 ## 4. 构建、打包、推送
 
@@ -176,6 +178,7 @@ atrium-desktop 的对话：审查用“确认代码审查协作” `01a19b98-7b1
 - 渲染线程与任何工作线程（飞书、微信、托盘读取）里都不要调用会给 UI 线程同步发消息的函数（`GetWindowText` / `GetWindowTextLength` 对本进程窗口会发 `WM_GETTEXT`，用 `InternalGetWindowText`）：UI 线程可能正在 `WaitGlass` 等这一帧的玻璃，或在退出时 join 这条线程——v0.9.8 前飞书线程因此会在退出时死锁（V31.6）。卡死时用 `%LOCALAPPDATA%\atrium-tools\stacks\stacks.exe <pid> <pdb 目录>` 打印所有线程的调用栈（dbgeng 非侵入附加，Release 带 `.pdb`）。动画路径上少写日志。
 - 在 `Surface` 自己的消息处理中不能销毁该 Surface（小组件移除用 `PostMessage` 延后）。
 - 本机：Windows 11 家庭中文版 26H2（26300），3200×2000 @200%，系统任务栏自动隐藏，Intel Arc（输出）+ RTX 4060；两台播放设备（Realtek、NICEHCK，默认 NICEHCK）；附近有一台无线显示器；单屏。
+- 设置中心的临时构建要输出到带结尾反斜杠的目录（`dotnet build ... -o '...\settings-build\'`）：不带时 `.xbf` 会写到目录外，运行时报“XAML parsing failed”。设置中心的异常记在 `%LOCALAPPDATA%\Atrium\logs\settings.log`。
 - 字体文件：`assets/fonts/MiSans-{Medium,Demibold,Semibold}.otf`，经 CMake 复制到开发构建的 `Fonts`，经设置中心项目复制到 `Settings\Fonts`；许可要求在“关于”页注明、不得修改字体（不能裁剪子集）。
 - 用户当前设置（2026-11-02）：隐藏系统任务栏与通知横幅已开，小组件开（7 个，实时桌面背景），微信 / 飞书 / Windows 通知来源都开，3 个固定项。
 

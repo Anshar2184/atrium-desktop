@@ -80,6 +80,7 @@
             <Color x:Key="SystemAccentColorDark1">#FF0077ED</Color>
             <Color x:Key="SystemAccentColorDark2">#FF006ADB</Color>
             <Color x:Key="SystemAccentColorDark3">#FF005BC4</Color>
+            <SolidColorBrush x:Key="TransparentBrush" Color="Transparent" />
             <SolidColorBrush x:Key="AccentBrush" Color="#FF0A84FF" />
             <SolidColorBrush x:Key="AccentHoverBrush" Color="#FF2490FF" />
             <SolidColorBrush x:Key="AccentPressedBrush" Color="#FF0072E0" />
@@ -157,16 +158,48 @@
             </Style>
 
             <!-- ============ Surfaces ============ -->
-            <!-- A page: one column, at most 880 wide, never scrolled sideways. -->
+            <!-- A scrolling column: never scrolled sideways. -->
             <Style x:Key="PageStyle" TargetType="ScrollViewer">
                 <Setter Property="HorizontalScrollMode" Value="Disabled" />
                 <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
                 <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
             </Style>
-            <Style x:Key="PageStackStyle" TargetType="StackPanel">
-                <Setter Property="MaxWidth" Value="880" />
-                <Setter Property="Margin" Value="40,20,40,120" />
+            <!-- The workspace column (title, preview, main choices) and the inspector column. -->
+            <Style x:Key="WorkspaceStackStyle" TargetType="StackPanel">
+                <Setter Property="MaxWidth" Value="1120" />
+                <Setter Property="Margin" Value="36,52,36,140" />
                 <Setter Property="Spacing" Value="28" />
+            </Style>
+            <Style x:Key="InspectorStackStyle" TargetType="StackPanel">
+                <Setter Property="Margin" Value="24,60,22,140" />
+            </Style>
+            <Style x:Key="InspectorPageStyle" TargetType="StackPanel">
+                <Setter Property="Spacing" Value="30" />
+            </Style>
+            <!-- A row of the inspector: no card, a little air above and below (DESIGN.md §8). -->
+            <Style x:Key="FlatRowStyle" TargetType="StackPanel">
+                <Setter Property="Spacing" Value="8" />
+                <Setter Property="Padding" Value="4,10,4,12" />
+            </Style>
+            <Style x:Key="FlatTileStyle" TargetType="Border">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="Padding" Value="12,10,12,12" />
+                <Setter Property="Margin" Value="-8,0,-8,0" />
+            </Style>
+            <!-- "Restore defaults" beside a group's title: quiet until the pointer is on it. -->
+            <Style x:Key="ResetButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Content" Value="恢复默认" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{ThemeResource InkTertiaryBrush}" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Padding" Value="8,2,8,3" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Top" />
+                <Setter Property="Margin" Value="0,-4,-8,0" />
             </Style>
             <!-- A tile: one setting on a small card; tiles sit three to a row (ResponsiveGrid). -->
             <Style x:Key="TileStyle" TargetType="Border">

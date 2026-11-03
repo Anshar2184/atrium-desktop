@@ -169,4 +169,8 @@ internal sealed class BarSettings
     }
 
     public bool SameAs(BarSettings other) => ToJson().ToJsonString() == other.ToJson().ToJsonString();
+
+    public bool SameMaterial(BarSettings o) =>
+        Transparency == o.Transparency && Blur == o.Blur && Refraction == o.Refraction && Edge == o.Edge && Dispersion == o.Dispersion &&
+        Highlight == o.Highlight && Shadow == o.Shadow && Tint == o.Tint;
 }

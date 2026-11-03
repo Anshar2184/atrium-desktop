@@ -10,10 +10,12 @@
         <MicaBackdrop Kind="Base" />
     </Window.SystemBackdrop>
 
-    <!-- A sidebar on the window's material, the page on a quiet grey; groups of rows on white cards (DESIGN.md §8). -->
+    <!-- Three columns (DESIGN.md §8): the sidebar on the window's material; the workspace (title, live preview,
+         the page's main choices) scrolling on its own; the inspector (the page's other parameters) on the right,
+         scrolling on its own. A narrow window folds the inspector under the workspace (OnContentSizeChanged). -->
     <Grid x:Name="RootGrid">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="272" />
+            <ColumnDefinition Width="232" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -21,16 +23,16 @@
         <Grid x:Name="AppTitleBar" Grid.ColumnSpan="2" Height="44" VerticalAlignment="Top" Background="Transparent" Canvas.ZIndex="1" />
 
         <!-- ============ Sidebar ============ -->
-        <Grid Padding="14,52,14,18">
+        <Grid Padding="12,52,12,18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <StackPanel Orientation="Horizontal" Spacing="12" Margin="10,0,0,26">
-                <Image Source="ms-appx:///Assets/atrium-256.png" Width="44" Height="44" />
-                <StackPanel VerticalAlignment="Center" Spacing="1">
+            <StackPanel Orientation="Horizontal" Spacing="12" Margin="10,0,0,24">
+                <Image Source="ms-appx:///Assets/atrium-256.png" Width="40" Height="40" />
+                <StackPanel VerticalAlignment="Center" Spacing="0">
                     <TextBlock Text="Atrium" Style="{StaticResource TitleStyle}" />
                     <TextBlock Text="设置" FontSize="13" Foreground="{ThemeResource InkSecondaryBrush}" />
                 </StackPanel>
@@ -44,7 +46,7 @@
                 <ListViewItem AutomationProperties.Name="通知"><local:NavLabel Glyph="&#xEA8F;" Text="通知" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="小组件"><local:NavLabel Glyph="&#xE8A9;" Text="小组件" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="系统"><local:NavLabel Glyph="&#xE770;" Text="系统" /></ListViewItem>
-                <ListViewItem AutomationProperties.Name="设计规范" Margin="0,18,0,2"><local:NavLabel Glyph="&#xE8D2;" Text="设计规范" /></ListViewItem>
+                <ListViewItem AutomationProperties.Name="设计语言" Margin="0,18,0,2"><local:NavLabel Glyph="&#xE8D2;" Text="设计语言" /></ListViewItem>
                 <ListViewItem AutomationProperties.Name="关于"><local:NavLabel Glyph="&#xE946;" Text="关于" /></ListViewItem>
             </ListView>
 
@@ -64,44 +66,62 @@
             </StackPanel>
         </Grid>
 
-        <!-- ============ Content ============ -->
-        <Grid Grid.Column="1" Background="{ThemeResource PageBrush}">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+        <!-- ============ Workspace + inspector ============ -->
+        <Grid x:Name="ContentGrid" Grid.Column="1" Background="{ThemeResource PageBrush}" SizeChanged="OnContentSizeChanged">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-            <Border Height="44" />
+            <!-- ======== Workspace ======== -->
+            <ScrollViewer x:Name="CenterScroll" Style="{StaticResource PageStyle}">
+                <StackPanel x:Name="CenterStack" Style="{StaticResource WorkspaceStackStyle}" SizeChanged="OnCenterSizeChanged">
+                    <StackPanel x:Name="Header" Spacing="6">
+                        <TextBlock x:Name="HeaderTitle" Style="{StaticResource LargeTitleStyle}" />
+                        <TextBlock x:Name="HeaderSubtitle" Style="{StaticResource SubtitleStyle}" />
+                    </StackPanel>
 
-            <StackPanel x:Name="Header" Grid.Row="1" MaxWidth="880" Margin="40,4,40,0" Spacing="6">
-                <TextBlock x:Name="HeaderTitle" Style="{StaticResource LargeTitleStyle}" />
-                <TextBlock x:Name="HeaderSubtitle" Style="{StaticResource SubtitleStyle}" />
-            </StackPanel>
-
-            <!-- Hero specimen: the glass bar, rendered live over the specimen photo (material and shape) -->
-            <Border x:Name="HeroFrame" Grid.Row="2" Height="224" MaxWidth="880" Margin="40,22,40,6" CornerRadius="20"
-                    Background="#FFCBD3DD" SizeChanged="OnHeroSizeChanged">
-                <Grid>
-                    <Canvas x:Name="HeroCanvas" />
-                    <Border x:Name="Loupe" Width="176" Height="112" HorizontalAlignment="Right" VerticalAlignment="Top"
-                            Margin="0,14,14,0" CornerRadius="14" BorderThickness="2" BorderBrush="#B3FFFFFF" Background="#FFCBD3DD">
-                        <Grid>
-                            <Canvas x:Name="LoupeCanvas" />
-                            <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8" CornerRadius="6" Padding="6,2,6,3" Background="#80000000">
-                                <TextBlock Text="3× 放大" FontSize="11" Foreground="#E6FFFFFF" />
+                    <!-- The live preview: the glass bar over the photo (material, shape, dock) -->
+                    <StackPanel x:Name="HeroBlock" Spacing="10">
+                        <Border x:Name="HeroFrame" Height="360" CornerRadius="20" Background="#FFCBD3DD" SizeChanged="OnHeroSizeChanged">
+                            <Grid>
+                                <Canvas x:Name="HeroCanvas" />
+                                <Border x:Name="Loupe" Width="232" Height="148" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Margin="0,16,16,0" CornerRadius="16" BorderThickness="2" BorderBrush="#B3FFFFFF" Background="#FFCBD3DD">
+                                    <Grid>
+                                        <Canvas x:Name="LoupeCanvas" />
+                                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8" CornerRadius="6" Padding="6,2,6,3" Background="#80000000">
+                                            <TextBlock Text="3× 放大" FontSize="11" Foreground="#E6FFFFFF" />
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                                <Border CornerRadius="20" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
+                            </Grid>
+                        </Border>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="BgSpecimen" GroupName="herobg" Content="示例照片" Tag="specimen" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
+                                    <RadioButton x:Name="BgWallpaper" GroupName="herobg" Content="我的壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnHeroBackgroundChecked" />
+                                </StackPanel>
                             </Border>
+                            <TextBlock x:Name="HeroCaption" Grid.Column="1" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" />
+                            <StackPanel x:Name="LoupeToggle" Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="局部放大" Style="{StaticResource RowNoteStyle}" VerticalAlignment="Center" />
+                                <ToggleSwitch x:Name="LoupeSwitch" Style="{StaticResource SwitchStyle}" Toggled="OnLoupeToggled"
+                                              AutomationProperties.Name="局部放大" />
+                            </StackPanel>
                         </Grid>
-                    </Border>
-                    <Border CornerRadius="20" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
-                </Grid>
-            </Border>
+                    </StackPanel>
 
-            <Grid Grid.Row="3">
-                <!-- ======== 01 Material ======== -->
-                <ScrollViewer x:Name="PageMaterial" Style="{StaticResource PageStyle}">
-                    <StackPanel Style="{StaticResource PageStackStyle}">
+                    <!-- ==== Material: presets and the basic three ==== -->
+                    <StackPanel x:Name="MainMaterial" Spacing="26">
                         <StackPanel>
                             <TextBlock Text="预设" Style="{StaticResource SectionStyle}" />
                             <Grid ColumnSpacing="12">
@@ -142,8 +162,11 @@
                         </StackPanel>
 
                         <StackPanel>
-                            <TextBlock Text="质感" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="ClarityTiles" MinCellWidth="250" Gap="12" StretchLastRow="True">
+                            <Grid>
+                                <TextBlock Text="质感" Style="{StaticResource SectionStyle}" />
+                                <Button Style="{StaticResource ResetButtonStyle}" Tag="clarity" Click="OnGroupReset" AutomationProperties.Name="恢复质感的默认值" />
+                            </Grid>
+                            <local:ResponsiveGrid x:Name="ClarityTiles" MinCellWidth="220" Gap="12" StretchLastRow="True">
                                 <!-- The tint, after the sliders (BuildRows puts them first) -->
                                 <Border x:Name="TintTile" Style="{StaticResource TileStyle}">
                                     <Grid RowSpacing="10">
@@ -178,93 +201,39 @@
                                 </Border>
                             </local:ResponsiveGrid>
                         </StackPanel>
-
-                        <StackPanel>
-                            <TextBlock Text="边缘" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="EdgeTiles" MinCellWidth="250" Gap="12" StretchLastRow="True" />
-                        </StackPanel>
-
-                        <StackPanel>
-                            <TextBlock Text="光影" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="LightTiles" MinCellWidth="250" Gap="12" StretchLastRow="True" />
-                        </StackPanel>
-
-                        <Button Content="恢复默认外观" Click="OnDefaults" HorizontalAlignment="Left" />
                     </StackPanel>
-                </ScrollViewer>
 
-                <!-- ======== 02 Shape ======== -->
-                <ScrollViewer x:Name="PageShape" Style="{StaticResource PageStyle}" Visibility="Collapsed">
-                    <StackPanel Style="{StaticResource PageStackStyle}">
-                        <StackPanel>
-                            <TextBlock Text="尺寸" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="SizeTiles" MinCellWidth="250" Gap="12" StretchLastRow="True" />
-                        </StackPanel>
-                        <StackPanel>
-                            <TextBlock Text="宽度" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="WidthTiles" MinCellWidth="250" Gap="12" StretchLastRow="True">
-                                <local:ToggleTile x:Name="AutoWidthSwitch" Title="自动宽度" SwitchName="自动宽度" Toggled="OnAutoWidthToggled"
-                                                  Note="玻璃栏随内容伸缩，像一枚贴合物品的胶囊；关闭后固定为“最大宽度”。" />
-                            </local:ResponsiveGrid>
-                        </StackPanel>
-                        <StackPanel>
-                            <TextBlock Text="位置与动效" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="PlaceTiles" MinCellWidth="250" Gap="12" StretchLastRow="True" />
-                        </StackPanel>
+                    <!-- ==== Shape: the geometry, read out ==== -->
+                    <StackPanel x:Name="MainShape" Visibility="Collapsed">
+                        <TextBlock Text="几何" Style="{StaticResource SectionStyle}" />
+                        <Border Style="{StaticResource TileStyle}" Padding="22,16,22,16">
+                            <local:ResponsiveGrid x:Name="ShapeReadout" MinCellWidth="120" Gap="12" />
+                        </Border>
+                        <TextBlock Style="{StaticResource FootnoteStyle}" Margin="4,10,0,0"
+                                   Text="调节右侧的参数时，预览会标出正在改变的尺寸。圆角达到高度的一半即为胶囊形。" />
                     </StackPanel>
-                </ScrollViewer>
 
-                <!-- ======== 03 Dock ======== -->
-                <ScrollViewer x:Name="PageDock" Style="{StaticResource PageStyle}" Visibility="Collapsed">
-                    <StackPanel Style="{StaticResource PageStackStyle}">
-                        <StackPanel>
-                            <TextBlock Text="栏上显示" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid MinCellWidth="250" Gap="12" StretchLastRow="True">
-                                <local:ToggleTile x:Name="ClockSwitch" Title="时钟和日期" SwitchName="显示时钟和日期" Toggled="OnClockToggled"
-                                                  Note="在栏的右端，使用系统的时间与日期格式。" />
-                                <local:ToggleTile x:Name="RunningSwitch" Title="正在运行的应用" SwitchName="显示正在运行的应用" Toggled="OnRunningToggled"
-                                                  Note="固定的应用之后，显示正在运行的其他应用，下方带一个小圆点。" />
-                                <Border Style="{StaticResource TileStyle}">
-                                    <Grid RowSpacing="8">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-                                        <TextBlock Text="文字颜色" Style="{StaticResource RowTitleStyle}" />
-                                        <Border Grid.Row="1" Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
-                                            <StackPanel Orientation="Horizontal">
-                                                <RadioButton x:Name="TextAuto" GroupName="ink" Content="自动" Tag="auto" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
-                                                <RadioButton x:Name="TextLight" GroupName="ink" Content="浅色" Tag="light" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
-                                                <RadioButton x:Name="TextDark" GroupName="ink" Content="深色" Tag="dark" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
-                                            </StackPanel>
-                                        </Border>
-                                        <TextBlock Grid.Row="2" Style="{StaticResource RowNoteStyle}" Text="自动：按玻璃下方背景的明暗选择。" />
-                                    </Grid>
-                                </Border>
-                            </local:ResponsiveGrid>
-                        </StackPanel>
-
-                        <StackPanel>
-                            <Grid Margin="0,0,0,10">
-                                <TextBlock Text="固定的应用" Style="{StaticResource SectionStyle}" Margin="4,0,0,0" VerticalAlignment="Center" />
-                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                                    <TextBlock x:Name="PinCount" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center" Margin="0,0,6,0"
-                                               Typography.NumeralAlignment="Tabular" />
-                                    <Button x:Name="ImportPinsButton" Content="导入系统任务栏固定项" Click="OnImportPins" />
-                                    <Button x:Name="AddPinButton" Content="添加应用…" Click="OnAddPin" Style="{StaticResource PrimaryButtonStyle}" />
-                                </StackPanel>
-                            </Grid>
-                            <Border Style="{StaticResource GroupStyle}">
-                                <Grid>
-                                    <ListView x:Name="PinsList" SelectionMode="None" CanReorderItems="True" CanDragItems="True" AllowDrop="True"
-                                              ItemContainerStyle="{StaticResource PinItemStyle}" DragItemsCompleted="OnPinsDragCompleted"
-                                              AutomationProperties.Name="固定的应用" Padding="0,4,0,4">
-                                        <ListView.ItemsPanel>
-                                            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
-                                        </ListView.ItemsPanel>
-                                        <ListView.ItemTemplate>
-                                            <DataTemplate x:DataType="local:PinVm">
+                    <!-- ==== Dock: the pinned apps ==== -->
+                    <StackPanel x:Name="MainDock" Visibility="Collapsed">
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="固定的应用" Style="{StaticResource SectionStyle}" Margin="4,0,0,0" VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                <TextBlock x:Name="PinCount" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center" Margin="0,0,6,0"
+                                           Typography.NumeralAlignment="Tabular" />
+                                <Button x:Name="ImportPinsButton" Content="导入系统任务栏固定项" Click="OnImportPins" />
+                                <Button x:Name="AddPinButton" Content="添加应用…" Click="OnAddPin" Style="{StaticResource PrimaryButtonStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Border Style="{StaticResource GroupStyle}">
+                            <Grid>
+                                <ListView x:Name="PinsList" SelectionMode="None" CanReorderItems="True" CanDragItems="True" AllowDrop="True"
+                                          ItemContainerStyle="{StaticResource PinItemStyle}" DragItemsCompleted="OnPinsDragCompleted"
+                                          AutomationProperties.Name="固定的应用" Padding="0,4,0,4">
+                                    <ListView.ItemsPanel>
+                                        <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+                                    </ListView.ItemsPanel>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="local:PinVm">
                                                 <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
@@ -298,104 +267,67 @@
                                                     </StackPanel>
                                                 </Grid>
                                             </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-                                    <StackPanel x:Name="PinsEmpty" Visibility="Collapsed" Padding="24,36,24,36" Spacing="6" HorizontalAlignment="Center">
-                                        <TextBlock Text="还没有固定的应用" Style="{StaticResource TitleStyle}" HorizontalAlignment="Center" />
-                                        <TextBlock Text="点“添加应用…”选择一个程序，或一键导入 Windows 任务栏上已固定的应用。"
-                                                   Style="{StaticResource RowNoteStyle}" TextAlignment="Center" MaxWidth="360" />
-                                    </StackPanel>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <StackPanel x:Name="PinsEmpty" Visibility="Collapsed" Padding="24,36,24,36" Spacing="6" HorizontalAlignment="Center">
+                                    <TextBlock Text="还没有固定的应用" Style="{StaticResource TitleStyle}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="点“添加应用…”选择一个程序，或一键导入 Windows 任务栏上已固定的应用。"
+                                               Style="{StaticResource RowNoteStyle}" TextAlignment="Center" MaxWidth="360" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <TextBlock Text="拖动行可以排序，顺序就是它们在玻璃栏上的先后。" Style="{StaticResource FootnoteStyle}" Margin="4,8,0,0" />
+                    </StackPanel>
+
+                    <!-- ==== Notifications: the cards as they pop up ==== -->
+                    <StackPanel x:Name="MainNotify" Visibility="Collapsed" Spacing="10">
+                        <Border x:Name="NotifyStage" Height="340" CornerRadius="20" Background="#FFCBD3DD">
+                            <Grid>
+                                <StackPanel x:Name="NotifyCards" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,28" Spacing="10" Width="360" />
+                                <Border CornerRadius="20" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
+                            </Grid>
+                        </Border>
+                        <Grid>
+                            <TextBlock x:Name="NotifyCaption" Style="{StaticResource FootnoteStyle}" VerticalAlignment="Center" Margin="4,0,0,0" />
+                            <Button Content="再弹一次" Click="OnReplayNotify" HorizontalAlignment="Right" />
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- ==== Widgets: the desktop's layout, and the gallery ==== -->
+                    <StackPanel x:Name="MainWidgets" Visibility="Collapsed" Spacing="26">
+                        <StackPanel Spacing="10">
+                            <Border x:Name="WidgetStage" Height="320" CornerRadius="20" Background="#FFCBD3DD" SizeChanged="OnWidgetStageSizeChanged">
+                                <Grid>
+                                    <Canvas x:Name="WidgetMap" />
+                                    <Border CornerRadius="20" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
                                 </Grid>
                             </Border>
-                            <TextBlock Text="拖动行可以排序，顺序就是它们在玻璃栏上的先后。" Style="{StaticResource FootnoteStyle}" Margin="4,8,0,0" />
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
-
-                <!-- ======== 04 Notifications ======== -->
-                <ScrollViewer x:Name="PageNotify" Style="{StaticResource PageStyle}" Visibility="Collapsed">
-                    <StackPanel Style="{StaticResource PageStackStyle}">
-                        <StackPanel>
-                            <TextBlock Text="弹出" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="NotifyTiles" MinCellWidth="250" Gap="12" StretchLastRow="True">
-                                <local:ToggleTile x:Name="HideBodySwitch" Title="隐藏通知正文" SwitchName="隐藏通知正文" Toggled="OnHideBodyToggled"
-                                                  Note="卡片只显示应用和标题；通知窗口同时不会出现在截图和屏幕共享里。" />
-                            </local:ResponsiveGrid>
-                        </StackPanel>
-                        <StackPanel>
-                            <TextBlock Text="来源" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid MinCellWidth="250" Gap="12" StretchLastRow="True">
-                                <local:ToggleTile x:Name="ListenerSwitch" Title="Windows 通知" SwitchName="显示 Windows 通知" Toggled="OnListenerToggled"
-                                                  Note="QQ 等发出系统通知的应用。需要在 Windows 隐私设置中允许访问通知。" />
-                                <local:ToggleTile x:Name="WeChatSwitch" Title="微信" SwitchName="显示微信消息" Toggled="OnWeChatToggled"
-                                                  Note="只读微信窗口里的会话列表，有新的未读消息时显示卡片；免打扰的会话不提醒。" />
-                                <local:ToggleTile x:Name="FeishuSwitch" Title="飞书" SwitchName="显示飞书消息" Toggled="OnFeishuToggled"
-                                                  Note="只读飞书弹窗里的文字，同时显示为卡片；点击卡片打开飞书。" />
-                            </local:ResponsiveGrid>
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
-
-                <!-- ======== 05 Widgets ======== -->
-                <ScrollViewer x:Name="PageWidgets" Style="{StaticResource PageStyle}" Visibility="Collapsed">
-                    <StackPanel Style="{StaticResource PageStackStyle}">
-                        <StackPanel>
-                            <TextBlock Text="桌面" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid MinCellWidth="250" Gap="12" StretchLastRow="True">
-                                <local:ToggleTile x:Name="WidgetsSwitch" Title="桌面小组件" SwitchName="桌面小组件" Toggled="OnWidgetsToggled"
-                                                  Note="放在桌面上、所有窗口之下。拖动可移动，拖下角可改变大小，右键可移除；靠哪一侧就贴着哪一侧排列。" />
-                                <Border Style="{StaticResource TileStyle}">
-                                    <Grid RowSpacing="8">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-                                        <TextBlock Text="玻璃映出" Style="{StaticResource RowTitleStyle}" />
-                                        <Border Grid.Row="1" Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
-                                            <StackPanel Orientation="Horizontal">
-                                                <RadioButton x:Name="BackdropDesktop" GroupName="backdrop" Content="实时桌面" Tag="desktop" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
-                                                <RadioButton x:Name="BackdropWallpaper" GroupName="backdrop" Content="静态壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
-                                            </StackPanel>
-                                        </Border>
-                                        <TextBlock Grid.Row="2" Style="{StaticResource RowNoteStyle}"
-                                                   Text="实时桌面跟随动态壁纸与幻灯片；静态壁纸直接读取图片，开销最低。" />
-                                    </Grid>
-                                </Border>
-                            </local:ResponsiveGrid>
+                            <TextBlock x:Name="WidgetMapCaption" Style="{StaticResource FootnoteStyle}" Margin="4,0,0,0" />
                         </StackPanel>
                         <StackPanel>
                             <TextBlock Text="添加小组件" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="WidgetGallery" MinCellWidth="190" Gap="12" />
+                            <local:ResponsiveGrid x:Name="WidgetGallery" MinCellWidth="180" Gap="12" />
                             <TextBlock x:Name="WidgetHint" Style="{StaticResource FootnoteStyle}" Margin="4,10,0,0"
                                        Text="点按一个小组件，把它放到桌面上第一个空位。" />
                         </StackPanel>
                     </StackPanel>
-                </ScrollViewer>
 
-                <!-- ======== 06 System ======== -->
-                <ScrollViewer x:Name="PageSystem" Style="{StaticResource PageStyle}" Visibility="Collapsed">
-                    <StackPanel Style="{StaticResource PageStackStyle}">
-                        <StackPanel>
-                            <TextBlock Text="Windows" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid MinCellWidth="250" Gap="12" StretchLastRow="True">
-                                <local:ToggleTile x:Name="HideTaskbarSwitch" Title="隐藏系统任务栏" SwitchName="隐藏系统任务栏" Toggled="OnHideTaskbarToggled"
-                                                  Note="只留下 Atrium 栏。关闭开关或退出 Atrium 时恢复；Win 键等系统快捷键照常可用。" />
-                                <local:ToggleTile x:Name="HideBannersSwitch" Title="隐藏系统通知横幅" SwitchName="隐藏系统通知横幅" Toggled="OnHideBannersToggled"
-                                                  Note="打开 Windows 的“请勿打扰”；通知照常显示为 Atrium 卡片。关闭开关或退出时恢复。" />
-                            </local:ResponsiveGrid>
-                        </StackPanel>
+                    <!-- ==== System ==== -->
+                    <StackPanel x:Name="MainSystem" Visibility="Collapsed">
+                        <TextBlock Text="Windows" Style="{StaticResource SectionStyle}" />
+                        <local:ResponsiveGrid MinCellWidth="280" Gap="12" StretchLastRow="True">
+                            <local:ToggleTile x:Name="HideTaskbarSwitch" Title="隐藏系统任务栏" SwitchName="隐藏系统任务栏" Toggled="OnHideTaskbarToggled"
+                                              Note="只留下 Atrium 栏。关闭开关或退出 Atrium 时恢复；Win 键等系统快捷键照常可用。" />
+                            <local:ToggleTile x:Name="HideBannersSwitch" Title="隐藏系统通知横幅" SwitchName="隐藏系统通知横幅" Toggled="OnHideBannersToggled"
+                                              Note="打开 Windows 的“请勿打扰”；通知照常显示为 Atrium 卡片。关闭开关或退出时恢复。" />
+                        </local:ResponsiveGrid>
                     </StackPanel>
-                </ScrollViewer>
 
-                <!-- ======== 07 Design: built in code (MainWindow.Design.cs) the first time it is shown ======== -->
-                <ScrollViewer x:Name="PageDesign" Style="{StaticResource PageStyle}" Visibility="Collapsed">
-                    <StackPanel x:Name="DesignStack" Style="{StaticResource PageStackStyle}" Spacing="32" />
-                </ScrollViewer>
+                    <!-- ==== Design language: built in code (MainWindow.Design.cs) the first time it is shown ==== -->
+                    <StackPanel x:Name="DesignStack" Visibility="Collapsed" Spacing="40" />
 
-                <!-- ======== 08 About ======== -->
-                <ScrollViewer x:Name="PageAbout" Style="{StaticResource PageStyle}" Visibility="Collapsed">
-                    <StackPanel Style="{StaticResource PageStackStyle}">
+                    <!-- ==== About ==== -->
+                    <StackPanel x:Name="MainAbout" Visibility="Collapsed" Spacing="28">
                         <Border Style="{StaticResource TileStyle}" Padding="28,28,28,26">
                             <Grid ColumnSpacing="24">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -445,27 +377,149 @@
                         <TextBlock Style="{StaticResource FootnoteStyle}" Margin="4,0,0,0"
                                    Text="界面字体：MiSans，版权归小米科技有限责任公司，依《MiSans 字体知识产权许可协议》使用。" />
                     </StackPanel>
-                </ScrollViewer>
 
-                <!-- Errors: a quiet banner over the page's top -->
-                <InfoBar x:Name="Status" IsOpen="False" IsClosable="True" MaxWidth="880" Margin="40,8,40,0" VerticalAlignment="Top" />
+                    <!-- A narrow window: the inspector's groups come here, under the page (OnContentSizeChanged) -->
+                    <Border x:Name="FoldedInspector" />
+                </StackPanel>
+            </ScrollViewer>
 
-                <!-- Unsaved changes: a floating capsule at the bottom, only while there are any -->
-                <Border x:Name="SaveBar" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,28"
-                        CornerRadius="24" Padding="18,8,8,8" BorderThickness="1"
-                        Background="{ThemeResource FloatBrush}" BorderBrush="{ThemeResource FloatStrokeBrush}"
-                        Opacity="0" IsHitTestVisible="False">
-                    <Border.Shadow>
-                        <ThemeShadow />
-                    </Border.Shadow>
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Ellipse x:Name="DirtyDot" Width="8" Height="8" VerticalAlignment="Center" Fill="#FFFF9F0A" />
-                        <TextBlock x:Name="DirtyText" Text="未保存的修改" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
-                        <Button x:Name="RevertButton" Content="撤销修改" Click="OnRevert" IsEnabled="False" CornerRadius="16" />
-                        <Button x:Name="SaveButton" Content="保存" Click="OnSave" IsEnabled="False" Style="{StaticResource PrimaryButtonStyle}" CornerRadius="16" />
+            <!-- ======== Inspector ======== -->
+            <Grid x:Name="InspectorPane" Grid.Column="1" Width="320">
+                <Rectangle Width="1" HorizontalAlignment="Left" Fill="{ThemeResource SeparatorBrush}" />
+                <ScrollViewer x:Name="InspectorScroll" Style="{StaticResource PageStyle}" Margin="1,0,0,0">
+                    <StackPanel x:Name="InspectorStack" Style="{StaticResource InspectorStackStyle}">
+                        <!-- Material: the edge and the light -->
+                        <StackPanel x:Name="SideMaterial" Style="{StaticResource InspectorPageStyle}">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="边缘" Style="{StaticResource SectionStyle}" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="edge" Click="OnGroupReset" AutomationProperties.Name="恢复边缘的默认值" />
+                                </Grid>
+                                <StackPanel x:Name="EdgeRows" />
+                            </StackPanel>
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="光影" Style="{StaticResource SectionStyle}" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="light" Click="OnGroupReset" AutomationProperties.Name="恢复光影的默认值" />
+                                </Grid>
+                                <StackPanel x:Name="LightRows" />
+                            </StackPanel>
+                            <Button Content="恢复默认外观" Click="OnDefaults" HorizontalAlignment="Left" />
+                        </StackPanel>
+
+                        <!-- Shape: size and width -->
+                        <StackPanel x:Name="SideShape" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="尺寸" Style="{StaticResource SectionStyle}" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="size" Click="OnGroupReset" AutomationProperties.Name="恢复尺寸的默认值" />
+                                </Grid>
+                                <StackPanel x:Name="SizeRows" />
+                            </StackPanel>
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="宽度" Style="{StaticResource SectionStyle}" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="width" Click="OnGroupReset" AutomationProperties.Name="恢复宽度的默认值" />
+                                </Grid>
+                                <StackPanel x:Name="WidthRows">
+                                    <local:ToggleTile x:Name="AutoWidthSwitch" Title="自动宽度" SwitchName="自动宽度" Toggled="OnAutoWidthToggled" Flat="True"
+                                                      Note="玻璃栏随内容伸缩，像一枚贴合物品的胶囊；关闭后固定为“最大宽度”。" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Dock: what the bar shows, the icons, place and motion -->
+                        <StackPanel x:Name="SideDock" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="栏上显示" Style="{StaticResource SectionStyle}" />
+                                <local:ToggleTile x:Name="ClockSwitch" Title="时钟和日期" SwitchName="显示时钟和日期" Toggled="OnClockToggled" Flat="True"
+                                                  Note="在栏的右端，使用系统的时间与日期格式。" />
+                                <local:ToggleTile x:Name="RunningSwitch" Title="正在运行的应用" SwitchName="显示正在运行的应用" Toggled="OnRunningToggled" Flat="True"
+                                                  Note="固定的应用之后，显示正在运行的其他应用，下方带一个小圆点。" />
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="文字颜色" Style="{StaticResource RowTitleStyle}" />
+                                    <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton x:Name="TextAuto" GroupName="ink" Content="自动" Tag="auto" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
+                                            <RadioButton x:Name="TextLight" GroupName="ink" Content="浅色" Tag="light" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
+                                            <RadioButton x:Name="TextDark" GroupName="ink" Content="深色" Tag="dark" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource RowNoteStyle}" Text="自动：按玻璃下方背景的明暗选择。" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="图标与位置" Style="{StaticResource SectionStyle}" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="dock" Click="OnGroupReset" AutomationProperties.Name="恢复图标与位置的默认值" />
+                                </Grid>
+                                <StackPanel x:Name="DockRows" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Notifications: how long, what they show, where from -->
+                        <StackPanel x:Name="SideNotify" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="弹出" Style="{StaticResource SectionStyle}" />
+                                    <Button Style="{StaticResource ResetButtonStyle}" Tag="notify" Click="OnGroupReset" AutomationProperties.Name="恢复弹出的默认值" />
+                                </Grid>
+                                <StackPanel x:Name="NotifyRows">
+                                    <local:ToggleTile x:Name="HideBodySwitch" Title="隐藏通知正文" SwitchName="隐藏通知正文" Toggled="OnHideBodyToggled" Flat="True"
+                                                      Note="卡片只显示应用和标题；通知窗口同时不会出现在截图和屏幕共享里。" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="来源" Style="{StaticResource SectionStyle}" />
+                                <local:ToggleTile x:Name="ListenerSwitch" Title="Windows 通知" SwitchName="显示 Windows 通知" Toggled="OnListenerToggled" Flat="True"
+                                                  Note="QQ 等发出系统通知的应用。需要在 Windows 隐私设置中允许访问通知。" />
+                                <local:ToggleTile x:Name="WeChatSwitch" Title="微信" SwitchName="显示微信消息" Toggled="OnWeChatToggled" Flat="True"
+                                                  Note="只读微信窗口里的会话列表，有新的未读消息时显示卡片；免打扰的会话不提醒。" />
+                                <local:ToggleTile x:Name="FeishuSwitch" Title="飞书" SwitchName="显示飞书消息" Toggled="OnFeishuToggled" Flat="True"
+                                                  Note="只读飞书弹窗里的文字，同时显示为卡片；点击卡片打开飞书。" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Widgets: on or off, what the glass shows -->
+                        <StackPanel x:Name="SideWidgets" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="桌面" Style="{StaticResource SectionStyle}" />
+                                <local:ToggleTile x:Name="WidgetsSwitch" Title="桌面小组件" SwitchName="桌面小组件" Toggled="OnWidgetsToggled" Flat="True"
+                                                  Note="放在桌面上、所有窗口之下。拖动可移动，拖下角可改变大小，右键可移除；靠哪一侧就贴着哪一侧排列。" />
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="玻璃映出" Style="{StaticResource RowTitleStyle}" />
+                                    <Border Style="{StaticResource SegmentTrackStyle}" HorizontalAlignment="Left">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton x:Name="BackdropDesktop" GroupName="backdrop" Content="实时桌面" Tag="desktop" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
+                                            <RadioButton x:Name="BackdropWallpaper" GroupName="backdrop" Content="静态壁纸" Tag="wallpaper" Style="{StaticResource SegmentStyle}" Checked="OnWidgetBackdropChecked" />
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource RowNoteStyle}" Text="实时桌面跟随动态壁纸与幻灯片；静态壁纸直接读取图片，开销最低。" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
                     </StackPanel>
-                </Border>
+                </ScrollViewer>
             </Grid>
+
+            <!-- Errors: a quiet banner over the workspace's top -->
+            <InfoBar x:Name="Status" IsOpen="False" IsClosable="True" MaxWidth="760" Margin="36,52,36,0" VerticalAlignment="Top" />
+
+            <!-- Unsaved changes: a floating capsule at the bottom, only while there are any -->
+            <Border x:Name="SaveBar" Grid.ColumnSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,28"
+                    CornerRadius="24" Padding="18,8,8,8" BorderThickness="1"
+                    Background="{ThemeResource FloatBrush}" BorderBrush="{ThemeResource FloatStrokeBrush}"
+                    Opacity="0" IsHitTestVisible="False">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Ellipse x:Name="DirtyDot" Width="8" Height="8" VerticalAlignment="Center" Fill="#FFFF9F0A" />
+                    <TextBlock x:Name="DirtyText" Text="未保存的修改" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Button x:Name="RevertButton" Content="撤销修改" Click="OnRevert" IsEnabled="False" CornerRadius="16" />
+                    <Button x:Name="SaveButton" Content="保存" Click="OnSave" IsEnabled="False" Style="{StaticResource PrimaryButtonStyle}" CornerRadius="16" />
+                </StackPanel>
+            </Border>
         </Grid>
     </Grid>
 </Window>

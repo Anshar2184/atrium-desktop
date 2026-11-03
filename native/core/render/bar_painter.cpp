@@ -167,22 +167,15 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
             moving |= nx != m.x;
             m.x = nx;
         }
-        // Launch bounce: hops of decreasing height; stops after the hop in
-        // which the app started running.
+        // Launch: one soft hop (v0.9.8; it was up to four, each lower). It leaves and lands
+        // without a jolt (sin², no speed at either end), whatever the app does meanwhile.
         m.hop = 0;
         if (item->bounceMs > 0) {
-            if (m.bounceMs != item->bounceMs) {
-                m.bounceMs = item->bounceMs;
-                m.bounceEnd = std::max(1, item->bounces);
-            }
-            constexpr double kHopMs = 560;
-            double t = nowMs - m.bounceMs;
-            int n = int(t / kHopMs);
-            if (item->running && m.bounceEnd > n + 1)
-                m.bounceEnd = n + 1;
-            if (t >= 0 && n < m.bounceEnd) {
-                float ph = float(std::fmod(t, kHopMs) / kHopMs);
-                m.hop = 4 * ph * (1 - ph) * std::pow(0.72f, float(n));
+            constexpr double kHopMs = 480;
+            double t = nowMs - item->bounceMs;
+            if (t >= 0 && t < kHopMs) {
+                float sn = std::sin(3.14159265f * float(t / kHopMs));
+                m.hop = sn * sn;
                 moving = true;
             }
         }
@@ -449,7 +442,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     // dips on press, fades in when new; lifts while dragged.
     float k = grow * (magnifying ? 1.f : 1 + 0.06f * hover) * (1 + 0.08f * lift) * (1 - 0.08f * m.press) * (0.85f + 0.15f * m.appear) *
               (m.leaving ? 0.45f + 0.55f * m.appear : 1.f);
-    float up = m.hop * 0.55f * size + (magnifying ? 0.f : 1.5f * s * hover) + 2.0f * s * lift;
+    float up = m.hop * 0.32f * size + (magnifying ? 0.f : 1.5f * s * hover) + 2.0f * s * lift;
     d2d->SetTransform(D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(bx, bottom)) * D2D1::Matrix3x2F::Translation(cx - bx, -up));
     if (it.key == L"#status") {
         bool darkInk = ink.r < 0.5f;

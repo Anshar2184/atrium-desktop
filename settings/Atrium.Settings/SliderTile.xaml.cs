@@ -12,6 +12,7 @@ public sealed partial class SliderTile : UserControl
     private Func<double, string>? _hint;
     private string _unit = "";
     private double _min, _max;
+    private bool _flat;
 
     public event Action<double>? UserValueChanged;
     public event Action<bool>? Engaged;
@@ -34,6 +35,18 @@ public sealed partial class SliderTile : UserControl
     }
 
     public double Value => Track.Value;
+
+    // In the inspector: a plain row, no card (lit while in use all the same).
+    public bool Flat
+    {
+        get => _flat;
+        set
+        {
+            _flat = value;
+            Surface.Style = (Style)Application.Current.Resources[value ? "FlatTileStyle" : "TileStyle"];
+            Surface.Background = Tokens.Brush(value ? "TransparentBrush" : "CardBrush");
+        }
+    }
 
     // Sets the slider without raising UserValueChanged semantics for the caller (the caller guards with its own flag).
     public void SetValue(double v)
@@ -58,7 +71,7 @@ public sealed partial class SliderTile : UserControl
     // The tile being adjusted is lit a little (the hero shows that parameter).
     private void SetEngaged(bool on)
     {
-        Surface.Background = Tokens.Brush(on ? "TileActiveBrush" : "CardBrush");
+        Surface.Background = Tokens.Brush(on ? "TileActiveBrush" : _flat ? "TransparentBrush" : "CardBrush");
         Engaged?.Invoke(on);
     }
 }

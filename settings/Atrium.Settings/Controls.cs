@@ -60,8 +60,17 @@ public sealed class ToggleTile : UserControl
         grid.Children.Add(_title);
         grid.Children.Add(Switch);
         grid.Children.Add(_note);
-        Content = new Border { Style = Res<Style>("TileStyle"), Child = grid };
+        Content = _surface = new Border { Style = Res<Style>("TileStyle"), Child = grid };
         Switch.Toggled += (_, e) => Toggled?.Invoke(this, e);
+    }
+
+    private readonly Border _surface;
+
+    // In the inspector: a plain row, no card.
+    public bool Flat
+    {
+        get => _surface.Style == Res<Style>("FlatTileStyle");
+        set => _surface.Style = Res<Style>(value ? "FlatTileStyle" : "TileStyle");
     }
 
     public string Title { get => _title.Text; set => _title.Text = value; }
