@@ -1,168 +1,311 @@
-<div align="center">
+<p align="center">
+  <img src="docs/images/readme/hero-en.jpg" alt="Atrium: a liquid glass taskbar and desktop widgets" width="100%">
+</p>
 
-# Atrium Desktop
-
-**A native glass desktop for Windows 11**
-
-Floating taskbar with real-time refraction · desktop widgets in one material · Explorer stays, crashes recover
-
-[![build](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform: Windows 11](https://img.shields.io/badge/platform-Windows%2011-0078D6)](#status)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](native/)
-[![WinUI 3 settings](https://img.shields.io/badge/settings-WinUI%203%20%C2%B7%20.NET%2010-512BD4?logo=dotnet&logoColor=white)](settings/)
-[![Status](https://img.shields.io/badge/status-prototype-orange)](docs/VERIFICATION.md)
-
-[简体中文](README.md) | English
-
-</div>
-
-> [!NOTE]
-> **v0.9 development build.** A C++ glass taskbar that coexists with the Windows taskbar by default, or stands alone: the Windows logo opens the Atrium start menu, pinned and running apps (drag to reorder), Atrium's own tray panel, a monochrome ring status icon (battery and Wi-Fi; the volume or the brightness while it changes) (it opens a macOS-style control centre: Wi-Fi, Bluetooth, battery, casting and projection modes, brightness, sound with the output device and per-app volume), a clock (it opens Atrium's calendar, with Chinese lunar dates), and Atrium notifications that also show Windows notifications and WeChat messages, macOS-style desktop widgets, plus a settings app in the style of macOS System Settings, with a live preview and a widget gallery. Every popup and context menu is exactly the bar's liquid glass, the interface typeface is MiSans throughout, and the icons swell like the macOS Dock under the pointer. By default it leaves the Windows taskbar alone; the settings can hide the Windows taskbar and the system notification banners so that only Atrium remains (undone when turned off or when Atrium exits).
+<br>
 
 <p align="center">
-  <img src="docs/images/v04-magnify.png" alt="v0.4 taskbar: magnification" width="80%"><br>
-  <sub>The icon under the pointer grows, its neighbours less and less, and the glass stretches with them; running apps have a small dot (test backdrop)</sub>
+  <img src="assets/atrium-256.png" alt="" width="76">
+</p>
+
+<h1 align="center">Atrium Desktop</h1>
+
+<p align="center">
+  A new desktop layer for Windows 11.<br>
+  The taskbar, start menu, control centre, notifications and desktop widgets share one piece of real-time refracting glass, one motion system and one typeface.
 </p>
 
 <p align="center">
-  <img src="docs/images/v06-control.png" alt="Atrium control centre" width="60%"><br>
-  <sub>The bar's right side: the tray entry, one status icon for Wi-Fi and battery (the level written inside the battery), the clock, notifications. The status icon opens the control centre: Wi-Fi networks in range (saved ones connect directly), a volume slider, the battery (network names hidden for the picture)</sub>
+  <a href="#quick-start"><b>Quick start</b></a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#design-language"><b>Design language</b></a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#engineering"><b>Engineering</b></a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="README.md"><b>简体中文</b></a>
 </p>
 
 <p align="center">
-  <img src="docs/images/v05-start.png" alt="Atrium start menu" width="52%">
-  <img src="docs/images/v05-center.png" alt="Atrium notifications" width="39%"><br>
-  <sub>Start menu: a search field and the Windows start menu's pins (7 × 3 a page), above a status capsule as high and as round as the bar; notifications: each card its own piece of glass, stacked and unfolding upwards. The material is exactly the bar's (Windows' own apps as pins for the picture; account and network names hidden)</sub>
+  <a href="https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/wynter-yaxley/atrium-desktop/build.yml?branch=main&style=flat-square&label=build&labelColor=1d1d1f" alt="build"></a>
+  <img src="https://img.shields.io/badge/version-0.9-3a3a3c?style=flat-square&labelColor=1d1d1f" alt="version 0.9">
+  <img src="https://img.shields.io/badge/Windows-11-3a3a3c?style=flat-square&labelColor=1d1d1f" alt="Windows 11">
+  <img src="https://img.shields.io/badge/C%2B%2B20-Direct3D%2011-3a3a3c?style=flat-square&labelColor=1d1d1f" alt="C++20, Direct3D 11">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3a3a3c?style=flat-square&labelColor=1d1d1f" alt="MIT"></a>
 </p>
+
+<br>
+
+## More than a taskbar
+
+The Windows desktop is several generations of design stacked on top of each other: the taskbar, the tray, the start menu, notifications and quick settings each have their own corners, type sizes and animations. Atrium redraws the whole layer you look at every day, and every part of it follows the same rules:
+
+- **One material.** The bar, every popup, every context menu, every notification card and every widget use the same shader with the same parameters. Change the transparency once and the whole desktop follows.
+- **One motion system.** Popups move on springs; whatever follows the pointer approaches it exponentially. Every animation can be interrupted, and none depends on the frame rate.
+- **One typeface.** All text is set in three weights of MiSans, figures are always tabular, and small type on glass is set one weight heavier.
+
+Explorer and the Windows shell stay as they are. Atrium injects no code into any system process, changes no system files, installs no services and needs no administrator rights. By default it runs next to the Windows taskbar; if you want Atrium alone, the settings can hide the Windows taskbar, which comes back when Atrium exits.
+
+<table>
+  <tr>
+    <td width="25%" valign="top"><b>Taskbar</b><br><sub>A floating capsule of glass. Icons swell in a wave under the pointer, like a dock; pinned and running apps can be dragged into order.</sub></td>
+    <td width="25%" valign="top"><b>Start menu</b><br><sub>The Windows start menu's pins, 7 × 3 a page. Start typing to search.</sub></td>
+    <td width="25%" valign="top"><b>Control centre</b><br><sub>Wi-Fi, Bluetooth, casting and projection modes, brightness, the sound output device and per-app volume.</sub></td>
+    <td width="25%" valign="top"><b>Calendar</b><br><sub>Opens from the clock on the bar: the month with Chinese lunar dates and festivals.</sub></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Notifications</b><br><sub>Every card is its own piece of glass, stacked upwards and unfolding. Windows notifications, WeChat and Feishu messages can come in as cards.</sub></td>
+    <td valign="top"><b>Tray</b><br><sub>Atrium's own tray panel. It reads the system tray's icons and forwards clicks to the apps themselves.</sub></td>
+    <td valign="top"><b>Desktop widgets</b><br><sub>Eight kinds in three sizes. They snap to a grid and resize from a grip on the corner.</sub></td>
+    <td valign="top"><b>Settings</b><br><sub>A three-column WinUI 3 workspace around a live preview rendered from the real parameters.</sub></td>
+  </tr>
+</table>
+
+<br>
+
+## One glass, two characters
 
 <p align="center">
-  <img src="docs/images/v03-settings.png" alt="Settings" width="70%"><br>
-  <sub>Settings: sidebar and cards; on top, a glass specimen rendered on the CPU from the real parameters, with a loupe on the rim's refraction and dispersion</sub>
+  <img src="docs/images/readme/material-en.jpg" alt="The Liquid and Frosted presets" width="100%">
 </p>
 
-<details>
-<summary>v0.4 screenshots</summary>
+Atrium's glass is one pixel shader built on a signed distance field ([`glass.hlsl`](native/core/render/shaders/glass.hlsl)). Every frame it takes what is behind the glass from desktop duplication, then works through these steps:
+
+1. **Shape**: the distance field of a rounded rectangle gives the normal at the edge, and the antialiasing.
+2. **Lens**: in a band along the edge, samples are pushed inwards along a circular cross-section, so the picture bends at the rim.
+3. **Dispersion**: red, green and blue are pushed slightly different distances, which leaves a fine coloured fringe.
+4. **Blur and vibrancy**: a few taps on a coarse mip blur the backdrop, the colour is lifted a little as on macOS, then the tint is mixed in.
+5. **Light**: a crisp specular line on the side facing the light, a softer glow inside it, a faint sheen from the top, and a soft shadow around it.
+
+Liquid and Frosted are not two implementations, only two sets of parameters for the same pipeline:
+
+| Parameter | Liquid (default) | Frosted |
+| :--- | ---: | ---: |
+| Transparency | 0.95 | 0.80 |
+| Blur | 0.50 | 1.00 |
+| Refraction | 30 | 6 |
+| Refracting edge width | 24 | 10 |
+| Dispersion | 0.30 | 0.04 |
+| Highlight | 0.80 | 0.45 |
+| Tint | `#FFFFFF` | `#F5F5FA` |
+
+The ink on the glass follows what is behind it: dark ink once the brightness passes 0.50, light ink again below 0.42. Between the two thresholds nothing changes, so the ink never flickers at the boundary, and each change fades over 450 ms. The ink is decided per region, so the icons on the left and the clock on the right can differ.
+
+<br>
+
+## Desktop widgets
 
 <p align="center">
-  <img src="docs/images/v04-start.png" alt="Atrium start menu v0.4" width="52%">
-  <img src="docs/images/v04-center.png" alt="Atrium notifications v0.4" width="44%"><br>
-  <sub>v0.4: the start menu with all apps grouped by initial, notifications stacked downwards, glass more frosted and tinted than the bar's</sub>
+  <img src="docs/images/readme/widgets-en.jpg" alt="Desktop widgets: world clock, digital clock, notes, reminders, lunar month, photo" width="100%">
 </p>
 
-</details>
+The widgets are the desktop's second layer of glass. Their design follows the desktop widgets of macOS Sonoma and later, with the layout and stacking reworked for Windows.
 
-<details>
-<summary>v0.3 screenshots</summary>
+<table>
+  <tr>
+    <td width="22%" valign="top"><b>Grid</b></td>
+    <td valign="top">Cells of 164, gaps of 16, 24 from the screen's edge. Each half of the screen packs against its own edge, with equal margins on both sides. A dragged widget floats on top; on release it snaps to the nearest free place and slides there (240 ms ease-out).</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Three sizes</b></td>
+    <td valign="top">Small 164 × 164, medium 344 × 164, large 344 × 344. A corner radius of 22, about 13 % of the side, the proportion of macOS widgets.</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Resize by the corner</b></td>
+    <td valign="top">On hover, the lower corner facing the middle of the screen shows an arc-shaped grip that follows the corner's curve: 6 inside the radius, 3.5 wide, in the secondary ink. While dragging, the size whose corner is nearest the pointer wins (the threshold is halfway between one cell and two), and the widget slides to it at once; the top edge and the outer edge stay where they are.</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Restrained colour</b></td>
+    <td valign="top">Widgets are always clear glass, with the ink the glass picks per region. Only a few colours remain: the clock's orange second hand, the battery ring's green and red, the calendar's accent, and the world clock's dark faces at night.</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Stacking</b></td>
+    <td valign="top">Above the desktop and below every window; on top while Win+D shows the desktop. A widget window accepts only the z-order changes it makes itself, so other windows resizing or system popups appearing never lift it above your windows.</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Content</b></td>
+    <td valign="top">Clock (and world clock), digital clock, calendar (the large one has the lunar day under every date), battery, system monitor (CPU, memory, disk), notes (type straight into them, with IME support), reminders, and photos (upright by EXIF, centre-cropped, a new one every 10 minutes).</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Power</b></td>
+    <td valign="top">The glass shows the live desktop by default, and each widget follows a changing desktop at most every 100 ms. The static wallpaper mode composes the glass again only when the wallpaper changes.</td>
+  </tr>
+</table>
+
+<br>
+
+## The status ring
 
 <p align="center">
-  <img src="docs/images/v03-bar.png" alt="v0.3 taskbar" width="80%"><br>
-  <sub>Logo (start menu) · pinned and running apps · clock · notifications; icons sit on plates concentric with the bar's corners (test backdrop)</sub>
+  <img src="docs/images/readme/ring-en.jpg" alt="Five states of the status ring" width="100%">
 </p>
+
+Instead of a row of battery, network and volume icons, the right side of the bar has one monochrome ring. It follows the iPhone's ring status bar, kept to two layers:
+
+- **Outside**, a ring open by 64° at the bottom fills clockwise from the gap's left end with the battery level. The track is faint ink, the fill is the ink of every other mark on the bar, and there is no number. The fill turns red only at 20 % or less while not charging. While charging, a small bolt sits in the gap.
+- **Inside**, the iPhone's three-step Wi-Fi: a wedge and two arcs, about 4:3. Three steps light at 60 % signal or more, two at 30 % or more, otherwise one; the unlit steps stay faint. A wired connection shows a network cable, and the whole glyph fades when offline.
+- **Volume and brightness**: when either changes, by the wheel, the keys or another program, the ring moves to the new level and the centre becomes a speaker or a sun; after 1.5 s it returns to the battery and Wi-Fi. The fill moves on a spring with a slight overshoot (response 0.48 s, bounce 0.23), never linearly.
+
+One glyph carries four states, and the bar stays quiet. Click the ring for the control centre; scroll over it to change the volume.
+
+<br>
+
+## Taskbar
 
 <p align="center">
-  <img src="docs/images/v03-start.png" alt="Atrium start menu" width="48%">
-  <img src="docs/images/v03-notify.png" alt="Atrium notifications" width="48%"><br>
-  <sub>Start menu: pinned apps, all apps, search, power, with network, volume, battery and the system tray at the bottom; notifications: a collapsed stack that expands on click</sub>
+  <img src="docs/images/readme/bar-en.jpg" alt="The magnification wave" width="100%">
 </p>
 
-</details>
+- **The wave.** The local scale is a raised cosine 2.3 icon pitches wide; integrating it gives every icon's position. The icon under the pointer therefore stays under the pointer, its neighbours shrink in turn, and the glass stretches with them. The default peak is 1.7×, and a magnified icon is never taller than twice the bar.
+- **Concentric corners.** An icon's plate has the bar's radius minus the gap between them, so the two arcs share a centre. Popups, tray plates and the control centre's modules follow the same rule.
+- **Sized by the screen.** The bar is about 6 % of the logical screen height and the icons are half the bar. Depending on the logical width, the bar is 52, 60, 64 or 68 high.
+- **One soft hop at launch.** 480 ms, 0.32 of the icon high, on a sin² curve, so it leaves and lands at zero speed.
+- **Out of the way.** When the foreground app is maximised or full screen, the bar slides off the screen and comes back when the pointer reaches the bottom edge.
 
-<details>
-<summary>v0.2 screenshots</summary>
+<br>
 
-<p align="center">
-  <img src="docs/images/v02-bar-liquid.png" alt="Liquid preset" width="80%"><br>
-  <img src="docs/images/v02-bar-frosted.png" alt="Frosted preset" width="80%"><br>
-  <img src="docs/images/v02-bar-light.png" alt="Dark text chosen automatically over a light backdrop" width="80%"><br>
-  <sub>On screen: liquid (strong refraction and dispersion after macOS Liquid Glass), frosted, and dark ink chosen automatically over a light backdrop (test pattern behind)</sub>
-</p>
+## Motion
 
-<p align="center">
-  <img src="docs/images/v02-bar-hover.png" alt="Hover" width="80%"><br>
-  <img src="docs/images/v02-settings-pins.png" alt="Settings" width="60%"><br>
-  <sub>Hovered icons lift and show their name above; the settings app adjusts material and size live and manages pinned apps (UI in Chinese for now)</sub>
-</p>
+Animation parameters are given the way Apple gives them: the response (the period of the undamped oscillation, in seconds) and the bounce (1 − the damping ratio). Springs are advanced by their closed-form solution, so at 60 Hz, at 144 Hz and through dropped frames an element is in the same place at the same moment. A popup's spring is cut into 12 cubic segments and played by DirectComposition, so the animation keeps going even when the UI thread is busy.
 
-</details>
+| Name | Parameters | Used for |
+| :--- | :--- | :--- |
+| `kPop` | response 0.36 s, bounce 0.38 | popups scaling from 0.92 to 1, peaking at only 1.0067 |
+| `kSmooth` | response 0.48 s, bounce 0.23 | the status ring's fill |
+| `EaseOut` | 1 − (1 − t)³ | fades, page changes, staggered lists, ink changes |
+| `EaseOutBack` | s = 1.2 / 1.5 | the bar rising from the edge, the start menu's cells |
+| `Approach` | in 20/s, out 11/s | hover plates, press feedback, the bar's movement |
+| Launch hop | 480 ms, sin² | an app's icon while it starts |
 
-## What it is
+Entrances use a spring or an ease-out; exits are shorter and never bounce. Direct responses to input finish within 100–350 ms.
 
-Atrium redesigns the layer you look at every day: a floating glass taskbar with its own start menu and notifications, and a set of desktop widgets, sharing one material and one design language. Explorer and the Windows shell stay in place; the Windows Start, Search, Notification Center and Quick Settings keep working.
+<br>
 
-- **One material engine**: rounded and capsule shapes, edge refraction, subtle dispersion, GPU blur, soft highlights. Liquid and frosted looks are presets of one pipeline.
-- **Native and light**: C++20, Win32, Direct3D 11, DirectComposition, DirectWrite. No browser runtime, no service, no admin rights.
-- **Safe to live with**: it lives beside the Windows taskbar and never hides or replaces it; no injection into Explorer or DWM, no system files touched.
+## Design language
+
+The full specification is [docs/DESIGN.md](docs/DESIGN.md) (in Chinese); every value in it comes from the code. The settings app's Design Language page is its interactive version: drag to compare Liquid and Frosted, change a superellipse's exponent, and click a curve to play it.
+
+| Principle | Meaning |
+| :--- | :--- |
+| Defer to content | The glass only carries the content. Highlights, dispersion and shadow must keep text legible on any wallpaper. |
+| Move like real things | Every animation can be interrupted and continues from its current position and velocity. |
+| Same things, same treatment | One kind of element, one curve, one radius, one type size; new screens reuse existing values first. |
+
+- **Typeface**: MiSans Medium, Demibold and Semibold, used by their actual weight as Regular, Medium and Semibold. Atrium loads them privately and never installs them.
+- **Type ramp**: 30 / 20 / 15 / 13 / 12 / 11.5. At most three sizes per screen; hierarchy comes from opacity first, then size, and weight last.
+- **Text on glass**: a halo of the opposite ink at 32–35 % opacity just below it; 12.5 and smaller one weight heavier.
+- **Spacing**: 4, 8, 10, 12, 14, 16, 24.
+- **Targets**: primary controls are at least 40 × 40.
+
+<br>
+
+## Engineering
+
+```text
+native/core   Atrium.Core      C++20 · Win32 · Direct3D 11 · DirectComposition · Direct2D · DirectWrite
+settings/     Atrium.Settings  C# · WinUI 3 · .NET 10
+```
+
+- **Capture**: DXGI desktop duplication with only Atrium's own windows excluded; Windows.Graphics.Capture when it is not available. The GPU compares the new backdrop exactly with the one last presented and skips identical frames, so an idle desktop costs a few dozen frames a minute.
+- **Pacing**: frame-latency waitable swap chains with a maximum latency of one frame. The render thread wakes on the compositor's clock, and no window presents more than once per frame.
+- **Light**: no browser engine. Popup content is drawn with WARP instead of a second hardware device, and a popup's swap chain is released when it closes. No drawing resources are created per frame.
+- **Click-through**: a click-through display window plus a shaped input window, so the shadow and the transparent corners click through to the window below.
+- **Settings**: a WinUI 3 workspace whose preview is the same glass shader ported to the CPU; parameters reach the core live over a named pipe.
+
+| Measured (Windows 11 26300, iGPU + RTX 4060 laptop, 3200 × 2000 at 200 %) | Result |
+| :--- | ---: |
+| Time per present with the backdrop changing every frame | p95 0.82 ms |
+| Lag of the picture under the glass | p95 1 frame |
+| Idle CPU (7 widgets, all three notification sources on) | about 1 % of one core |
+| Core private memory (7 widgets; about 260 MB of it shared GPU memory) | about 270 MB |
+| Core private memory (no widgets) | about 180–215 MB |
+
+Methods and data: [docs/VERIFICATION.md](docs/VERIFICATION.md).
+
+<br>
 
 ## Quick start
 
-1. Download the `Atrium-win-x64` artifact from the latest successful run in [Actions](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml), or build it as described below.
-2. Unzip and run `Atrium.Core.exe`. The glass taskbar appears at the bottom of the screen; on first run it imports your current Windows taskbar pins.
-3. Left-click an app to open it, bring it to the front or minimize it; middle-click or Shift+click for a new window; right-click to pin, unpin, open the file location or close. Drag icons to reorder; drop a file on an app to open it there.
-4. Click the Windows logo on the left for the Atrium start menu (type to search apps), the bell on the right for notifications, the clock for Atrium's calendar (a month with Chinese lunar dates). Icons grow under the pointer (“悬停放大”, magnification, on the 形状 (Shape) page of Settings adjusts or turns it off); the bar slides off the screen while a maximized or full-screen app is in front and comes back when the pointer reaches the bottom edge.
-5. Double-click the tray icon (or right-click it → the first menu item) to open the settings: material, size, pinned apps, notifications and more.
-6. Right-click the tray icon → the last menu item to quit. Nothing is written to the registry and no service is installed; settings live in `%LOCALAPPDATA%\Atrium`.
+1. Download `Atrium-win-x64` from the latest successful run in [Actions](https://github.com/wynter-yaxley/atrium-desktop/actions/workflows/build.yml), or build it as below.
+2. Unzip and run `Atrium.Core.exe`. The glass bar appears at the bottom of the screen; on first run it imports the pins of your Windows taskbar.
+3. Click an app to open it, bring it to the front or minimise it; middle-click or Shift+click for a new window; right-click to pin, open the file location or close windows. Drag icons to reorder; drop a file on an app to open it there.
+4. The Windows logo opens the Atrium start menu (just start typing to search). The status ring opens the control centre, the clock the calendar, the bell your notifications.
+5. Double-click the tray icon (or right-click it and choose Appearance settings…) to open the settings: material, size, pinned apps, notifications and widgets.
+6. Right-click the tray icon and choose Quit Atrium to exit completely. Atrium writes no registry keys and installs no services; its settings live in `%LOCALAPPDATA%\Atrium`.
 
-## Status
+## Building
 
-All verification ran on a Windows 11 build 26300 (Insider) laptop with Intel Arc + RTX 4060. Numbers: [docs/VERIFICATION.md](docs/VERIFICATION.md) (Chinese). Current decisions: [docs/DECISIONS.md](docs/DECISIONS.md).
-
-| Area | Result |
-|---|---|
-| v0.6 tray, control centre and notification sources | ✅ Atrium's own tray panel (the system tray's icons, left and right clicks forwarded to the apps themselves), the status icon and control centre (Wi-Fi, volume, battery), Windows notifications shown as cards by default, WeChat messages (its chat list, experimental); start menu pins complete even without some environment variables; dark text over light backgrounds: tray 8, start menu 13, notifications 16 checks and the other regression tests pass |
-| v0.5 start menu and notifications | ✅ the start menu shows the Windows start menu's pins (separate from the bar's), search only, pages; the status capsule shaped like the bar; each notification card its own glass, stacked upwards; popups exactly on the bar's material: start menu 13, notifications 15, motion 7 checks and the other regression tests pass |
-| v0.4 motion, one material, stacking | ✅ magnification, launch bounce, press ripple, popups on the bar's glass: 7 checks; back on top after a topmost window covers it, hidden for full-screen apps, kept for maximized windows, below a revealed Windows taskbar: 5 checks; all v0.3 tests still pass |
-| v0.3 taskbar, start menu and notifications | ✅ coexistence mode; real mouse and keyboard tests: taskbar 11, start menu 11, notifications 14 checks pass; settings end to end 14 and protocol 7 checks pass |
-| v0.2 glass taskbar and settings | ✅ with a backdrop changing every frame, present p95 0.8 ms, about 4 % of one core, 144 MB |
-| Live glass | ✅ backdrop from DXGI Desktop Duplication (Atrium's windows excluded from it alone), WGC when unavailable; D3D11; iGPU frame work p95 2.4 ms, content lag p95 1 frame |
-| Self-capture echo | ✅ exact comparison with the last presented backdrop; slow gradients, 1 px cursors and low-contrast scrolling text are never lost |
-| Click-through | ✅ click-through visual window + region-shaped input window; shadows and transparent corners pass clicks through |
-| Taskbar takeover and recovery | ⏸ the takeover protocol and the guard's fault recovery were verified with prototypes in v0.1; Atrium only coexists with the taskbar now, and the prototypes left the repository (see git history) |
-| Native entry points | ✅ Start, Search, Quick Settings and Notification Center work while the Explorer taskbar is hidden |
-| Third-party tray icons | ⚠️ forwarding bridge verified on normal and failure paths; Explorer restarts and real-app compatibility not yet tested |
-| Desktop widgets | ✅ v0.9.2: clock, world clock, digital clock, calendar (and a large month with Chinese lunar dates), batteries, system monitor, notes, reminders, photos; always clear glass; small, medium and large; drag to a snapping grid (its halves hug the left and right edges), drag a bottom corner or right-click to resize, right-click to remove or add; just above the desktop and under every window, on top after Win+D (single monitor) |
-| Screenshots and recordings | ✅ v0.9.1: the system screenshot and tools using WGC or GDI capture the bar, popups and widgets (D36); recorders using DXGI Desktop Duplication still do not; on hybrid laptops after one restart of Atrium |
-| Notifications | ✅ Atrium's own cards (queue, merge, timeout, unread, full-screen suppression, hidden text); ⚠️ mirroring Windows notifications is experimental and off by default: an unpackaged process can read and poll them, but the system banners still appear as well |
-
-**Not yet verified**: multiple monitors, HDR, high refresh rates, Explorer restarts, sleep/resume, long-running stability and stable (non-Insider) Windows 11 builds.
-
-## Repository layout
-
-```text
-native/core    Atrium.Core: glass bar, start menu, notifications, control centre, desktop widgets, settings pipe (C++20, D3D11, DirectComposition)
-settings/      settings app Atrium.Settings (C# / WinUI 3)
-tools/         build.ps1 packaging script, icon generator
-tests/         end-to-end and protocol test scripts
-docs/          current decisions, design specification, verification log, settings protocol, hand-over notes (Chinese)
-```
-
-The early design documents and the verification probes (`poc/`, `native/guard`) left the repository in v0.9.2; see the git history.
-
-## Build
-
-Requires Windows 10 19041+ (Windows 11 recommended), the .NET 10 SDK and Visual Studio or Build Tools with the C++ workload and a Windows SDK (CMake 3.25+).
+Requires Windows 10 19041 or later (Windows 11 recommended), the .NET 10 SDK, and Visual Studio or the Build Tools with the C++ workload and a Windows SDK (CMake 3.25+).
 
 ```powershell
-# native core and settings app into the portable folder dist/Atrium (-Zip also zips it)
+# Native core and settings app into the portable folder dist/Atrium (-Zip also packs it)
 ./tools/build.ps1
 
-# tests (briefly start Atrium and drive the settings window; the settings file is restored)
+# Tests (they briefly start Atrium and drive the settings window, then restore the settings file)
 ./tests/e2e-settings.ps1 -Package
 ./tests/pipe-protocol.ps1
-./tests/e2e-bar.ps1          # these move the mouse, click or type; they run only after 30 s without user input
+
+# These move the mouse, click or type; they only run after 30 seconds without input
+./tests/e2e-bar.ps1
 ./tests/e2e-start.ps1
 ./tests/e2e-notify.ps1
-
 ./tests/e2e-tray.ps1
 ./tests/e2e-widgets.ps1
 ./tests/e2e-motion.ps1
 ./tests/e2e-stacking.ps1
 ```
 
+## Status
+
+Atrium is a v0.9 development build: usable every day, still changing quickly. Everything above is covered by end-to-end tests with real mouse and keyboard input, recorded in [VERIFICATION](docs/VERIFICATION.md); the current decisions are in [DECISIONS](docs/DECISIONS.md).
+
+| Status | What |
+| :--- | :--- |
+| Daily use | Taskbar, start menu, control centre, calendar, tray, Atrium notifications, desktop widgets, settings; system screenshots and recordings capture Atrium |
+| Experimental | Mirroring Windows notifications as Atrium cards; WeChat and Feishu messages (read only, through their own windows) |
+| Not yet verified | Multiple monitors, HDR, high refresh rates, Explorer restarts, sleep and wake, long-term stability, stable Windows 11 builds |
+| Known limits | Recorders that use DXGI desktop duplication do not capture Atrium; on hybrid-GPU laptops Atrium needs one restart after its first run |
+
+## Repository
+
+```text
+native/core    Atrium.Core: glass bar, start menu, notifications, control centre, desktop widgets, settings pipe
+settings/      the settings app Atrium.Settings
+tools/         build.ps1, icon generation, the README artwork (tools/readme)
+tests/         end-to-end and protocol tests
+docs/          design specification, current decisions, verification, settings protocol, handoff
+```
+
+Suggested reading order: [HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [DESIGN](docs/DESIGN.md) → [VERIFICATION](docs/VERIFICATION.md).
+
+<details>
+<summary><b>Screenshots</b></summary>
+<br>
+
+<p align="center">
+  <img src="docs/images/v04-magnify.png" alt="Magnification" width="80%"><br>
+  <sub>The icon under the pointer grows, its neighbours less and less, and the glass stretches with them (test backdrop)</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/v06-control.png" alt="Control centre" width="60%"><br>
+  <sub>The control centre: Wi-Fi networks in range, volume, battery (network names hidden)</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/v05-start.png" alt="Start menu" width="52%">
+  <img src="docs/images/v05-center.png" alt="Notifications" width="39%"><br>
+  <sub>Start menu and notifications, exactly the bar's material (Windows' own apps as pins; account and network names hidden)</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/v02-bar-liquid.png" alt="Liquid" width="80%"><br>
+  <img src="docs/images/v02-bar-frosted.png" alt="Frosted" width="80%"><br>
+  <img src="docs/images/v02-bar-light.png" alt="Light backdrop" width="80%"><br>
+  <sub>An early version: Liquid, Frosted, and the dark ink chosen automatically over a light backdrop</sub>
+</p>
+
+</details>
+
 ## Contributing
 
-Design review and test results from other hardware are the most useful contributions right now, especially stable Windows 11, multiple monitors and HDR. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The most valuable contributions now are design review and test results from other hardware and systems, especially stable Windows 11, multiple monitors and HDR. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE). Visual inspiration comes from Apple's Liquid Glass; Atrium is not affiliated with Apple or Microsoft.
+[MIT](LICENSE). Visually inspired by Apple's Liquid Glass; not affiliated with Apple or Microsoft.
+
+<sub>The artwork on this page is rendered offline by [`tools/readme`](tools/readme), not captured: the glass is a port of `glass.hlsl`, the bar, the status ring and the widgets are redrawn from the core's drawing code and metrics, and the backdrops and app icons are original drawings. For the real thing, see Screenshots above.</sub>
