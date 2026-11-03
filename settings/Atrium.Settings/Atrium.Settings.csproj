@@ -18,7 +18,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\atrium.ico</ApplicationIcon>
-    <Version>0.9.7</Version>
+    <Version>0.9.8</Version>
     <Product>Atrium Desktop</Product>
     <Copyright>MIT License</Copyright>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
@@ -33,6 +33,9 @@
   <ItemGroup>
     <Content Include="..\..\assets\atrium.ico" Link="Assets\atrium.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\atrium-256.png" Link="Assets\atrium-256.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The previews' photo (Photo.cs): local only, never in the repository (a copyrighted wallpaper). -->
+    <Content Include="..\..\assets\specimen\specimen.jpg" Link="Assets\specimen.jpg" CopyToOutputDirectory="PreserveNewest"
+             Condition="Exists('..\..\assets\specimen\specimen.jpg')" />
     <!-- The interface face (D40); the core reads it from here too (Settings\Fonts). -->
     <Content Include="..\..\assets\fonts\*.otf;..\..\assets\fonts\README.md" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -31,6 +31,7 @@ namespace atrium {
 namespace {
 
 constexpr float kMargin = 24;
+constexpr float kGrip = 30; // DIP: the corner that resizes a widget when dragged
 constexpr double kGlideMs = 240;
 constexpr UINT_PTR kTickTimer = 1, kGlideTimer = 3, kSafetyTimer = 4, kCaretTimer = 5, kSaveTimer = 6;
 constexpr UINT kCaretMs = 530, kSaveMs = 800;
@@ -69,6 +70,7 @@ bool ParseKind(const std::wstring& s, WidgetKind& k)
 const wchar_t* SizeName(WidgetSize s) { return s == WidgetSize::Small ? L"small" : s == WidgetSize::Medium ? L"medium" : L"large"; }
 WidgetSize ParseSize(const std::wstring& s) { return s == L"large" ? WidgetSize::Large : s == L"medium" ? WidgetSize::Medium : WidgetSize::Small; }
 bool Editable(WidgetKind k) { return k == WidgetKind::Notes || k == WidgetKind::Reminders; }
+bool Resizable(WidgetKind k) { return WidgetSupports(k, WidgetSize::Medium) || WidgetSupports(k, WidgetSize::Large); }
 
 std::wstring LayoutPath()
 {
@@ -81,6 +83,13 @@ std::wstring ClassOf(HWND h)
     wchar_t cls[64] = {};
     GetClassNameW(h, cls, 64);
     return cls;
+}
+
+// Without a message to the window (GetWindowTextLength would wait for a hung one).
+bool HasTitle(HWND h)
+{
+    wchar_t t[2] = {};
+    return InternalGetWindowText(h, t, 2) > 0;
 }
 
 bool IsDesktopWindow(HWND h)
@@ -209,6 +218,13 @@ struct DesktopWidgets::Widget {
     int col = 0, row = 0;
     std::unique_ptr<Surface> surface;
     bool down = false, dragging = false;
+    bool hover = false;    // the mouse is over it: the resize grip shows
+    bool tracking = false; // TrackMouseEvent asked for its WM_MOUSELEAVE
+    bool resizing = false; // dragged by the grip
+    bool growLeft = false; // ... the one at its bottom left (a widget on the right half)
+    WidgetSize downSize = WidgetSize::Small;
+    int downCol = 0;
+    ULONGLONG activating = 0; // a click activates a note or reminders: it may come forward
     POINT downAt{};
     RECT downRect{};
     RECT glideFrom{}, glideTo{};
@@ -324,11 +340,19 @@ int DesktopWidgets::Rows() const
     return std::max(1, int((float(wa.bottom - wa.top) / Scale() - 2 * kMargin - 90 + kWidgetGap) / (kWidgetCell + kWidgetGap)));
 }
 
+// Each half of the grid hugs its own edge (D44): a widget whose middle is left of the grid's
+// middle stands kMargin from the left edge, any other kMargin from the right, so whatever the
+// grid does not fill is left in the middle and both sides have the same margin.
+bool DesktopWidgets::FromRight(int col, WidgetSize size) const { return 2 * col + WidgetCols(size) >= Cols(); }
+
 RECT DesktopWidgets::CellRect(int col, int row, WidgetSize size) const
 {
     RECT wa = WorkArea();
     float s = Scale();
-    int x = wa.left + int(std::lround((kMargin + float(col) * (kWidgetCell + kWidgetGap)) * s));
+    const float step = kWidgetCell + kWidgetGap;
+    float left = FromRight(col, size) ? float(wa.right - wa.left) / s - kMargin - float(Cols() - col - WidgetCols(size)) * step - WidgetWidth(size)
+                                      : kMargin + float(col) * step;
+    int x = wa.left + int(std::lround(left * s));
     int y = wa.top + int(std::lround((kMargin + float(row) * (kWidgetCell + kWidgetGap)) * s));
     return RECT{x, y, x + int(std::lround(WidgetWidth(size) * s)), y + int(std::lround(WidgetHeight(size) * s))};
 }
@@ -601,6 +625,55 @@ void DesktopWidgets::Resize(Widget& w, WidgetSize size)
     Save();
 }
 
+// The grip is the bottom corner nearer the middle of the screen, the side a widget grows to.
+bool DesktopWidgets::GrowsLeft(const Widget& w) const { return FromRight(w.col, w.size); }
+
+bool DesktopWidgets::InGrip(const Widget& w, POINT screen) const
+{
+    if (!w.surface || !Resizable(w.kind))
+        return false;
+    RECT r = w.surface->Rect();
+    int g = int(std::lround(kGrip * Scale()));
+    bool x = GrowsLeft(w) ? screen.x < r.left + g : screen.x >= r.right - g;
+    return x && screen.y >= r.bottom - g && PtInRect(&r, screen);
+}
+
+// Dragging the grip: the size whose corner is nearest the pointer, among those the widget has
+// and that fit where it stands; it glides there at once, as the sizes of the menu do.
+void DesktopWidgets::DragSize(Widget& w, POINT screen)
+{
+    float s = Scale();
+    const RECT& d = w.downRect; // the edges that stay: the top, and the side away from the grip
+    float width = float(w.growLeft ? d.right - screen.x : screen.x - d.left) / s;
+    float height = float(screen.y - d.top) / s;
+    const float half = kWidgetCell + (kWidgetGap + kWidgetCell) / 2; // between one cell and two
+    WidgetSize size = height > half ? WidgetSize::Large : width > half ? WidgetSize::Medium : WidgetSize::Small;
+    if (size == WidgetSize::Large && !WidgetSupports(w.kind, size))
+        size = WidgetSize::Medium;
+    if (!WidgetSupports(w.kind, size))
+        size = WidgetSize::Small;
+    // The column that keeps the fixed side where it was (near the middle a size may be placed
+    // from the other edge, CellRect): within half a cell, or the widget stays as it is.
+    int col = -1;
+    LONG best = LONG(std::lround((kWidgetCell + kWidgetGap) * s / 2));
+    for (int c = std::max(0, w.downCol - 2); c <= w.downCol + 2; ++c) {
+        if (!Fits(c, w.row, size, &w))
+            continue;
+        RECT r = CellRect(c, w.row, size);
+        LONG off = std::abs(w.growLeft ? r.right - d.right : r.left - d.left);
+        if (off <= best) {
+            best = off;
+            col = c;
+        }
+    }
+    if (col < 0 || (size == w.size && col == w.col))
+        return;
+    w.size = size;
+    w.col = col;
+    Place(w, true);
+    w.surface->Invalidate();
+}
+
 bool DesktopWidgets::IsOurs(HWND h) const
 {
     DWORD pid = 0;
@@ -634,6 +707,11 @@ void DesktopWidgets::Restack()
         return;
     if (std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->dragging; }))
         return; // the one being dragged stays over the windows
+    zMoving_ = true;
+    struct Done {
+        bool& flag;
+        ~Done() { flag = false; }
+    } done{zMoving_};
     if (test_) {
         // Screenshots: over the test backdrop.
         for (auto& w : widgets_)
@@ -656,7 +734,7 @@ void DesktopWidgets::Restack()
             if (!IsWindowVisible(h) || IsIconic(h) || s->self->IsOurs(h) || IsDesktopWindow(h))
                 return TRUE;
             LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-            if ((ex & WS_EX_TOOLWINDOW) || (GetWindow(h, GW_OWNER) && !(ex & WS_EX_APPWINDOW)) || GetWindowTextLengthW(h) == 0)
+            if ((ex & WS_EX_TOOLWINDOW) || (GetWindow(h, GW_OWNER) && !(ex & WS_EX_APPWINDOW)) || !HasTitle(h))
                 return TRUE;
             BOOL cloaked = FALSE;
             DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
@@ -672,9 +750,23 @@ void DesktopWidgets::Restack()
     bool raise = !scan.open && (!fg || IsDesktopWindow(fg) || neutral);
     const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
     if (raise) {
+        // Over the desktop, but under Atrium's own windows there (the bar, a menu, a popup):
+        // right after the lowest of them, or at the top when none is up.
+        HWND after = HWND_TOPMOST;
+        for (HWND h = GetTopWindow(nullptr); h; h = GetWindow(h, GW_HWNDNEXT)) {
+            if (!(GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_TOPMOST))
+                break;
+            bool widget = std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& w) { return w->surface && w->surface->Hwnd() == h; });
+            if (!widget && IsWindowVisible(h) && IsOurs(h))
+                after = h;
+        }
         for (auto& w : widgets_)
-            if (w->surface)
-                SetWindowPos(w->surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, flags);
+            if (w->surface) {
+                SetWindowPos(w->surface->Hwnd(), after, 0, 0, 0, 0, flags);
+                if (after != HWND_TOPMOST && !(GetWindowLongPtrW(w->surface->Hwnd(), GWL_EXSTYLE) & WS_EX_TOPMOST))
+                    SetWindowPos(w->surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, flags); // not made topmost by its place: the top, then
+                after = w->surface->Hwnd();
+            }
     } else {
         // The window just above the desktop's top window (Progman, or the
         // WorkerW with the icons); the widgets go right under it.
@@ -888,27 +980,74 @@ void DesktopWidgets::LoadPhoto(Widget& w, bool another)
 
 bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r)
 {
-    (void)r;
     switch (m) {
+    case WM_MOUSEACTIVATE:
+        if (Editable(w.kind))
+            w.activating = GetTickCount64();
+        return false;
+    case WM_WINDOWPOSCHANGING: {
+        // The widgets stay where Restack put them: a window shown or touched is not raised
+        // over the windows by Windows (a note being typed into may come forward).
+        auto* pos = reinterpret_cast<WINDOWPOS*>(lp);
+        if (!zMoving_ && !w.dragging && !w.content.editing && GetTickCount64() - w.activating > 500)
+            pos->flags |= SWP_NOZORDER;
+        return false;
+    }
+    case WM_SETCURSOR: {
+        POINT p;
+        GetCursorPos(&p);
+        if (LOWORD(lp) != HTCLIENT || !(w.resizing || (!w.down && InGrip(w, p))))
+            return false;
+        SetCursor(LoadCursorW(nullptr, (w.resizing ? w.growLeft : GrowsLeft(w)) ? IDC_SIZENESW : IDC_SIZENWSE));
+        r = TRUE;
+        return true;
+    }
+    case WM_MOUSELEAVE:
+        w.tracking = false;
+        if (w.hover && !w.down) {
+            w.hover = false;
+            w.surface->Invalidate();
+        }
+        return true;
     case WM_LBUTTONDOWN:
         w.down = true;
         w.dragging = false;
         GetCursorPos(&w.downAt);
         w.downRect = w.surface->Rect();
+        w.resizing = InGrip(w, w.downAt);
+        w.growLeft = GrowsLeft(w);
+        w.downSize = w.size;
+        w.downCol = w.col;
+        if (w.resizing)
+            EndEdit(w);
         SetCapture(w.surface->Hwnd());
         return true;
     case WM_MOUSEMOVE: {
+        if (!w.tracking) {
+            TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE, w.surface->Hwnd(), 0};
+            w.tracking = TrackMouseEvent(&t) != FALSE;
+        }
+        if (!w.hover) {
+            w.hover = true;
+            w.surface->Invalidate();
+        }
         if (!w.down)
             return true;
         POINT p;
         GetCursorPos(&p);
+        if (w.resizing) {
+            DragSize(w, p);
+            return true;
+        }
         int dx = p.x - w.downAt.x, dy = p.y - w.downAt.y;
         if (!w.dragging && std::abs(dx) + std::abs(dy) > int(6 * Scale())) {
             w.dragging = true;
             w.glideMs = 0;
             EndEdit(w);
             // Over the windows while it moves, as macOS lifts a dragged widget.
+            zMoving_ = true;
             SetWindowPos(w.surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            zMoving_ = false;
         }
         if (w.dragging)
             w.surface->Move(RECT{w.downRect.left + dx, w.downRect.top + dy, w.downRect.right + dx, w.downRect.bottom + dy});
@@ -919,15 +1058,31 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
         if (!w.down)
             return m == WM_LBUTTONUP;
         w.down = false;
-        bool dragged = w.dragging;
-        w.dragging = false;
+        bool dragged = w.dragging, resized = w.resizing;
+        w.dragging = w.resizing = false;
         if (m == WM_LBUTTONUP && GetCapture() == w.surface->Hwnd())
             ReleaseCapture();
-        if (dragged) {
+        POINT at;
+        GetCursorPos(&at);
+        if (RECT now = w.surface->Rect(); w.hover && !PtInRect(&now, at)) {
+            w.hover = false; // let go outside it (its WM_MOUSELEAVE came while it was held)
+            w.surface->Invalidate();
+        }
+        if (resized) {
+            if (w.size != w.downSize) {
+                if (w.kind == WidgetKind::Photos)
+                    LoadPhoto(w, false); // the same photo, cropped for the new size
+                Save();
+                Log(L"widgets: %s resized to %s at %d,%d", NameOf(w.kind), SizeName(w.size), w.col, w.row);
+            }
+        } else if (dragged) {
             // Snaps to the nearest free place of the grid and glides there.
             RECT cur = w.surface->Rect(), wa = WorkArea();
             float s = Scale();
+            // Counted from the edge the widget was dropped nearer to, as CellRect places it.
             float col = (float(cur.left - wa.left) / s - kMargin) / (kWidgetCell + kWidgetGap);
+            if (cur.left + cur.right > wa.left + wa.right)
+                col = float(Cols() - WidgetCols(w.size)) - (float(wa.right - cur.right) / s - kMargin) / (kWidgetCell + kWidgetGap);
             float row = (float(cur.top - wa.top) / s - kMargin) / (kWidgetCell + kWidgetGap);
             int c = w.col, rr = w.row;
             if (FreeCellNear(col, row, w.size, &w, c, rr)) {
@@ -1268,6 +1423,13 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
         c.Fill(D2D1::RectF(0, 0, WidgetWidth(w.size), WidgetHeight(w.size)), kWidgetRadius, c.theme.panel);
     GetLocalTime(&world_.now);
     PaintWidget(c, w.kind, w.size, w.content, world_, w.hits);
+    if ((w.hover || w.resizing) && !w.dragging && Resizable(w.kind)) {
+        // The grip: a short arc along the rounded corner it is in.
+        const float r = kWidgetRadius, h = WidgetHeight(w.size);
+        bool left = w.resizing ? w.growLeft : GrowsLeft(w);
+        float cx = left ? r : WidgetWidth(w.size) - r;
+        c.Arc(cx, h - r, r - 6, left ? 100.f : 10.f, left ? 170.f : 80.f, c.theme.subtext, 3.5f);
+    }
     if (w.content.editing)
         PlaceImeWindow(w);
 }

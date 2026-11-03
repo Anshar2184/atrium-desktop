@@ -127,7 +127,11 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, b
     desc.Scaling = DXGI_SCALING_STRETCH;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+    desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     Check(gpu_.factory->CreateSwapChainForComposition(dev, &desc, nullptr, swap_.put()));
+    auto paced = swap_.as<IDXGISwapChain2>();
+    Check(paced->SetMaximumFrameLatency(1));
+    waitable_ = paced->GetFrameLatencyWaitableObject();
 
     auto dxgi = gpu_.device.as<IDXGIDevice>();
     Check(DCompositionCreateDevice(dxgi.get(), IID_PPV_ARGS(dcomp_.put())));
@@ -146,6 +150,19 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, b
     }
 
     CreateSizeDependent();
+}
+
+GlassRenderer::~GlassRenderer()
+{
+    if (waitable_)
+        CloseHandle(waitable_);
+}
+
+bool GlassRenderer::Ready()
+{
+    if (!ready_)
+        ready_ = WaitForSingleObject(waitable_, 0) == WAIT_OBJECT_0;
+    return ready_;
 }
 
 void GlassRenderer::CreateSizeDependent()
@@ -204,7 +221,7 @@ void GlassRenderer::Resize(int width, int height)
         d2d_->SetTarget(nullptr);
     rtv_ = nullptr;
     overlayTarget_ = nullptr;
-    Check(swap_->ResizeBuffers(2, UINT(w_), UINT(h_), DXGI_FORMAT_B8G8R8A8_UNORM, 0));
+    Check(swap_->ResizeBuffers(2, UINT(w_), UINT(h_), DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT));
     CreateSizeDependent();
 }
 
@@ -248,8 +265,7 @@ void GlassRenderer::UpdateBackdrop(ID3D11Texture2D* frame, int x, int y)
     nextSlot_ = (nextSlot_ + 1) % kSlots;
     ctx->CopyResource(slots_[slot].counters.get(), cmpOut_.get());
     ctx->CopySubresourceRegion(slots_[slot].grid.get(), 0, 0, 0, 0, roi_.get(), gridMip_, nullptr);
-    ctx->Flush(); // start the GPU now; the result is polled later
-    inFlight_.push_back(slot);
+    inFlight_.push_back(slot); // the render loop flushes once per wake-up; the result is polled later
 }
 
 bool GlassRenderer::ReadSlot(int slot, bool wait, Readback& out)
@@ -395,6 +411,7 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
     ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
     hasPresented_ = hasBackdrop_;
     HRESULT hr = swap_->Present(sync_, 0);
+    ready_ = false;
     return hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET;
 }
 

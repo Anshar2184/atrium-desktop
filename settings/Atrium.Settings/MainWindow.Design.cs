@@ -102,16 +102,18 @@ public sealed partial class MainWindow
         return t;
     }
 
-    private static Border Card(UIElement child) => new() { Style = StyleOf("GroupStyle"), Padding = new Thickness(20, 16, 20, 16), Child = child };
+    private static Border Card(UIElement child) => new() { Style = StyleOf("TileStyle"), Padding = new Thickness(20, 16, 20, 16), Child = child };
 
     private static StackPanel Section(string label, string? note, UIElement body)
     {
         var s = new StackPanel { Spacing = 12 };
-        s.Children.Add(Text(label, "SectionStyle"));
+        var title = Text(label, "SectionStyle");
+        title.Margin = new Thickness(4, 0, 0, 0);
+        s.Children.Add(title);
         if (note != null)
         {
             var n = Text(note, "RowNoteStyle");
-            n.Margin = new Thickness(18, -4, 0, 0);
+            n.Margin = new Thickness(4, -6, 0, 0);
             s.Children.Add(n);
         }
         s.Children.Add(body);

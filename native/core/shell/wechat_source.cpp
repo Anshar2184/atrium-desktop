@@ -80,28 +80,17 @@ Row Parse(const std::wstring& name)
     return r;
 }
 
-std::wstring WeChatPath(DWORD& pid)
+// WeChat's program, from one of its processes.
+std::wstring ProgramPath(DWORD pid)
 {
-    pid = 0;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE)
-        return {};
-    PROCESSENTRY32W pe{sizeof(pe)};
     std::wstring path;
-    for (BOOL ok = Process32FirstW(snap, &pe); ok && !pid; ok = Process32NextW(snap, &pe)) {
-        if (_wcsicmp(pe.szExeFile, L"Weixin.exe") != 0 && _wcsicmp(pe.szExeFile, L"WeChat.exe") != 0)
-            continue;
-        if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID)) {
-            wchar_t buf[MAX_PATH * 2];
-            DWORD len = DWORD(std::size(buf));
-            if (QueryFullProcessImageNameW(p, 0, buf, &len)) {
-                path = buf;
-                pid = pe.th32ProcessID;
-            }
-            CloseHandle(p);
-        }
+    if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+        wchar_t buf[MAX_PATH * 2];
+        DWORD len = DWORD(std::size(buf));
+        if (QueryFullProcessImageNameW(p, 0, buf, &len))
+            path = buf;
+        CloseHandle(p);
     }
-    CloseHandle(snap);
     return path;
 }
 
@@ -166,7 +155,6 @@ void WeChatSource::Run()
     };
     while (!stop_ && uia && cells) {
         try {
-            DWORD pid = 0;
             std::wstring exe;
             // Every WeChat process: the chat list is in one of them.
             std::vector<std::pair<DWORD, std::wstring>> procs;
@@ -179,7 +167,8 @@ void WeChatSource::Run()
                 if (snap != INVALID_HANDLE_VALUE)
                     CloseHandle(snap);
             }
-            exe = WeChatPath(pid);
+            if (!procs.empty())
+                exe = ProgramPath(procs.front().first);
             std::vector<std::pair<std::wstring, Row>> rows;
             bool found = false;
             for (const auto& [p, unused] : procs) {
@@ -251,7 +240,9 @@ void WeChatSource::Run()
         } catch (...) {
             Log(L"wechat: reading failed");
         }
-        WaitForSingleObject(wake_, 2000);
+        // A list it can read is read every 2 s; looking for one (WeChat closed or only in the
+        // tray) costs a search through its windows, so that waits longer.
+        WaitForSingleObject(wake_, state == 2 ? 2000 : 6000);
     }
     cells = nullptr;
     uia = nullptr;

@@ -47,6 +47,10 @@ struct TaskItem {
 // thread. COM must be initialised on the calling thread.
 // thumbnail: the picture itself (an image file) rather than its icon.
 bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out, bool thumbnail = false);
+// Atrium's own programs (Atrium.Core.exe, Atrium.Settings.exe): their icon read from the file
+// itself, not from the shell's icon cache or Explorer's tray snapshot, which keep the icon an
+// earlier build had at the same path. False for any other program.
+bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out);
 
 class TaskModel {
 public:

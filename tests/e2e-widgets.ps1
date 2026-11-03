@@ -3,7 +3,7 @@
   Atrium's desktop widgets: the layout read from widgets.json, their layer
   (just above the desktop, under every window; over it when every app is
   minimised), dragging one with the real mouse (it snaps to the grid and the
-  layout is saved), changing a size, adding and removing, a large (2 x 2)
+  layout is saved), resizing one by its corner with the real mouse, changing a size, adding and removing, a large (2 x 2)
   calendar, typing into a note and into reminders with real clicks and keys
   (saved in widgets.json), ticking a reminder off, and turning them off.
 
@@ -90,7 +90,21 @@ try {
     Start-Process $Core -ArgumentList "--exit" -Wait
     Start-Sleep 1
 
+    # The grid's right half hugs the right edge: a widget in the last column is as far from it as the first is from the left.
+    $cols = [int](Field $st[0] "cols")
+    [IO.File]::WriteAllText($wfile, '{"widgets":[{"kind":"clock","size":"small","col":0,"row":0},{"kind":"battery","size":"small","col":' + ($cols - 1) + ',"row":0}]}')
+    Start-Process $Core
+    Start-Sleep 4
+    $st = @(State)
+    Add-Type -AssemblyName System.Windows.Forms
+    $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $r0 = Rect $st[1]; $r1 = Rect $st[2]
+    Check "equal-margins" ([math]::Abs(($r0[0] - $wa.Left) - ($wa.Right - $r1[2])) -le 1 -and (Field $st[2] "cell") -eq "$($cols - 1),0") "left $($r0[0] - $wa.Left) px, right $($wa.Right - $r1[2]) px ($($st[2]))"
+    Start-Process $Core -ArgumentList "--exit" -Wait
+    Start-Sleep 1
+
     # Over the windows for the mouse (the test mode), then drag the clock two cells right and one down.
+    [IO.File]::WriteAllText($wfile, '{"widgets":[{"kind":"clock","size":"small","col":0,"row":0},{"kind":"calendar","size":"small","col":1,"row":0}]}')
     $env:ATRIUM_WIDGETS_TEST = "1"
     Start-Process $Core
     Start-Sleep 4
@@ -107,6 +121,24 @@ try {
     Check "drag-snaps" ((Field $st[1] "cell") -eq "2,1" -and $moved.col -eq 2 -and $moved.row -eq 1) "after the drag: $(Field $st[1] 'cell'), saved $($moved.col),$($moved.row)"
     $r = Rect $st[1]
     Check "drag-glides-home" ($r[0] -eq $r0[0] + 2 * $pitch -and $r[1] -eq $r0[1] + $pitch) "rect $($r -join ',') (pitch $pitch)"
+
+    # Resized by the grip at its bottom right corner: a pitch to the right makes it medium (saved), back makes it small.
+    function GripDrag($line, $dx) {
+        $g = Rect $line; $k = ($g[3] - $g[1]) / 164
+        $gx = [int]($g[2] - 10 * $k); $gy = [int]($g[3] - 10 * $k)
+        [U]::SetCursorPos($gx, $gy) | Out-Null; Start-Sleep -Milliseconds 200
+        [U]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80
+        for ($i = 1; $i -le 20; $i++) { [U]::SetCursorPos([int]($gx + $dx * $i / 20), $gy) | Out-Null; Start-Sleep -Milliseconds 25 }
+        [U]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep 0.8
+    }
+    GripDrag $st[1] $pitch
+    $st = @(State)
+    $r = Rect $st[1]
+    $saved = Layout | Where-Object { $_.kind -eq "clock" }
+    Check "grip-resizes" ((Field $st[1] "size") -eq "medium" -and (Field $st[1] "cell") -eq "2,1" -and ($r[2] - $r[0]) -gt 1.9 * ($r[3] - $r[1]) -and $saved.size -eq "medium") "clock $(Field $st[1] 'size') at $(Field $st[1] 'cell') rect $($r -join ','), saved $($saved.size)"
+    GripDrag $st[1] (-$pitch)
+    $st = @(State)
+    Check "grip-shrinks" ((Field $st[1] "size") -eq "small" -and (Field $st[1] "cell") -eq "2,1") "clock $(Field $st[1] 'size') at $(Field $st[1] 'cell')"
 
     # Sizes, adding, removing.
     C widgets-do "size:1:medium"; Start-Sleep 0.6

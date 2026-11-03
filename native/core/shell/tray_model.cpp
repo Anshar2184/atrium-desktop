@@ -210,7 +210,7 @@ std::map<std::wstring, Program> RunningPrograms()
         Program& p = (*c->out)[it->second];
         p.windows.push_back(h);
         wchar_t title[256];
-        if (c->titles && IsWindowVisible(h) && GetWindowTextW(h, title, 256))
+        if (c->titles && IsWindowVisible(h) && InternalGetWindowText(h, title, 256) > 0) // sends no message (a hung window)
             p.titles.push_back(title);
         return TRUE;
     };
@@ -572,7 +572,7 @@ void TrayModel::Worker()
                     auto& pic = pictures[key];
                     if (!pic) {
                         IconImage img;
-                        if ((r.png.empty() || !DecodePng(r.png, img)) && !LoadShellImage(r.exe, kIconPx, img))
+                        if (!LoadAtriumIcon(r.exe, kIconPx, img) && (r.png.empty() || !DecodePng(r.png, img)) && !LoadShellImage(r.exe, kIconPx, img))
                             img = {};
                         if (!img.empty())
                             pic = std::make_shared<const IconImage>(std::move(img));

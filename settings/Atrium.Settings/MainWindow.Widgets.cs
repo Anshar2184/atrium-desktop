@@ -5,13 +5,14 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
 
 namespace Atrium.Settings;
 
 // The widget gallery (D43): every widget the core can show, as a small
-// picture of it on a piece of glass; a click puts one on the desktop.
+// picture of it on a piece of glass over the specimen photo; a click puts one on the desktop.
 public sealed partial class MainWindow
 {
     private sealed record WidgetChoice(string Kind, string Size, string Name, string Note);
@@ -34,6 +35,16 @@ public sealed partial class MainWindow
         new("photos", "medium", "照片", "每 10 分钟换一张"),
     };
 
+    private BitmapImage? _galleryPhoto;
+
+    // The specimen photo, decoded small (cards are about 200 DIP wide), shared by every card.
+    private Brush PhotoBrush()
+    {
+        if (Photo.Path == null) return new SolidColorBrush(Color.FromArgb(255, 0xCB, 0xD3, 0xDD));
+        _galleryPhoto ??= new BitmapImage(new Uri(Photo.Path)) { DecodePixelWidth = 640 };
+        return new ImageBrush { ImageSource = _galleryPhoto, Stretch = Stretch.UniformToFill };
+    }
+
     private void BuildWidgetGallery()
     {
         foreach (var choice in WidgetChoices)
@@ -55,13 +66,8 @@ public sealed partial class MainWindow
         var stage = new Border
         {
             Height = 118, CornerRadius = new CornerRadius(12), Padding = new Thickness(14),
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 1),
-                GradientStops = { new GradientStop { Color = Color.FromArgb(255, 0x9F, 0xB8, 0xD8), Offset = 0 },
-                                  new GradientStop { Color = Color.FromArgb(255, 0xC9, 0xB8, 0xD6), Offset = 1 } },
-            },
-            Child = new Viewbox { Stretch = Stretch.Uniform, Child = Face(c) },
+            Background = PhotoBrush(),
+            Child = new Viewbox { Stretch = Stretch.Uniform, Child = Face(c, PhotoBrush()) },
         };
         var name = new TextBlock { Text = c.Name, Style = (Style)Application.Current.Resources["RowTitleStyle"] };
         var note = new TextBlock
@@ -99,7 +105,7 @@ public sealed partial class MainWindow
     private static readonly Color Green = Color.FromArgb(255, 0x30, 0xD1, 0x58);
     private static readonly Color Blue = Color.FromArgb(255, 0x0A, 0x84, 0xFF);
 
-    private static FrameworkElement Face(WidgetChoice c)
+    private static FrameworkElement Face(WidgetChoice c, Brush photo)
     {
         double w = c.Size == "medium" ? 344 : 164, h = c.Size == "small" ? 164 : c.Size == "medium" ? 164 : 344;
         if (c.Size == "large") w = 344;
@@ -178,17 +184,7 @@ public sealed partial class MainWindow
                 break;
             case ("photos", _):
                 canvas.Children.Clear();
-                canvas.Children.Add(new Rectangle
-                {
-                    Width = w, Height = h, RadiusX = 30, RadiusY = 30,
-                    Fill = new LinearGradientBrush
-                    {
-                        StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1),
-                        GradientStops = { new GradientStop { Color = Color.FromArgb(255, 0xF6, 0xB4, 0x8F), Offset = 0 },
-                                          new GradientStop { Color = Color.FromArgb(255, 0x74, 0x86, 0xE0), Offset = 0.6 },
-                                          new GradientStop { Color = Color.FromArgb(255, 0x2B, 0x29, 0x5C), Offset = 1 } },
-                    },
-                });
+                canvas.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 30, RadiusY = 30, Fill = photo });
                 break;
         }
         return canvas;
@@ -279,7 +275,9 @@ public sealed partial class MainWindow
                     Canvas.SetLeft(disc, x + d * cell + (cell - row) / 2); Canvas.SetTop(disc, y + r * row);
                     c.Children.Add(disc);
                 }
-                Label(c, day.ToString(), x + d * cell, y + r * row + row * 0.12, cell, row * 0.6, day == 2 ? Colors.White : Ink, true);
+                // MiSans' line box is 1.326 em with the figures centred in it: centre the box on the disc.
+                double size = row * 0.6;
+                Label(c, day.ToString(), x + d * cell, y + r * row + (row - 1.326 * size) / 2, cell, size, day == 2 ? Colors.White : Ink, true);
             }
     }
 }

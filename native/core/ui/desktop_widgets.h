@@ -1,11 +1,12 @@
 // Desktop widgets after macOS's (Sonoma and later): pieces of the bar's glass
-// on the desktop, in a grid from the top left of the bar's monitor. They
+// on the desktop, in a grid on the bar's monitor whose halves hug its left and right edges. They
 // stand just above the desktop, under every window, always clear glass with
 // its ink and a few of macOS's colours (widget_faces); Win+D (every app
 // minimised) lifts them over the desktop. Drag one to move it (it snaps to the
-// grid); right-click for its sizes, to remove it or to add another. Notes and
-// reminders take typing (the input method too) after a click. The layout and
-// the widgets' content are saved in %LOCALAPPDATA%\Atrium\widgets.json.
+// grid), or by its bottom corner to resize it; right-click for its sizes, to
+// remove it or to add another. Notes and reminders take typing (the input
+// method too) after a click. The layout and the widgets' content are saved in
+// %LOCALAPPDATA%\Atrium\widgets.json.
 #pragma once
 
 #include "ui/glass_menu.h"
@@ -60,6 +61,7 @@ private:
     RECT WorkArea() const;
     int Cols() const;
     int Rows() const;
+    bool FromRight(int col, WidgetSize size) const;        // placed from the right edge
     RECT CellRect(int col, int row, WidgetSize size) const; // screen px
     bool Fits(int col, int row, WidgetSize size, const Widget* except) const;
     bool FreeCellNear(float col, float row, WidgetSize size, const Widget* except, int& outCol, int& outRow) const;
@@ -68,6 +70,10 @@ private:
     void Restack();
     void Tick();
     bool IsOurs(HWND h) const;
+    // Resizing by the grip at a widget's bottom corner (nearer the middle of the screen).
+    bool GrowsLeft(const Widget& w) const;
+    bool InGrip(const Widget& w, POINT screen) const;
+    void DragSize(Widget& w, POINT screen);
     bool Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r);
     void Menu(Widget& w);
     void Activate(Widget& w);
@@ -101,6 +107,9 @@ private:
     unsigned photoGen_ = 0;
     bool test_ = false; // ATRIUM_WIDGETS_TEST=1: over everything (screenshots)
     bool restackPosted_ = false;
+    // Only Restack (and a drag) may change a widget's place in the z-order: anything else
+    // (showing the window, a click, the system) is held back in WM_WINDOWPOSCHANGING.
+    bool zMoving_ = false;
 };
 
 } // namespace atrium

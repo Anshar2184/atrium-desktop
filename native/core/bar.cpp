@@ -30,6 +30,11 @@ namespace {
 
 constexpr UINT WM_BAR_CAPTURE = WM_APP + 0x70; // wParam 1: Atrium may show in screenshots (render thread -> UI thread)
 
+// DCompositionWaitForCompositorClock (Windows 11): waits for the next composed frame or a handle;
+// WAIT_OBJECT_0 + count is the clock. Looked up at run time (absent before build 22000).
+using WaitClockFn = DWORD(WINAPI*)(UINT, const HANDLE*, DWORD);
+const WaitClockFn g_waitClock = reinterpret_cast<WaitClockFn>(GetProcAddress(LoadLibraryW(L"dcomp.dll"), "DCompositionWaitForCompositorClock"));
+
 constexpr wchar_t kVisualClass[] = L"AtriumBarVisual";
 constexpr wchar_t kInputClass[] = L"AtriumBarInput";
 constexpr wchar_t kClockKey[] = L"#clock";
@@ -42,6 +47,7 @@ constexpr wchar_t kMoreKey[] = L"#more";
 bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
+constexpr double kDesktopFollowMs = 100; // widgets follow a changing desktop at most this often
 constexpr UINT_PTR kTooltipTimer = 1;
 constexpr UINT kTooltipDelayMs = 450;
 constexpr UINT_PTR kFileHoverTimer = 2;
@@ -1500,6 +1506,7 @@ bool Bar::RenderSession()
     unsigned frames = 0, presents = 0, skipped = 0;
     std::vector<double> workMs;    // capture copy + comparison (+ draw and present), per wake-up
     std::vector<double> presentMs; // the same, only for wake-ups that presented
+    std::vector<double> panelsMs;  // of which the popups' and widgets' glass, when there was any
     winrt::com_ptr<ID3D11Texture2D> frozen; // --debug-capturable only
     ULONGLONG statsStart = GetTickCount64();
     Log(L"render: started on %s, window %ldx%ld", gpu.adapterName.c_str(), snap.window.right - snap.window.left, snap.window.bottom - snap.window.top);
@@ -1511,14 +1518,23 @@ bool Bar::RenderSession()
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         RECT window{};        // where it was last drawn: a moved panel is drawn again at once
         unsigned desktopVersion = 0; // a widget: the desktop picture its backdrop came from
+        double desktopMs = -1e9;     // ... and when it took it
+        bool desktopDue = false;     // a newer picture, taken a little later (kDesktopFollowMs)
         // Presents of an animation, logged when it ends (smoothness checks).
         double burstStart = 0, burstLast = 0, burstGap = 0;
         int burstFrames = 0;
+        // Why it was drawn again, during the burst: moved or resized, a new desktop
+        // picture, what is under it changed (readback), its parameters changed.
+        int burstMoved = 0, burstDesktop = 0, burstReadback = 0, burstParams = 0;
+        bool owed = false;    // a frame to draw once its last one is on screen (Ready), or at the next tick
+        uint64_t drawnTick = 0; // the compositor frame it was last drawn in
         bool dark = false;
         InkGrid grid;         // ink region by region (published for the popup)
         std::vector<GlassParams> params;
     };
     std::map<HWND, PanelState> panels;
+    double slowLogged = -1e9;
+    uint64_t tick = 1; // compositor frames (every wake-up when not paced by the clock)
     // A panel that moves (a widget dragged or gliding) needs the backdrop at
     // its new place even when the screen has not changed and no frame comes:
     // for a second after a move the newest frame is kept.
@@ -1570,17 +1586,23 @@ bool Bar::RenderSession()
                     wchar_t title[64] = {};
                     InternalGetWindowText(hwnd, title, 64); // no message to the UI thread (it may be waiting for this glass)
                     double span = ps.burstLast - ps.burstStart;
-                    Log(L"render: %s glass animated %d presents in %.0f ms (%.0f fps), longest gap %.1f ms", title, ps.burstFrames, span,
-                        span > 0 ? 1000.0 * (ps.burstFrames - 1) / span : 0.0, ps.burstGap);
+                    Log(L"render: %s glass animated %d presents in %.0f ms (%.0f fps), longest gap %.1f ms (moved %d, desktop %d, under %d, "
+                        L"params %d)",
+                        title, ps.burstFrames, span, span > 0 ? 1000.0 * (ps.burstFrames - 1) / span : 0.0, ps.burstGap, ps.burstMoved,
+                        ps.burstDesktop, ps.burstReadback, ps.burstParams);
                 }
                 ps.burstFrames = 0;
+                ps.burstMoved = ps.burstDesktop = ps.burstReadback = ps.burstParams = 0;
             }
         for (const GlassPanel& p : snap.panels) {
             int w = p.window.right - p.window.left, h = p.window.bottom - p.window.top;
             if (w <= 0 || h <= 0 || !IsWindow(p.hwnd))
                 continue;
             PanelState& ps = panels[p.hwnd];
+            const double t0 = ClockMs();
+            double created = 0;
             if (!ps.renderer) {
+                created = 1;
                 try {
                     ps.renderer = std::make_unique<GlassRenderer>(gpu, p.hwnd, w, h, false, false);
                 } catch (const winrt::hresult_error& e) {
@@ -1588,9 +1610,12 @@ bool Bar::RenderSession()
                     continue;
                 }
             }
+            if (created)
+                created = ClockMs() - t0;
             GlassRenderer& r = *ps.renderer;
             const bool moved = !EqualRect(&ps.window, &p.window);
             bool changed = r.Width() != w || r.Height() != h || moved;
+            bool newDesktop = false, under = false;
             ps.window = p.window;
             if (moved)
                 panelMovedMs = now;
@@ -1600,16 +1625,25 @@ bool Bar::RenderSession()
                 // Again once the glass is on screen if its ink was never measured: the
                 // first copy (before any present) is not compared, and a still desktop
                 // would leave a widget with the default ink over any wallpaper.
-                if (pic && (changed || ps.desktopVersion != desktop.Version() || !r.HasBackdrop() || ps.grid.w == 0)) {
+                bool fresh = ps.desktopVersion != desktop.Version();
+                // A desktop that keeps changing (a slideshow's cross-fade) is followed ten times a
+                // second, the last picture always: under the blur more would not show, and the GPU
+                // is busy with the fade itself.
+                bool soon = fresh && !changed && r.HasBackdrop() && ps.grid.w != 0 && now - ps.desktopMs < kDesktopFollowMs;
+                ps.desktopDue = soon; // woken by the clock until it is time
+                if (!soon && pic && (changed || fresh || !r.HasBackdrop() || ps.grid.w == 0)) {
                     r.UpdateBackdrop(pic, p.window.left - desktop.Origin().x, p.window.top - desktop.Origin().y);
+                    newDesktop = fresh;
                     ps.desktopVersion = desktop.Version();
+                    ps.desktopMs = now;
                 }
-            } else if (ID3D11Texture2D* under = source ? source : (moved || !r.HasBackdrop()) ? lastFrame.get() : nullptr) {
-                r.UpdateBackdrop(under, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
+            } else if (ID3D11Texture2D* below = source ? source : (moved || !r.HasBackdrop()) ? lastFrame.get() : nullptr) {
+                r.UpdateBackdrop(below, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
             }
             std::vector<GlassParams> gp = PanelParams(snap.settings, snap.scale, p);
             if (auto rb = r.Poll()) {
                 changed |= rb->changed;
+                under = rb->changed;
                 // The ink region by region (cells of about 20 DIP), from what
                 // the glass shows there, each cell with the bar's hysteresis;
                 // the popup's own ink is what most of it needs.
@@ -1666,16 +1700,37 @@ bool Bar::RenderSession()
             }
             if (!r.HasBackdrop())
                 continue; // waits for the first capture frame under it
+            const double t1 = ClockMs();
             bool same = gp.size() == ps.params.size() && memcmp(gp.data(), ps.params.data(), gp.size() * sizeof(GlassParams)) == 0;
-            if (!changed && r.HasPresented() && same) {
+            if (!changed && !ps.owed && r.HasPresented() && same) {
                 GlassPresented(p.hwnd, p.gen);
                 continue;
             }
+            // Once per composed frame (a new picture under it or new shapes may come in between),
+            // and only when its last frame is on screen; else at the next tick.
+            if ((ps.drawnTick == tick && !moved) || !r.Ready()) {
+                ps.owed = true;
+                continue;
+            }
+            ps.owed = false;
+            ps.drawnTick = tick;
             if (!r.Present(gp, nullptr)) {
                 lost = true;
                 return false;
             }
             GlassPresented(p.hwnd, p.gen);
+            // A panel that holds the render thread up: what took the time (rate-limited).
+            if (double t2 = ClockMs(); t2 - t0 > 16 && t2 - slowLogged > 2000) {
+                slowLogged = t2;
+                wchar_t title[64] = {};
+                InternalGetWindowText(p.hwnd, title, 64);
+                Log(L"render: slow glass for %s: %.1f ms (renderer created in %.1f ms, backdrop %.1f ms, present %.1f ms)", title, t2 - t0, created,
+                    t1 - t0 - created, t2 - t1);
+            }
+            ps.burstMoved += moved ? 1 : 0;
+            ps.burstDesktop += newDesktop ? 1 : 0;
+            ps.burstReadback += under ? 1 : 0;
+            ps.burstParams += same ? 0 : 1;
             ps.params = gp;
             if (!ps.burstFrames || now - ps.burstLast > 250) {
                 ps.burstStart = now;
@@ -1699,11 +1754,27 @@ bool Bar::RenderSession()
     };
 
     HANDLE handles[] = {quit_, wake_, frame_};
-    bool panelsMoving = false;
+    bool panelsMoving = false, barOwed = false;
     for (;;) {
-        // Animations run at display rate; pending readbacks are polled soon.
-        DWORD timeout = animating || panelsMoving ? 6 : renderer.ReadbackPending() ? 3 : 1000;
-        DWORD w = WaitForMultipleObjects(3, handles, FALSE, timeout);
+        // Animations, and glass owed a frame (not Ready last time), run on the compositor's
+        // clock (D45): one wake-up per composed frame, at the display's rate. A timeout would
+        // be rounded up to 15.6 ms, and the popups' latency objects (no vsync) would spin.
+        // Pending readbacks are polled soon.
+        bool owed = barOwed || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed || e.second.desktopDue; });
+        bool paced = animating || panelsMoving || owed;
+        DWORD w = WAIT_FAILED;
+        if (paced && g_waitClock) {
+            w = g_waitClock(3, handles, 100);
+            if (w == WAIT_OBJECT_0 + 3 || w == WAIT_TIMEOUT) {
+                ++tick;
+            } else if (w > WAIT_OBJECT_0 + 3) {
+                w = WaitForMultipleObjects(3, handles, FALSE, 6); // no clock (the display is off)
+                ++tick;
+            }
+        } else {
+            w = WaitForMultipleObjects(3, handles, FALSE, paced ? 6 : renderer.ReadbackPending() ? 3 : 1000);
+            ++tick;
+        }
         if (w == WAIT_OBJECT_0)
             return false;
         if (GetTickCount64() - statsStart >= 60000) {
@@ -1711,14 +1782,18 @@ bool Bar::RenderSession()
             auto pct = [&](double q) { return workMs.empty() ? 0.0 : workMs[std::min(workMs.size() - 1, size_t(q * double(workMs.size())))]; };
             std::sort(presentMs.begin(), presentMs.end());
             double presentP95 = presentMs.empty() ? 0.0 : presentMs[std::min(presentMs.size() - 1, size_t(0.95 * double(presentMs.size())))];
+            std::sort(panelsMs.begin(), panelsMs.end());
+            double panelsP95 = panelsMs.empty() ? 0.0 : panelsMs[std::min(panelsMs.size() - 1, size_t(0.95 * double(panelsMs.size())))];
             PROCESS_MEMORY_COUNTERS_EX mem{sizeof(mem)};
             GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem), sizeof(mem));
             Log(L"render: last minute %u frames, %u presents, %u echoes skipped; work p50 %.2f ms, p95 %.2f ms, max %.2f ms; "
-                L"presenting p95 %.2f ms; private %zu MB",
-                frames, presents, skipped, pct(0.5), pct(0.95), workMs.empty() ? 0.0 : workMs.back(), presentP95, size_t(mem.PrivateUsage >> 20));
+                L"presenting p95 %.2f ms; popups and widgets p95 %.2f ms, max %.2f ms; private %zu MB",
+                frames, presents, skipped, pct(0.5), pct(0.95), workMs.empty() ? 0.0 : workMs.back(), presentP95, panelsP95,
+                panelsMs.empty() ? 0.0 : panelsMs.back(), size_t(mem.PrivateUsage >> 20));
             frames = presents = skipped = 0;
             workMs.clear();
             presentMs.clear();
+            panelsMs.clear();
             statsStart = GetTickCount64();
         }
         LARGE_INTEGER t0;
@@ -1754,12 +1829,16 @@ bool Bar::RenderSession()
             }
             if (!freeze)
                 keepFrame(frame);
+            double p0 = elapsedMs();
             panelsMoving = renderPanels(snap, hidden.get(), lost);
+            if (!snap.panels.empty())
+                panelsMs.push_back(elapsedMs() - p0);
             hidden = nullptr;
             capture->Release();
+            gpu.context->Flush();
             if (lost)
                 return true;
-            animating = false;
+            animating = barOwed = false; // drawn afresh when the bar shows again
             continue;
         }
         renderer.Resize(snap.window.right - snap.window.left, snap.window.bottom - snap.window.top);
@@ -1791,7 +1870,10 @@ bool Bar::RenderSession()
             bool lost = false;
             if (!freeze)
                 keepFrame(frame);
+            double p0 = elapsedMs();
             panelsMoving = renderPanels(snap, source.get(), lost);
+            if (!snap.panels.empty())
+                panelsMs.push_back(elapsedMs() - p0);
             if (lost) {
                 Log(L"render: device lost (popup glass)");
                 return true;
@@ -1799,6 +1881,7 @@ bool Bar::RenderSession()
         }
         source = nullptr;
         capture->Release();
+        gpu.context->Flush(); // the panels' copies and comparisons start now, in one submission
 
         bool changed = !renderer.HasPresented();
         if (auto rb = renderer.Poll()) {
@@ -1843,13 +1926,18 @@ bool Bar::RenderSession()
         }
         ULONGLONG now = GetTickCount64();
         bool force = snap.generation != drawnGeneration || textKey != drawnText || dark != drawnDark || darkIcons != drawnDarkIcons ||
-                     animating || now - lastPresent > kStaleMs;
+                     animating || barOwed || now - lastPresent > kStaleMs;
         if (!changed && !force) {
             ++skipped; // echo of our own present, or nothing new under the glass
             if (hadBackdrop)
                 workMs.push_back(elapsedMs());
             continue;
         }
+        if (!renderer.Ready()) {
+            barOwed = true; // the last frame is not on screen yet: drawn when it is
+            continue;
+        }
+        barOwed = false;
         GlassParams params = ParamsFor(snap.settings, snap.scale);
         const BarFrame& bf = painter.Frame();
         params.radius = std::min(params.radius, (bf.shape.bottom - bf.shape.top) / 2);

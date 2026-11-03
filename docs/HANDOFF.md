@@ -1,10 +1,10 @@
-# 交接文档（2026-11-02，v0.9.7）
+# 交接文档（2026-11-03，v0.9.8）
 
-给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D43，D25 / D30 / D35 在 v0.9.2 修订，D37 为 v0.9.3、D38 为 v0.9.4、D39 为 v0.9.6 新增，D40–D43 为 v0.9.7 新增，D24 / D26 在 v0.9.4 补充，D30 在 v0.9.6 补充）、[DESIGN](DESIGN.md)（设计规范：新界面必须遵守）和 [VERIFICATION](VERIFICATION.md) 第 20–30 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
+给接手的新对话：**先读本文**，再读 [DECISIONS](DECISIONS.md)（当前有效决策 D01–D45，D25 / D30 / D35 在 v0.9.2 修订，D37 为 v0.9.3、D38 为 v0.9.4、D39 为 v0.9.6 新增，D40–D43 为 v0.9.7 新增，D44–D45 为 v0.9.8 新增，D24 / D26 在 v0.9.4 补充，D30 在 v0.9.6 补充）、[DESIGN](DESIGN.md)（设计规范：新界面必须遵守）和 [VERIFICATION](VERIFICATION.md) 第 20–31 节（v0.7 以后的验证记录）。保留已有实现，不推倒重做。开工前先 `git log -5`、`git status`，并确认用户的 Atrium 正在运行。
 
 ## 0. 一句话现状
 
-C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.7**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
+C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐藏系统任务栏与系统通知横幅，D37），带自绘开始菜单、通知、托盘面板、控制中心、日历、macOS 式桌面小组件（11 种 / 3 种尺寸）；最大化或全屏时自动隐藏。版本 **0.9.8**（大版本保持 0.9，见 §1）。**用户日常运行的是开发版** `native\build\win-x64\Release\Atrium.Core.exe`（每次更新后用 `dev-update.sh` 替换，§4）；打包版 `dist\Atrium` 见 §4。
 
 ## 1. 用户与协作方式（重要）
 
@@ -39,6 +39,8 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 
 - v0.9.7：**界面字体 MiSans**（D40，`render/ui_font.*`，栏 / 面板 / 小组件 / 菜单 / 设置中心统一，数字等宽，玻璃上小字自动加重一档）；**玻璃右键菜单**（D41，`ui/glass_menu.*`，替换五处系统菜单）；**新图标**（D42）；**设置中心重构**（D43：macOS 系统设置式的侧边栏 + 分组卡片，自绘开关 / 滑块 / 分段控件，浮起的保存胶囊，新增“小组件”页与画廊，管道操作 `add-widget`）。修复：小组件在新窗口出现或解除隐藏时立即退到窗口下面（不再在设置中心上停留几秒）；触控板慢慢滑通知堆叠时跟手、松手吸附最近一张（不再两张叠在一起），翻页中途的前后遮挡顺序正确；微信 / 飞书读取线程启动时 UI 自动化建条件失败（E_FAIL）会每 2 秒重试（此前失败即整轮不读，飞书消息因此没有接入）；静止桌面上的小组件第一次就测量字色（此前亮壁纸上一直是白字）。
 
+- v0.9.8：**小组件拖角改尺寸**（D35：悬停出现弧形握把，拖动吸附到最近的尺寸）；**网格两半贴边**（D44，左右边距相等）；**层级守卫**（D35：只有 Restack 与拖动能改组件的 Z 序，窗口改大小、右键菜单不再与组件层级错乱）；**渲染节奏**（D45：动画按 DWM 合成时钟唤醒、每块玻璃每帧最多画一次，交换链帧延迟等待对象让未就绪的玻璃跳过而不阻塞）；Atrium 自己的图标从程序文件读取（D42，程序坞与托盘面板不再是旧图标）；飞书 / 微信轮询降耗（空闲 CPU 约 14% → 1% 单核）；修复退出时的死锁（飞书线程 `GetWindowTextLength` 等界面线程，V31.6）；Release 生成 `.pdb`。设置中心：调节项改为小卡片、页面不再横向偏移、预览改用照片、日历今天的数字居中（D43）。Codex 审查修了 EXIF 旋转照片与预览帧交接两处。
+
 - v0.9.6：**亮度也显示在状态圆环上**（D30：`GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS` 电源通知，太阳图标，控制中心滑块随之更新）；**统一动效**（D39，`motion.h`：缓出、回弹缓出、指数渐近、闭式弹簧；弹出面板改为真实弹簧，由 DirectComposition 播放）；**设计规范**（`docs/DESIGN.md` 与设置中心“设计规范”页）；Codex 审查后修复：放不下的小组件不再被存档删除、设置管道与核心自身的修改串行（`txn_`）、断线的保存报失败、保存途中的修改不被标为已保存、开始菜单固定快捷方式保留参数、Alt+F4 经面板自己的关闭流程（小组件上不起作用）、通知堆叠的 id 不再无限增长、设计页日落图逐像素分配；绘制：圆头描边、后缓冲 RTV / D2D 目标、开始徽标的笔刷只建一次；每分钟的渲染统计带上进程私有内存。
 
 - v0.9.5：**滚轮翻看通知堆叠**（D24）：弹出的堆叠与通知中心未展开的堆叠上，滚轮带惯性连续翻看（快速一划翻几张，一格一张），弹簧停在某一张，两端回弹不循环，卡片位置与文字逐帧由连续位置算出；实测约 60–64 帧。
@@ -53,7 +55,7 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 | `render/desktop_backdrop.*` | 小组件的背景（D38）：桌面窗口抓取或壁纸合成 |
 | `render/capture.*` | `BackdropSource` 接口；`MonitorCapture`（WGC）、`DuplicationCapture`（DDA，取帧线程 `AcquireNextFrame(0)` + 5 ms 轮询，交出帧不整屏复制）；`SetCaptureExclusion`；`PreferPowerSavingGpu` |
 | `render/gpu.*` | 选扫描输出的 GPU；同一 GPU 被列两次时选列出该屏输出的那一项 |
-| `render/glass_renderer.*`、`shaders/glass.hlsl` | 玻璃着色器；`GlassParams` **336 字节**（含 6 个融合部件 `parts`、`partRadii`、`melt`、`partMix`；`pad0` / `pad1` 占位），与 HLSL cbuffer 一一对应 |
+| `render/glass_renderer.*`、`shaders/glass.hlsl` | 玻璃着色器；交换链帧延迟等待对象（`Ready` / `Waitable` / `Took`，D45）；`GlassParams` **336 字节**（含 6 个融合部件 `parts`、`partRadii`、`melt`、`partMix`；`pad0` / `pad1` 占位），与 HLSL cbuffer 一一对应 |
 | `render/wifi_glyph.*` | iPhone 式三格 Wi-Fi 图形（栏、控制中心、开始菜单共用） |
 | `render/round_stroke.h` | 圆头描边（每个 D2D 工厂只建一次） |
 | `render/ui_font.h/.cpp` | 界面字体（D40）：MiSans 私有字体集合（`Settings\Fonts` 或开发构建的 `Fonts`）、`UiTextFormat`（字重映射）、`UiTextLayout` / `DrawUiText`（等宽数字）、`MeasureUiText` |
@@ -63,7 +65,7 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 | `render/glass_panel.*` | `GlassPanel` / `GlassShape`（含 `parts`）/ `GlassHost`、墨色网格 `InkGrid` |
 | `render/bar_painter.*` | 栏内容绘制与动画；状态圆环 `DrawStatus`（`StatusMotion`：弹簧填充、音量临时显示）；自动隐藏的滑动（`slide_`，`frame_.slideY`） |
 | `ui/surface.*` | 弹窗基础（D2D 内容 + 栏渲染线程画的玻璃）；`ShapeDip`（可带 `parts` 融合）；`SetDesktopLayer`（小组件：不置顶）；`SetCaptureVisible` / `SetPrivate`；`Move` 只在尺寸变化时重绘；`Canvas::Capsule/Arc/Image/ImageRounded/Caret/WifiFan/...` |
-| `ui/desktop_widgets.*` | 桌面小组件：网格（跨行）、层级 `Restack`、拖动、菜单、备忘录 / 提醒事项输入（输入法定位）、照片读取（WIC，工作线程）、系统采样、`widgets.json` |
+| `ui/desktop_widgets.*` | 桌面小组件：网格（跨行，两半贴边 `FromRight`）、层级 `Restack` 与守卫（`zMoving_`、`WM_WINDOWPOSCHANGING`）、拖动、拖角改尺寸（`InGrip` / `DragSize`）、菜单、备忘录 / 提醒事项输入（输入法定位）、照片读取（WIC，工作线程）、系统采样、`widgets.json` |
 | `ui/widget_faces.*` | 每种小组件的绘制（`PaintWidget`），`WidgetKind` / `WidgetSize` / `WidgetContent` |
 | `ui/control_center.*` | 控制中心（Main/Wifi/Bluetooth/Sound/Cast 五页，换页融合动画） |
 | `ui/start_menu.*`、`ui/notifications.*`、`ui/tray_panel.*`、`ui/calendar_panel.*` | 开始菜单、通知、托盘面板、日历 |
@@ -75,7 +77,7 @@ C++ 液态玻璃任务栏（默认与系统任务栏共存，可在设置中隐�
 | `shell/notification_listener.*`、`shell/wechat_source.*`、`shell/feishu_source.*` | 通知来源 |
 | `settings.*` | 设置读写（`ReadTextFile` / `WriteTextFile` 原子写） |
 
-设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10；D43）。`App.xaml` 是设计令牌与控件样式（颜色只有一个强调色，字体为三个 MiSans 文件），`MainWindow.xaml` 是侧边栏与八页，`SliderRow` 是滑块行，`MainWindow.Widgets.cs` 是小组件画廊（示意图用 XAML 图形画），`MainWindow.Hero.cs` / `GlassPreview.cs` 是材质与形状页顶部的实时预览，`MainWindow.Design.cs` 是设计规范页。WinUI 的坑：控件模板里被视觉状态改动的元素不能挂 `OpacityTransition` 等隐式过渡，否则启动即崩溃（`Microsoft.UI.Xaml.dll` 访问冲突，无托管异常）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)；C++ `settings.h` 与 C# `BarSettings.cs` 必须同步（C# 写回时会丢掉它不认识的键，所以小组件布局单独存 `widgets.json`）。
+设置中心：`settings/Atrium.Settings`（C# / WinUI 3 / .NET 10；D43）。`App.xaml` 是设计令牌与控件样式（颜色只有一个强调色，字体为三个 MiSans 文件），`MainWindow.xaml` 是侧边栏与八页，`SliderTile` / `ToggleTile`（`Controls.cs`）是滑块与开关小卡片，`ResponsiveGrid` 排成三列，`MainWindow.Widgets.cs` 是小组件画廊（示意图用 XAML 图形画，照片组件用预览照片），`MainWindow.Hero.cs` / `GlassPreview.cs` 是材质与形状页顶部的实时预览（照片只画一次，每帧只渲染玻璃叠层），`Photo.cs` 是预览照片（`assets/specimen/specimen.jpg`，苹果壁纸、有版权，已 gitignore、只在本机；没有时用当前桌面壁纸），`MainWindow.Design.cs` 是设计规范页。WinUI 的坑：控件模板里被视觉状态改动的元素不能挂 `OpacityTransition` 等隐式过渡，否则启动即崩溃（`Microsoft.UI.Xaml.dll` 访问冲突，无托管异常）。设置键见 [SETTINGS-PROTOCOL](SETTINGS-PROTOCOL.md)；C++ `settings.h` 与 C# `BarSettings.cs` 必须同步（C# 写回时会丢掉它不认识的键，所以小组件布局单独存 `widgets.json`）。
 
 ## 4. 构建、打包、推送
 
@@ -117,7 +119,7 @@ nohup $PS -NoProfile -ExecutionPolicy Bypass -File "$T\\run-tests.ps1" -Core 'D:
 | 脚本 | 项数 | 内容 |
 | --- | --- | --- |
 | `e2e-settings.ps1` | 14 | 设置中心（UIA）；`-Package` 测打包版 |
-| `e2e-widgets.ps1` | 13 | 小组件：读布局、层级、网格、真实鼠标拖动吸附并保存、改尺寸、添加、移除、大号、备忘录与提醒事项真实点击和键盘输入并保存、勾选、关闭 |
+| `e2e-widgets.ps1` | 16 | 小组件：读布局、层级、网格、左右边距相等、真实鼠标拖动吸附并保存、真实鼠标拖角放大与缩小、改尺寸、添加、移除、大号、备忘录与提醒事项真实点击和键盘输入并保存、勾选、关闭 |
 | `e2e-tray.ps1` | 16 | 托盘面板与转发、日历、控制中心（蓝牙页、声音页、投屏页、音量滑块与滚轮、从喇叭拖动） |
 | `e2e-start.ps1` | 13 | 开始菜单 |
 | `e2e-notify.ps1` | 18 | 通知 |
@@ -135,7 +137,17 @@ nohup $PS -NoProfile -ExecutionPolicy Bypass -File "$T\\run-tests.ps1" -Core 'D:
 - 日志：`%LOCALAPPDATA%\Atrium\logs\core.log`（后台线程写入，超过 8 MB 启动时移到 `core.1.log`）。动画流畅度：每段动画结束时记录 `surface: <标题> animated N frames in T ms (fps), longest gap, slowest paint`（内容）与 `render: <标题> glass animated N presents ...`（玻璃）；`atrium-tools\notify-anim.ps1` 播放一轮通知动画供对照。渲染每分钟一行 `render: last minute ... work p50/p95/max ...; private N MB`（进程私有内存；本机 3200×2000 开 7 个小组件约 270 MB，不开小组件约 190 MB，大头是驱动与几张整屏纹理，1080p 屏约为其三分之一），改渲染/捕获后要看它有无退化（DDA 修复后基准：p50 0.6 ms、p95 12 ms；4 个小组件开着时 p95 约 20 ms）。自动隐藏记录 `bar: a maximized or full-screen app is in front ... (类名)` 与 `bar: slide down/up`。
 - 本地辅助脚本（`%LOCALAPPDATA%\atrium-tools\`，不在仓库）：`run-tests.ps1`、`idle.ps1`；截图 `cc-shot.ps1`/`cc2-shot.ps1`（控制中心各页）、`cc-anim.ps1`（换页连拍 12 帧）、`widgets-shot.ps1`（小组件，`-Layout` 指定 widgets.json，如 `widgets-all.json` 全部种类）、`ring-shot.ps1`（状态圆环各状态）、`slide-shot.ps1`（自动隐藏连拍）、`dev-update.sh`、`widgets-desk.ps1`（真实桌面 Win+D 层级）、`capture-shot.ps1`（非调试模式 GDI 截屏，验证截图兼容与背景实时）、`v07-shot.ps1` 等；性能 `blink.ps1` + `perf-compare.sh`；对比 `mot-compare.sh`；`switch-check.ps1`（切换输出设备并切回）；设置样例 `demo-v07.json` 等。截图拷到 `devshots/tmp/`（已被 .gitignore 忽略）再用 `remote_read_file` 看。
 
-## 6. 调用 Codex（agent-control-bridge）
+## 6. 调用 Codex
+
+v0.9.8 起直接用 Codex 应用自带的命令行（只读沙箱）。审查对话在 Codex 应用里开着时 `resume` 会报 “already has an active writer”，用 `fork` 从它分出一个新会话：
+
+```bash
+C='/mnt/c/Program Files/WindowsApps/OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0/app/resources/codex.exe'   # 版本号随应用更新而变：Get-AppxPackage *Codex*
+nohup "$C" exec -s read-only fork 01a19b98-7b11-7d02-be7f-ea3e3fba9527 - < prompt.txt > out.txt 2>&1 &
+# 最后一个 “codex” 行之后是结论
+```
+
+旧方式（agent-control-bridge）：
 
 ```bash
 cd /mnt/c/Users/Lenovo/AppData/Local/atrium-tools/acb
@@ -161,7 +173,7 @@ atrium-desktop 的对话：审查用“确认代码审查协作” `01a19b98-7b1
 - 双显卡：DXGI 只在进程所在 GPU 下列出屏幕；Atrium 首次运行写入 `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`（本机 dist 与开发版 exe 都已写入）。
 - 弹窗窗口 = 内容 + 阴影边距；`Surface::Rect()` 是内容区；控制中心窗口固定为最高页高度，命中坐标要减 `cardTop_`。
 - 跨进程 `SendMessage`（`--command`）里不能发 COM 调用。
-- 渲染线程里不要调用会给 UI 线程发消息的函数（`GetWindowTextW` 取弹窗标题等，用 `InternalGetWindowText`）：UI 线程可能正在 `WaitGlass` 等这一帧的玻璃。动画路径上少写日志。
+- 渲染线程与任何工作线程（飞书、微信、托盘读取）里都不要调用会给 UI 线程同步发消息的函数（`GetWindowText` / `GetWindowTextLength` 对本进程窗口会发 `WM_GETTEXT`，用 `InternalGetWindowText`）：UI 线程可能正在 `WaitGlass` 等这一帧的玻璃，或在退出时 join 这条线程——v0.9.8 前飞书线程因此会在退出时死锁（V31.6）。卡死时用 `%LOCALAPPDATA%\atrium-tools\stacks\stacks.exe <pid> <pdb 目录>` 打印所有线程的调用栈（dbgeng 非侵入附加，Release 带 `.pdb`）。动画路径上少写日志。
 - 在 `Surface` 自己的消息处理中不能销毁该 Surface（小组件移除用 `PostMessage` 延后）。
 - 本机：Windows 11 家庭中文版 26H2（26300），3200×2000 @200%，系统任务栏自动隐藏，Intel Arc（输出）+ RTX 4060；两台播放设备（Realtek、NICEHCK，默认 NICEHCK）；附近有一台无线显示器；单屏。
 - 字体文件：`assets/fonts/MiSans-{Medium,Demibold,Semibold}.otf`，经 CMake 复制到开发构建的 `Fonts`，经设置中心项目复制到 `Settings\Fonts`；许可要求在“关于”页注明、不得修改字体（不能裁剪子集）。

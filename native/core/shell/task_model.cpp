@@ -1148,9 +1148,9 @@ struct TaskModel::Impl {
         bool ok = false;
         LARGE_INTEGER t0, t1, f;
         QueryPerformanceCounter(&t0);
-        for (const auto& s : sources)
-            if ((ok = ShellImage(s, job.size, img)))
-                break;
+        ok = LoadAtriumIcon(job.exePath, job.size, img);
+        for (size_t i = 0; !ok && i < sources.size(); ++i)
+            ok = ShellImage(sources[i], job.size, img);
         for (size_t i = 0; !ok && i < job.hwnds.size(); ++i) {
             IconImage raw;
             if (WindowIcon(job.hwnds[i], job.size, raw)) {
@@ -1389,6 +1389,23 @@ struct TaskModel::Impl {
 };
 
 TaskModel::Impl* TaskModel::Impl::self = nullptr;
+
+bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out)
+{
+    const size_t slash = exePath.find_last_of(L"\\/");
+    const wchar_t* name = exePath.c_str() + (slash == std::wstring::npos ? 0 : slash + 1);
+    if (_wcsicmp(name, L"Atrium.Settings.exe") != 0 && _wcsicmp(name, L"Atrium.Core.exe") != 0)
+        return false;
+    HICON icon = nullptr;
+    if (SHDefExtractIconW(exePath.c_str(), 0, 0, &icon, nullptr, MAKELONG(sizePx, 0)) != S_OK || !icon)
+        return false;
+    IconImage raw;
+    bool ok = IconToImage(icon, raw);
+    DestroyIcon(icon);
+    if (ok)
+        out = FitToSquare(raw, sizePx);
+    return ok;
+}
 
 bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out, bool thumbnail)
 {

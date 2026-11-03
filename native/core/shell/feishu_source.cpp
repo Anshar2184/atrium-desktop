@@ -17,6 +17,8 @@ namespace atrium {
 namespace {
 
 constexpr DWORD kPollMs = 400;
+constexpr ULONGLONG kProcessesMs = 10000; // Feishu's processes are listed again after this
+constexpr ULONGLONG kUnknownMs = 3000;    // or sooner when a popup-like window is not theirs
 
 std::wstring Trim(std::wstring s)
 {
@@ -53,19 +55,22 @@ std::map<DWORD, std::wstring> FeishuProcesses()
 
 // Feishu's popups on screen: visible, untitled Chromium windows of at most
 // 520 x 260 DIP (its main window and other dialogs are larger or titled) in
-// the corner of the work area.
-std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& procs)
+// the corner of the work area. `unknown`: such a window of a process not in
+// `procs` (Feishu may have started since they were listed).
+std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& procs, bool& unknown)
 {
     struct Ctx {
         const std::map<DWORD, std::wstring>* procs;
         std::vector<std::pair<HWND, DWORD>> out;
+        bool unknown = false;
     } ctx{&procs, {}};
     EnumWindows(
         [](HWND h, LPARAM l) -> BOOL {
             auto* c = reinterpret_cast<Ctx*>(l);
-            DWORD pid = 0;
-            GetWindowThreadProcessId(h, &pid);
-            if (!c->procs->count(pid) || !IsWindowVisible(h) || IsIconic(h) || GetWindowTextLengthW(h) > 0)
+            // InternalGetWindowText sends no message: GetWindowText would wait for the window's
+            // thread, Atrium's own UI thread too (a deadlock while it waits for this one to end).
+            wchar_t title[2] = {};
+            if (!IsWindowVisible(h) || IsIconic(h) || InternalGetWindowText(h, title, 2) > 0)
                 return TRUE;
             wchar_t cls[64] = {};
             GetClassNameW(h, cls, 64);
@@ -81,11 +86,18 @@ std::vector<std::pair<HWND, DWORD>> Popups(const std::map<DWORD, std::wstring>& 
             MONITORINFO mi{sizeof(mi)};
             GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
             bool corner = float(mi.rcWork.right - r.right) / s <= 48 && float(mi.rcWork.bottom - r.bottom) / s <= 48;
-            if (wcscmp(cls, L"Chrome_WidgetWin_1") == 0 && w >= 160 && w <= 520 && hh >= 40 && hh <= 260 && corner)
+            if (wcscmp(cls, L"Chrome_WidgetWin_1") != 0 || w < 160 || w > 520 || hh < 40 || hh > 260 || !corner)
+                return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(h, &pid);
+            if (c->procs->count(pid))
                 c->out.push_back({h, pid});
+            else
+                c->unknown = true;
             return TRUE;
         },
         reinterpret_cast<LPARAM>(&ctx));
+    unknown = ctx.unknown;
     return ctx.out;
 }
 
@@ -142,15 +154,25 @@ void FeishuSource::Run()
     // Popups already handled, by window and text (a popup may be reused for the next message).
     std::map<HWND, std::wstring> seen;
     bool baseline = false, running = false;
+    // Listing every process is the costly part of a pass: done every few seconds, not every pass.
+    std::map<DWORD, std::wstring> procs;
+    ULONGLONG listed = 0;
     while (!stop_ && uia && text) {
         try {
-            auto procs = FeishuProcesses();
-            if (procs.empty() != !running) {
-                running = !procs.empty();
-                Log(L"feishu: %s", running ? L"watching Feishu's message popups" : L"Feishu is not running");
+            ULONGLONG tick = GetTickCount64();
+            bool unknown = false;
+            auto popups = Popups(procs, unknown);
+            if (!listed || tick - listed >= kProcessesMs || (unknown && tick - listed >= kUnknownMs)) {
+                procs = FeishuProcesses();
+                listed = tick;
+                popups = Popups(procs, unknown);
+                if (procs.empty() != !running) {
+                    running = !procs.empty();
+                    Log(L"feishu: %s", running ? L"watching Feishu's message popups" : L"Feishu is not running");
+                }
             }
             std::map<HWND, std::wstring> now;
-            for (const auto& [h, pid] : Popups(procs)) {
+            for (const auto& [h, pid] : popups) {
                 std::vector<std::wstring> t = Texts(uia.get(), text.get(), h);
                 if (t.empty())
                     continue; // still loading: read again next time

@@ -15,32 +15,32 @@ public sealed partial class MainWindow : Window
 {
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
 
-    // One slider row: its group, UI range, and the mapping between the stored
+    // One slider tile: its group, UI range, and the mapping between the stored
     // value and the slider value (percentages are stored as 0..1).
     private sealed record SliderDef(string Group, string Title, string Description, double Min, double Max, double Step, string Unit,
         Func<double, string> Hint, Func<BarSettings, double> Get, Action<BarSettings, double> Set, bool Material);
 
     private SliderDef[] Sliders => new SliderDef[]
     {
-        new("material", "透明度", "玻璃混入多少染色。100% 如清水般通透，0% 像一块纯色亚克力。", 0, 100, 1, "%",
+        new("clarity", "透明度", "玻璃混入多少染色。100% 如清水般通透，0% 像一块纯色亚克力。", 0, 100, 1, "%",
             v => v >= 90 ? "几乎无色" : v >= 70 ? "清透" : v >= 40 ? "淡淡的染色" : v >= 15 ? "浓郁的染色" : "接近纯色",
             s => s.Transparency * 100, (s, v) => s.Transparency = v / 100, true),
-        new("material", "模糊", "背景被磨砂的程度。0% 依然清晰可辨，100% 只剩色块。", 0, 100, 1, "%",
+        new("clarity", "模糊", "背景被磨砂的程度。0% 依然清晰可辨，100% 只剩色块。", 0, 100, 1, "%",
             v => v < 1 ? "完全清晰" : v < 25 ? "微微朦胧" : v < 60 ? "柔和" : v < 85 ? "磨砂" : "深度磨砂",
             s => s.Blur * 100, (s, v) => s.Blur = v / 100, true),
-        new("material", "折射强度", "边缘把背景“弯折”的距离，像水滴边缘放大背后的景物。0 就是一块平板玻璃。", 0, 60, 1, "px",
+        new("edge", "折射强度", "边缘把背景“弯折”的距离，像水滴边缘放大背后的景物。0 就是一块平板玻璃。", 0, 60, 1, "px",
             v => v < 1 ? "平板玻璃" : v <= 12 ? "轻微弯折" : v <= 36 ? "水滴般的边缘" : "夸张的凸透镜",
             s => s.Refraction, (s, v) => s.Refraction = v, true),
-        new("material", "折射边缘宽度", "折射发生的范围：从外沿向内多少像素。窄像薄片，宽像厚实的凸透镜。", 1, 80, 1, "px",
+        new("edge", "折射边缘宽度", "折射发生的范围：从外沿向内多少像素。窄像薄片，宽像厚实的凸透镜。", 1, 80, 1, "px",
             v => v <= 8 ? "薄如刀片" : v <= 28 ? "圆润" : "宽厚的透镜边",
             s => s.Edge, (s, v) => s.Edge = v, true),
-        new("material", "色散", "边缘处红、绿、蓝分离的程度，像棱镜折出的彩虹边。", 0, 50, 1, "%",
+        new("edge", "色散", "边缘处红、绿、蓝分离的程度，像棱镜折出的彩虹边。", 0, 50, 1, "%",
             v => v < 1 ? "纯净" : v <= 10 ? "几乎看不出" : v <= 30 ? "细腻的彩虹边" : "明显的棱镜彩边",
             s => s.Dispersion * 100, (s, v) => s.Dispersion = v / 100, true),
-        new("material", "高光", "玻璃边沿被光照亮的那条亮线。", 0, 100, 1, "%",
+        new("light", "高光", "玻璃边沿被光照亮的那条亮线。", 0, 100, 1, "%",
             v => v < 1 ? "没有反光" : v < 35 ? "含蓄" : v < 75 ? "清晰的亮边" : "强烈的镜面光",
             s => s.Highlight * 100, (s, v) => s.Highlight = v / 100, true),
-        new("material", "阴影", "玻璃下方投影的浓度。越浓，玻璃栏看起来离桌面越“悬浮”。", 0, 100, 1, "%",
+        new("light", "阴影", "玻璃下方投影的浓度。越浓，玻璃栏看起来离桌面越“悬浮”。", 0, 100, 1, "%",
             v => v < 1 ? "没有投影" : v < 25 ? "若有若无" : v < 55 ? "轻盈悬浮" : "厚重的投影",
             s => s.Shadow * 100, (s, v) => s.Shadow = v / 100, true),
 
@@ -56,10 +56,10 @@ public sealed partial class MainWindow : Window
         new("width", "最大宽度", "开启“自动宽度”时最宽不超过此值；不会超过屏幕工作区。", 300, 2400, 10, "px",
             v => v >= 1920 ? "宽于 1080p 屏幕" : $"约 1080p 宽度的 {Math.Round(v / 19.2)}%",
             s => s.Width, (s, v) => s.Width = v, false),
-        new("motion", "底部间距", "与工作区底边的距离。", 0, 200, 1, "px",
+        new("place", "底部间距", "与工作区底边的距离。", 0, 200, 1, "px",
             v => v < 1 ? "贴着底边" : v <= 16 ? "贴近底边" : v <= 60 ? "悬浮" : "高高悬浮",
             s => s.Margin, (s, v) => s.Margin = v, false),
-        new("motion", "悬停放大", "指针下的图标放大到这个倍数，两侧依次变大，玻璃栏随之伸展。100% 即关闭。", 100, 200, 5, "%",
+        new("place", "悬停放大", "指针下的图标放大到这个倍数，两侧依次变大，玻璃栏随之伸展。100% 即关闭。", 100, 200, 5, "%",
             v => v < 101 ? "关闭" : v < 140 ? "轻轻放大" : v < 180 ? "像 macOS 程序坞" : "夸张",
             s => s.Magnify * 100, (s, v) => s.Magnify = v / 100, false),
 
@@ -81,7 +81,7 @@ public sealed partial class MainWindow : Window
     };
 
     private readonly CoreClient _client = new();
-    private readonly List<(SliderDef Def, SliderRow Row)> _rows = new();
+    private readonly List<(SliderDef Def, SliderTile Tile)> _rows = new();
     private readonly List<(uint Rgb, Button Button, FrameworkElement Ring)> _tintButtons = new();
     private BarSettings _saved = new();
     private BarSettings _current = new();
@@ -162,34 +162,30 @@ public sealed partial class MainWindow : Window
 
     // ---- Rows ----
 
-    // Every slider goes into its group's card, rows divided by hairlines.
+    // Every slider is a tile in its group's grid: after the group's other tiles, or before them
+    // where the sliders lead (the tint, the notification switch).
     private void BuildRows()
     {
-        var groups = new Dictionary<string, Panel>
+        var groups = new Dictionary<string, (Panel Panel, bool First)>
         {
-            ["material"] = MaterialRows, ["size"] = ShapeSizeRows, ["width"] = ShapeWidthRows, ["motion"] = ShapeMotionRows, ["notify"] = NotifyRows,
+            ["clarity"] = (ClarityTiles, true), ["edge"] = (EdgeTiles, false), ["light"] = (LightTiles, false),
+            ["size"] = (SizeTiles, false), ["width"] = (WidthTiles, false), ["place"] = (PlaceTiles, false), ["notify"] = (NotifyTiles, true),
         };
+        var placed = new Dictionary<string, int>();
         foreach (var d in Sliders)
         {
-            var panel = groups[d.Group];
-            var row = new SliderRow();
-            row.Configure(d.Title, d.Description, d.Min, d.Max, d.Step, d.Unit, d.Hint);
-            row.UserValueChanged += v => OnSliderChanged(d, v);
-            row.Engaged += on => OnEngage(d.Title, on);
-            _rows.Add((d, row));
-            var line = new Microsoft.UI.Xaml.Shapes.Rectangle { Style = (Style)Application.Current.Resources["SeparatorStyle"] };
-            if (d.Group == "notify")
-            {
-                // Above the group's toggle.
-                panel.Children.Insert(0, line);
-                panel.Children.Insert(0, row);
-                continue;
-            }
-            if (panel.Children.Count > 0) panel.Children.Add(line);
-            panel.Children.Add(row);
+            var (panel, first) = groups[d.Group];
+            var tile = new SliderTile();
+            tile.Configure(d.Title, d.Description, d.Min, d.Max, d.Step, d.Unit, d.Hint);
+            tile.UserValueChanged += v => OnSliderChanged(d, v);
+            tile.Engaged += on => OnEngage(d.Title, on);
+            _rows.Add((d, tile));
+            int at = first ? placed.GetValueOrDefault(d.Group) : panel.Children.Count;
+            panel.Children.Insert(at, tile);
+            placed[d.Group] = at + 1;
         }
-        AutoWidthCard.GotFocus += (_, _) => OnEngage("最大宽度", true);
-        AutoWidthCard.LostFocus += (_, _) => OnEngage("最大宽度", false);
+        AutoWidthSwitch.GotFocus += (_, _) => OnEngage("最大宽度", true);
+        AutoWidthSwitch.LostFocus += (_, _) => OnEngage("最大宽度", false);
     }
 
     private static readonly (string Name, uint Rgb)[] TintChoices =
@@ -201,16 +197,16 @@ public sealed partial class MainWindow : Window
     {
         foreach (var (name, rgb) in TintChoices)
         {
-            var ring = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 30, Height = 30, Stroke = Tokens.Brush("AccentBrush"), StrokeThickness = 2, Opacity = 0 };
+            var ring = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 28, Height = 28, Stroke = Tokens.Brush("AccentBrush"), StrokeThickness = 2, Opacity = 0 };
             ring.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
             var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
             {
-                Width = 24, Height = 24, Fill = new SolidColorBrush(TintColor(rgb)), Stroke = Tokens.Brush("CardStrokeBrush"), StrokeThickness = 1,
+                Width = 22, Height = 22, Fill = new SolidColorBrush(TintColor(rgb)), Stroke = Tokens.Brush("CardStrokeBrush"), StrokeThickness = 1,
             };
             var button = new Button
             {
-                Content = new Grid { Width = 30, Height = 30, Children = { dot, ring } },
-                Style = (Style)Application.Current.Resources["IconButtonStyle"], Width = 36, Height = 36, CornerRadius = new CornerRadius(18),
+                Content = new Grid { Width = 28, Height = 28, Children = { dot, ring } },
+                Style = (Style)Application.Current.Resources["IconButtonStyle"], Width = 32, Height = 32, CornerRadius = new CornerRadius(16),
             };
             AutomationProperties.SetName(button, "染色 " + name);
             ToolTipService.SetToolTip(button, name);

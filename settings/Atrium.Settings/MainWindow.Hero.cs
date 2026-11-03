@@ -14,9 +14,10 @@ using Windows.UI.ViewManagement;
 
 namespace Atrium.Settings;
 
-// The hero specimen: the glass bar rendered on the CPU (GlassPreview.cs) over an artwork, with
-// mock icons and a clock laid out by the same rules as the real bar, a loupe on the right end of
-// the bar, and dimension marks for the parameter that is being edited.
+// The hero specimen: the glass bar rendered on the CPU (GlassPreview.cs) over the specimen photo
+// (Photo.cs), with mock icons and a clock laid out by the same rules as the real bar, a loupe on
+// the right end of the bar, and dimension marks for the parameter that is being edited. The photo
+// is uploaded once per size; a frame repaints only the glass, as a transparent layer over it.
 public sealed partial class MainWindow
 {
     private const double LoupeW = 176, LoupeH = 112, LoupeZoom = 3;
@@ -28,7 +29,7 @@ public sealed partial class MainWindow
         bool Clock, double ClockX, double ClockW, double TimePx, double DatePx, double SepX,
         double LoupeX0, double LoupeY0);
 
-    private sealed record RenderJob(BarSettings S, HeroLayout L, double W, double H, double Rs, Specimen Kind);
+    private sealed record RenderJob(BarSettings S, HeroLayout L, double W, double H, double Rs);
 
     private static readonly (string Glyph, uint C1, uint C2, bool Running)[] MockApps =
     {
@@ -37,11 +38,12 @@ public sealed partial class MainWindow
         ("", 0xA9B6C9, 0x56657C, true),
     };
 
-    private Specimen _specimen = Specimen.Sunset;
     private double _heroW, _heroH;
     private readonly ImageBrush _heroBrush = new() { Stretch = Stretch.Fill };
     private readonly ImageBrush _loupeBrush = new() { Stretch = Stretch.Fill };
-    private WriteableBitmap? _heroBmp, _loupeBmp;
+    private readonly Image _glass = new() { Stretch = Stretch.Fill, IsHitTestVisible = false };
+    private WriteableBitmap? _photoBmp, _glassBmp, _loupeBmp;
+    private Backdrop? _photoPending; // a new backdrop for the hero's background (Interlocked)
     private volatile FrameBuffers? _heroFrames, _loupeFrames;
     private LatestWorker<RenderJob>? _renderWorker;
     private LatestWorker<BarSettings>? _swatchWorker;
@@ -70,6 +72,7 @@ public sealed partial class MainWindow
         _renderWorker = new LatestWorker<RenderJob>(RenderFrame);
         _swatchWorker = new LatestWorker<BarSettings>(job => RenderSwatch(job, SwatchCustom));
 
+        HeroCanvas.Children.Add(_glass);
         _plate = new Border { Background = new SolidColorBrush(Color.FromArgb(46, 255, 255, 255)), BorderBrush = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255)), BorderThickness = new Thickness(1) };
         HeroCanvas.Children.Add(_plate);
         for (int i = 0; i < MockApps.Length; i++)
@@ -121,19 +124,12 @@ public sealed partial class MainWindow
     {
         _heroW = e.NewSize.Width;
         _heroH = e.NewSize.Height;
+        HeroCanvas.Clip = new RectangleGeometry { Rect = new Rect(0, 0, _heroW, _heroH) };
         if (!_heroSized && HeroFrame.XamlRoot != null)
         {
             _heroSized = true;
             HeroFrame.XamlRoot.Changed += (_, _) => UpdateHero();
         }
-        UpdateHero();
-    }
-
-    private void OnSpecimenClick(object sender, RoutedEventArgs e)
-    {
-        var chosen = (ToggleButton)sender;
-        _specimen = (Specimen)int.Parse((string)chosen.Tag);
-        foreach (var b in new[] { SpecSunset, SpecNight, SpecStripes }) b.IsChecked = b == chosen;
         UpdateHero();
     }
 
@@ -188,8 +184,7 @@ public sealed partial class MainWindow
         if (L == null) return;
         PositionMock(L);
         DrawAnnotations(L);
-        ScaleCaption.Text = $"预览 {Math.Round(L.S * 100)}%";
-        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale, _specimen));
+        _renderWorker.Post(new RenderJob(_current.Clone(), L, _heroW, _heroH, RasterScale));
     }
 
     private Brush InkBrush()
@@ -335,33 +330,35 @@ public sealed partial class MainWindow
         if (pw < 8 || ph < 8) return;
         var L = j.L;
 
-        // Main view.
-        string key = $"{j.Kind}/{pw}x{ph}/{j.W:F1}x{j.H:F1}";
+        // Main view: the photo once per size, then the glass alone, over it.
+        string key = $"{pw}x{ph}/{j.W:F1}x{j.H:F1}";
         if (_mainBg == null || key != _mainKey)
         {
-            _mainBg = Backdrop.Create(j.Kind, pw, ph, j.W, j.H, 0, 0, j.Rs);
+            _mainBg = Backdrop.Create(pw, ph, j.W, j.H, 0, 0, j.Rs);
             _mainKey = key;
+            Interlocked.Exchange(ref _photoPending, _mainBg);
         }
-        var frames = _heroFrames;
-        if (frames == null || frames.Width != pw || frames.Height != ph)
-            _heroFrames = frames = new FrameBuffers(pw, ph);
-        Buffer.BlockCopy(_mainBg.Base, 0, frames.Back, 0, _mainBg.Base.Length);
         var spec = GlassSpec.For(j.S, L.S * j.Rs);
         int inset = (int)spec.Inset;
         int bx = (int)Math.Round(L.BarX * j.Rs), by = (int)Math.Round(L.BarY * j.Rs);
         int bw = (int)Math.Round(L.BarW * j.Rs), bh = (int)Math.Round(L.BarH * j.Rs);
-        GlassRenderer.Draw(_mainBg, frames.Back, bx - inset, by - inset, bw + 2 * inset, bh + 2 * inset, spec);
-        float luma = GlassRenderer.MeanLuma(frames.Back, pw, Math.Clamp(bx + bh / 2, 0, pw - 1), Math.Clamp(by + bh / 4, 0, ph - 1),
-            Math.Clamp(bx + bw - bh / 2, 1, pw), Math.Clamp(by + bh * 3 / 4, 1, ph));
-        frames.Publish(luma);
+        int gw = bw + 2 * inset, gh = bh + 2 * inset;
+        var frames = _heroFrames;
+        if (frames == null || frames.Width != gw || frames.Height != gh)
+            _heroFrames = frames = new FrameBuffers(gw, gh);
+        Array.Clear(frames.Back);
+        GlassRenderer.DrawOverlay(_mainBg, frames.Back, bx - inset, by - inset, gw, gh, spec);
+        float luma = GlassRenderer.MeanLuma(frames.Back, gw, inset + Math.Clamp(bh / 2, 0, bw - 1), inset + bh / 4,
+            inset + Math.Clamp(bw - bh / 2, 1, bw), inset + Math.Max(bh * 3 / 4, bh / 4 + 1));
+        frames.Publish(luma, (bx - inset) / j.Rs, (by - inset) / j.Rs, j.Rs);
 
         // Loupe: the right end of the bar repainted at 3x, so the rim is real detail, not enlarged pixels.
         int lw = (int)Math.Round(LoupeW * j.Rs), lh = (int)Math.Round(LoupeH * j.Rs);
         double ppd = LoupeZoom * j.Rs;
-        string lkey = $"{j.Kind}/{lw}x{lh}/{j.W:F1}x{j.H:F1}/{L.LoupeX0:F2},{L.LoupeY0:F2}";
+        string lkey = $"{lw}x{lh}/{j.W:F1}x{j.H:F1}/{L.LoupeX0:F2},{L.LoupeY0:F2}";
         if (_loupeBg == null || lkey != _loupeKey)
         {
-            _loupeBg = Backdrop.Create(j.Kind, lw, lh, j.W, j.H, L.LoupeX0, L.LoupeY0, ppd);
+            _loupeBg = Backdrop.Create(lw, lh, j.W, j.H, L.LoupeX0, L.LoupeY0, ppd);
             _loupeKey = lkey;
         }
         var lframes = _loupeFrames;
@@ -395,14 +392,35 @@ public sealed partial class MainWindow
     private void ApplyFrames()
     {
         Interlocked.Exchange(ref _uiPending, 0);
-        if (_heroFrames is { } hf) Upload(hf, ref _heroBmp, _heroBrush);
-        if (_loupeFrames is { } lf) Upload(lf, ref _loupeBmp, _loupeBrush);
-        if (_heroFrames is { } f && Math.Abs(f.Luma - _luma) > 0.001f)
+        if (Interlocked.Exchange(ref _photoPending, null) is { } bg)
         {
-            bool before = _luma > 0.6f;
-            _luma = f.Luma;
-            if (_current.TextColor == "auto" && before != _luma > 0.6f) UpdateHero();
+            _photoBmp = new WriteableBitmap(bg.Width, bg.Height);
+            using (var stream = _photoBmp.PixelBuffer.AsStream()) stream.Write(bg.Base, 0, bg.Base.Length);
+            _photoBmp.Invalidate();
+            _heroBrush.ImageSource = _photoBmp;
         }
+        if (_heroFrames is { } hf)
+        {
+            if (_glassBmp == null || _glassBmp.PixelWidth != hf.Width || _glassBmp.PixelHeight != hf.Height)
+            {
+                _glassBmp = new WriteableBitmap(hf.Width, hf.Height);
+                _glass.Source = _glassBmp;
+            }
+            FrameBuffers.Placement at;
+            using (var stream = _glassBmp.PixelBuffer.AsStream()) at = hf.WriteFront(stream);
+            _glassBmp.Invalidate();
+            _glass.Width = hf.Width / at.Scale;
+            _glass.Height = hf.Height / at.Scale;
+            Canvas.SetLeft(_glass, at.X);
+            Canvas.SetTop(_glass, at.Y);
+            if (Math.Abs(at.Luma - _luma) > 0.001f)
+            {
+                bool before = _luma > 0.6f;
+                _luma = at.Luma;
+                if (_current.TextColor == "auto" && before != _luma > 0.6f) UpdateHero();
+            }
+        }
+        if (_loupeFrames is { } lf) Upload(lf, ref _loupeBmp, _loupeBrush);
     }
 
     private static void Upload(FrameBuffers f, ref WriteableBitmap? bmp, ImageBrush brush)
@@ -431,7 +449,7 @@ public sealed partial class MainWindow
         int w = (int)Math.Round(SwatchW * rs), h = (int)Math.Round(SwatchH * rs);
         Backdrop bg;
         lock (s_swatchLock)
-            bg = s_swatchBg ??= Backdrop.Create(Specimen.Sunset, w, h, SwatchW, SwatchH, 0, 0, rs);
+            bg = s_swatchBg ??= Backdrop.Create(w, h, SwatchW, SwatchH, 0, 0, rs);
         // A 60 DIP capsule at 60 %, centred.
         var s = material.Clone();
         s.Height = 60;

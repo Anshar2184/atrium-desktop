@@ -16,6 +16,7 @@
                     <SolidColorBrush x:Key="PageBrush" Color="#FFF5F5F7" />
                     <SolidColorBrush x:Key="CardBrush" Color="#FFFFFFFF" />
                     <SolidColorBrush x:Key="CardStrokeBrush" Color="#0F000000" />
+                    <SolidColorBrush x:Key="TileActiveBrush" Color="#FFF3F7FF" />
                     <SolidColorBrush x:Key="SeparatorBrush" Color="#FFE8E8ED" />
                     <SolidColorBrush x:Key="InkBrush" Color="#FF1D1D1F" />
                     <SolidColorBrush x:Key="InkSecondaryBrush" Color="#FF6E6E73" />
@@ -44,6 +45,7 @@
                     <SolidColorBrush x:Key="PageBrush" Color="#FF1C1C1E" />
                     <SolidColorBrush x:Key="CardBrush" Color="#FF2C2C2E" />
                     <SolidColorBrush x:Key="CardStrokeBrush" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="TileActiveBrush" Color="#FF32363E" />
                     <SolidColorBrush x:Key="SeparatorBrush" Color="#FF3A3A3C" />
                     <SolidColorBrush x:Key="InkBrush" Color="#FFF5F5F7" />
                     <SolidColorBrush x:Key="InkSecondaryBrush" Color="#FFA1A1A6" />
@@ -122,12 +124,6 @@
                 <Setter Property="Foreground" Value="{ThemeResource InkSecondaryBrush}" />
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
-            <Style x:Key="SectionStyle" TargetType="TextBlock">
-                <Setter Property="FontFamily" Value="{StaticResource EmphasisFont}" />
-                <Setter Property="FontSize" Value="13" />
-                <Setter Property="Foreground" Value="{ThemeResource InkSecondaryBrush}" />
-                <Setter Property="Margin" Value="18,0,0,8" />
-            </Style>
             <Style x:Key="RowTitleStyle" TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
                 <Setter Property="FontSize" Value="15" />
@@ -161,22 +157,36 @@
             </Style>
 
             <!-- ============ Surfaces ============ -->
+            <!-- A page: one column, at most 880 wide, never scrolled sideways. -->
+            <Style x:Key="PageStyle" TargetType="ScrollViewer">
+                <Setter Property="HorizontalScrollMode" Value="Disabled" />
+                <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+                <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+            </Style>
+            <Style x:Key="PageStackStyle" TargetType="StackPanel">
+                <Setter Property="MaxWidth" Value="880" />
+                <Setter Property="Margin" Value="40,20,40,120" />
+                <Setter Property="Spacing" Value="28" />
+            </Style>
+            <!-- A tile: one setting on a small card; tiles sit three to a row (ResponsiveGrid). -->
+            <Style x:Key="TileStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="16" />
+                <Setter Property="Padding" Value="18,15,18,16" />
+            </Style>
+            <Style x:Key="SectionStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{StaticResource EmphasisFont}" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{ThemeResource InkSecondaryBrush}" />
+                <Setter Property="Margin" Value="4,0,0,10" />
+            </Style>
             <Style x:Key="GroupStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource CardBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="CornerRadius" Value="16" />
-            </Style>
-            <!-- A row of a group: 18 DIP from the group's edge, at least 56 high. -->
-            <Style x:Key="RowStyle" TargetType="Grid">
-                <Setter Property="Padding" Value="18,13,18,13" />
-                <Setter Property="MinHeight" Value="56" />
-                <Setter Property="ColumnSpacing" Value="16" />
-            </Style>
-            <Style x:Key="SeparatorStyle" TargetType="Rectangle">
-                <Setter Property="Height" Value="1" />
-                <Setter Property="Margin" Value="18,0,0,0" />
-                <Setter Property="Fill" Value="{ThemeResource SeparatorBrush}" />
             </Style>
 
             <!-- ============ Buttons ============ -->
@@ -396,6 +406,7 @@
                 <Setter Property="Foreground" Value="{ThemeResource InkBrush}" />
                 <Setter Property="FontSize" Value="15" />
                 <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="CornerRadius" Value="10" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListViewItem">
@@ -482,57 +493,6 @@
                                         </VisualState>
                                         <VisualState x:Name="Unchecked" />
                                         <VisualState x:Name="Indeterminate" />
-                                    </VisualStateGroup>
-                                </VisualStateManager.VisualStateGroups>
-                            </Grid>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <!-- Segmented control that floats on the specimen (always over art, so fixed colours). -->
-            <Style x:Key="SegToggleStyle" TargetType="ToggleButton">
-                <Setter Property="Foreground" Value="#D9FFFFFF" />
-                <Setter Property="FontFamily" Value="{StaticResource EmphasisFont}" />
-                <Setter Property="FontSize" Value="12" />
-                <Setter Property="Padding" Value="14,5,14,6" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="ToggleButton">
-                            <Grid x:Name="Root" Background="Transparent" CornerRadius="9" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter x:Name="Content" Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
-                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                <VisualStateManager.VisualStateGroups>
-                                    <VisualStateGroup x:Name="CommonStates">
-                                        <VisualState x:Name="Normal" />
-                                        <VisualState x:Name="PointerOver">
-                                            <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="#1FFFFFFF" />
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="Pressed">
-                                            <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="#33FFFFFF" />
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="Checked">
-                                            <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="#F2FFFFFF" />
-                                                <Setter Target="Content.Foreground" Value="#FF16181D" />
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="CheckedPointerOver">
-                                            <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="#FFFFFFFF" />
-                                                <Setter Target="Content.Foreground" Value="#FF16181D" />
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="CheckedPressed">
-                                            <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="#E6FFFFFF" />
-                                                <Setter Target="Content.Foreground" Value="#FF16181D" />
-                                            </VisualState.Setters>
-                                        </VisualState>
                                     </VisualStateGroup>
                                 </VisualStateManager.VisualStateGroups>
                             </Grid>

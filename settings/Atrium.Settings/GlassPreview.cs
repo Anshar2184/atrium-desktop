@@ -11,11 +11,9 @@ namespace Atrium.Settings;
 //   - fwidth(d) is taken from the analytic gradient (|n.x| + |n.y|) instead of quad derivatives;
 //   - the blur mip level is offset by log2(scale) so a bar drawn at 62 % blurs 62 % as far
 //     (on screen the lod is relative to device pixels, here to the scaled-down specimen);
-//   - the "screen" is a procedural specimen backdrop with a CPU-built mip chain.
+//   - the "screen" is the specimen photo (Photo.cs) with a CPU-built mip chain.
 
-internal enum Specimen { Sunset, Night, Stripes }
-
-// The artwork behind the glass, level 0 plus a box-filtered mip chain (what GenerateMips gives the shader).
+// The photo behind the glass, level 0 plus a box-filtered mip chain (what GenerateMips gives the shader).
 internal sealed class Backdrop
 {
     public readonly int Width, Height;
@@ -28,12 +26,12 @@ internal sealed class Backdrop
         Width = w; Height = h; Mips = mips; MipW = mw; MipH = mh; Base = baseBgra;
     }
 
-    // Paints `kind` for a pw x ph pixel viewport onto an art of artW x artH DIP whose top-left
+    // The photo for a pw x ph pixel viewport onto an art of artW x artH DIP whose top-left
     // visible point is (x0, y0) DIP, at ppd pixels per DIP.
-    public static Backdrop Create(Specimen kind, int pw, int ph, double artW, double artH, double x0, double y0, double ppd)
+    public static Backdrop Create(int pw, int ph, double artW, double artH, double x0, double y0, double ppd)
     {
         var l0 = new float[pw * ph * 4];
-        Specimens.Paint(kind, l0, pw, ph, (float)artW, (float)artH, (float)x0, (float)y0, (float)ppd);
+        Photo.Current.Paint(l0, pw, ph, (float)artW, (float)artH, (float)x0, (float)y0, (float)ppd);
 
         var mips = new List<float[]> { l0 };
         var mw = new List<int> { pw };
@@ -113,10 +111,20 @@ internal static class GlassRenderer
     {
         int y0 = Math.Max(0, -winY), y1 = Math.Min(winH, bg.Height - winY);
         if (y1 <= y0 || winW <= 0) return;
-        Parallel.For(y0, y1, ly => Row(bg, dst, winX, winY, winW, winH, p, ly));
+        Parallel.For(y0, y1, ly => Row(bg, dst, bg.Width, winX, winY, false, winX, winY, winW, winH, p, ly));
     }
 
-    private static void Row(Backdrop bg, byte[] dst, int winX, int winY, int winW, int winH, GlassSpec p, int ly)
+    // The same glass alone: `dst` is the window (winW x winH), cleared to transparent, and gets
+    // premultiplied BGRA (the shadow is black at its strength) to lay over the backdrop.
+    public static void DrawOverlay(Backdrop bg, byte[] dst, int winX, int winY, int winW, int winH, GlassSpec p)
+    {
+        int y0 = Math.Max(0, -winY), y1 = Math.Min(winH, bg.Height - winY);
+        if (y1 <= y0 || winW <= 0) return;
+        Parallel.For(y0, y1, ly => Row(bg, dst, winW, 0, 0, true, winX, winY, winW, winH, p, ly));
+    }
+
+    private static void Row(Backdrop bg, byte[] dst, int stride, int dstX, int dstY, bool overlay, int winX, int winY, int winW, int winH,
+                            GlassSpec p, int ly)
     {
         float W = winW, H = winH, inset = p.Inset;
         float bx = W * 0.5f - inset, by = H * 0.5f - inset;
@@ -128,7 +136,7 @@ internal static class GlassRenderer
         float sheenT = Sat(1 - (py - inset) / MathF.Max(H - 2 * inset, 1f));
         float sheen = p.Highlight * 0.045f * sheenT * sheenT;
         int xs = Math.Max(0, -winX), xe = Math.Min(winW, bg.Width - winX);
-        int rowBase = (winY + ly) * bg.Width;
+        int rowBase = (dstY + ly) * stride + dstX;
         bool needSharp = p.BlurMix < 1f, needSoft = p.BlurMix > 0f;
 
         for (int lx = xs; lx < xe; lx++)
@@ -137,12 +145,13 @@ internal static class GlassRenderer
             float d = Sd(cx, cy, bx, by, r);
             float ds = Sd(cx, cy - inset * 0.25f, bx, by, r);
             float shadowA = d >= 0 ? p.Shadow * MathF.Exp(-MathF.Max(ds, 0) * shadowK) : 0;
-            int di = (rowBase + winX + lx) * 4;
+            int di = (rowBase + lx) * 4;
 
             if (d > 1.5f)
             {
                 if (shadowA > 0.002f)
                 {
+                    if (overlay) { dst[di + 3] = To8(shadowA); continue; }
                     float k = 1 - shadowA;
                     dst[di] = (byte)(dst[di] * k + 0.5f);
                     dst[di + 1] = (byte)(dst[di + 1] * k + 0.5f);
@@ -162,6 +171,7 @@ internal static class GlassRenderer
             float cov = Sat(0.5f - d / aa);
             if (cov <= 0)
             {
+                if (overlay) { dst[di + 3] = To8(shadowA); continue; }
                 float k = 1 - shadowA;
                 dst[di] = (byte)(dst[di] * k + 0.5f);
                 dst[di + 1] = (byte)(dst[di + 1] * k + 0.5f);
@@ -216,6 +226,14 @@ internal static class GlassRenderer
 
             col = Vector3.Clamp(col, Vector3.Zero, Vector3.One);
             float a = cov + (1 - cov) * shadowA;
+            if (overlay)
+            {
+                dst[di] = To8(col.Z * cov);
+                dst[di + 1] = To8(col.Y * cov);
+                dst[di + 2] = To8(col.X * cov);
+                dst[di + 3] = To8(a);
+                continue;
+            }
             float inv = 1 - a;
             dst[di] = To8(col.Z * cov + dst[di] / 255f * inv);
             dst[di + 1] = To8(col.Y * cov + dst[di + 1] / 255f * inv);
@@ -340,7 +358,10 @@ internal sealed class FrameBuffers
     private byte[] _front, _back;
     public int Width { get; }
     public int Height { get; }
-    public float Luma { get; private set; } = 0.5f;
+    // What came with the front buffer: its mean luminance, where it goes (DIP; an overlay's
+    // top-left in its frame) and its pixels per DIP.
+    public readonly record struct Placement(float Luma, double X, double Y, double Scale);
+    private Placement _placed = new(0.5f, 0, 0, 1);
 
     public FrameBuffers(int w, int h)
     {
@@ -351,13 +372,18 @@ internal sealed class FrameBuffers
 
     public byte[] Back => _back;
 
-    public void Publish(float luma)
+    public void Publish(float luma, double x = 0, double y = 0, double scale = 1)
     {
-        lock (_lock) { (_front, _back) = (_back, _front); Luma = luma; }
+        lock (_lock) { (_front, _back) = (_back, _front); _placed = new Placement(luma, x, y, scale); }
     }
 
-    public void WriteFront(Stream target)
+    // The front buffer's pixels and its placement, read together (the next frame may be published meanwhile).
+    public Placement WriteFront(Stream target)
     {
-        lock (_lock) target.Write(_front, 0, _front.Length);
+        lock (_lock)
+        {
+            target.Write(_front, 0, _front.Length);
+            return _placed;
+        }
     }
 }

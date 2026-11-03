@@ -64,6 +64,7 @@ public:
     // glass below (topmost = false) and its content drawn by Surface above.
     // overlay: whether Present draws a Direct2D overlay (the popups' glass does not).
     GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost = true, bool overlay = true);
+    ~GlassRenderer();
     GlassRenderer(const GlassRenderer&) = delete;
     GlassRenderer& operator=(const GlassRenderer&) = delete;
 
@@ -89,6 +90,11 @@ public:
     // Several shapes, back to front (each with its own shadow), then the overlay.
     bool Present(const std::vector<GlassParams>& shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay);
 
+    // D45: the swap chain queues one frame at most, and its latency object is signalled when
+    // that frame has been taken for the screen. Ready() takes the signal without waiting (once
+    // taken it holds until Present); the render thread draws a surface only when it is ready,
+    // so it never waits for one surface while others have frames to draw.
+    bool Ready();
     ID2D1DeviceContext2* D2D() const { return d2d_.get(); }
     IDWriteFactory3* DWrite() const { return dwrite_.get(); }
 
@@ -134,6 +140,8 @@ private:
     // frame of the two lands in the same composition.
     UINT sync_ = 1;
     bool hasBackdrop_ = false;
+    HANDLE waitable_ = nullptr;
+    bool ready_ = false;
 
     winrt::com_ptr<ID2D1Factory3> d2dFactory_;
     winrt::com_ptr<ID2D1Device2> d2dDevice_;

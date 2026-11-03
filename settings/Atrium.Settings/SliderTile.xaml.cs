@@ -6,8 +6,8 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Atrium.Settings;
 
-// One adjustable parameter: name, value (with a word for it), slider, description.
-public sealed partial class SliderRow : UserControl
+// One adjustable parameter on a tile: name, value, slider, a word for the value and a description.
+public sealed partial class SliderTile : UserControl
 {
     private Func<double, string>? _hint;
     private string _unit = "";
@@ -16,7 +16,7 @@ public sealed partial class SliderRow : UserControl
     public event Action<double>? UserValueChanged;
     public event Action<bool>? Engaged;
 
-    public SliderRow()
+    public SliderTile()
     {
         InitializeComponent();
         GotFocus += (_, _) => SetEngaged(true);
@@ -44,10 +44,9 @@ public sealed partial class SliderRow : UserControl
 
     private void Refresh(double v)
     {
-        string hint = _hint?.Invoke(v) ?? "";
-        HintRun.Text = hint.Length > 0 ? hint + "   " : "";
+        HintText.Text = _hint?.Invoke(v) ?? "";
         ValueRun.Text = Math.Round(v).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        UnitRun.Text = _unit.Length > 0 ? " " + _unit : "";
+        UnitRun.Text = _unit is "" or "%" ? _unit : " " + _unit;
     }
 
     private void OnTrackChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -56,10 +55,10 @@ public sealed partial class SliderRow : UserControl
         UserValueChanged?.Invoke(e.NewValue);
     }
 
-    // The row being adjusted is lit a little (the hero shows that parameter).
+    // The tile being adjusted is lit a little (the hero shows that parameter).
     private void SetEngaged(bool on)
     {
-        Surface.Background = on ? Tokens.Brush("HoverBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        Surface.Background = Tokens.Brush(on ? "TileActiveBrush" : "CardBrush");
         Engaged?.Invoke(on);
     }
 }

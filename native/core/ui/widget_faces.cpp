@@ -240,9 +240,9 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
             c.Circle(cx, cy, rh / 2 + 0.5f, p.blue);
         bool weekend = (first + cell % 7) % 7 >= 5;
         D2D1_COLOR_F ink = today ? Rgba(0xFFFFFF, 0.98f) : weekend ? p.sub : p.text;
-        // Digits sit high in their line box: lifted so they centre in the disc.
-        const float lift = 10.5f * 0.08f;
-        c.Text(std::to_wstring(d), D2D1::RectF(x0, cy - rh / 2 - lift, x0 + cw, cy + rh / 2 - lift), 10.5f, ink,
+        // MiSans centres its figures in the line box (ascent 1.044, descent 0.282, figures 0.76
+        // high): the box centred on the disc centres the digits.
+        c.Text(std::to_wstring(d), D2D1::RectF(x0, cy - rh / 2, x0 + cw, cy + rh / 2), 10.5f, ink,
                today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Foundation;
 
@@ -36,8 +37,44 @@ public sealed class NavLabel : StackPanel
     public string Text { get => _text.Text; set => _text.Text = value; }
 }
 
-// A wrapping grid of equal-width cells: as many columns as fit MinCellWidth (1 when narrow,
-// 2 when wide), each row as tall as its tallest card. Unlike a virtualising ItemsRepeater every
+// A tile with a switch: the name and the switch on top, a sentence under them.
+public sealed class ToggleTile : UserControl
+{
+    private readonly TextBlock _title = new() { Style = Res<Style>("RowTitleStyle"), VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _note = new() { Style = Res<Style>("RowNoteStyle") };
+
+    public ToggleSwitch Switch { get; } = new() { Style = Res<Style>("SwitchStyle") };
+    public event RoutedEventHandler? Toggled;
+
+    public ToggleTile()
+    {
+        IsTabStop = false;
+        var grid = new Grid { RowSpacing = 6, ColumnSpacing = 12 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetColumn(Switch, 1);
+        Grid.SetRow(_note, 1);
+        Grid.SetColumnSpan(_note, 2);
+        grid.Children.Add(_title);
+        grid.Children.Add(Switch);
+        grid.Children.Add(_note);
+        Content = new Border { Style = Res<Style>("TileStyle"), Child = grid };
+        Switch.Toggled += (_, e) => Toggled?.Invoke(this, e);
+    }
+
+    public string Title { get => _title.Text; set => _title.Text = value; }
+    public string Note { get => _note.Text; set => _note.Text = value; }
+    // The switch's name for UI Automation (and screen readers).
+    public string SwitchName { get => AutomationProperties.GetName(Switch); set => AutomationProperties.SetName(Switch, value); }
+    public bool IsOn { get => Switch.IsOn; set => Switch.IsOn = value; }
+
+    private static T Res<T>(string key) => (T)Application.Current.Resources[key];
+}
+
+// A wrapping grid of equal-width cells: as many columns as fit MinCellWidth, each row as tall as
+// its tallest card. With StretchLastRow a short last row of two or more shares the full width. Unlike a virtualising ItemsRepeater every
 // card stays in the visual tree, so UI Automation can always find its controls.
 public sealed class ResponsiveGrid : Panel
 {
@@ -48,6 +85,15 @@ public sealed class ResponsiveGrid : Panel
 
     public double MinCellWidth { get => (double)GetValue(MinCellWidthProperty); set => SetValue(MinCellWidthProperty, value); }
     public double Gap { get => (double)GetValue(GapProperty); set => SetValue(GapProperty, value); }
+    public bool StretchLastRow { get; set; }
+
+    // The width of each cell in the row that starts at `start` of `count` visible children.
+    private double CellWidth(double width, int cols, int start, int count)
+    {
+        int inRow = Math.Min(cols, count - start);
+        int n = StretchLastRow && inRow >= 2 ? inRow : cols;
+        return (width - (n - 1) * Gap) / n;
+    }
 
     private int Columns(double width)
     {
@@ -58,31 +104,32 @@ public sealed class ResponsiveGrid : Panel
     protected override Size MeasureOverride(Size available)
     {
         int cols = Columns(available.Width);
-        double cell = double.IsInfinity(available.Width) ? MinCellWidth : (available.Width - (cols - 1) * Gap) / cols;
+        var visible = Children.Where(c => c.Visibility != Visibility.Collapsed).ToList();
         double total = 0;
-        int shown = 0;
-        double rowH = 0;
-        foreach (var child in Children)
+        for (int start = 0; start < visible.Count; start += cols)
         {
-            if (child.Visibility == Visibility.Collapsed) continue;
-            child.Measure(new Size(cell, double.PositiveInfinity));
-            rowH = Math.Max(rowH, child.DesiredSize.Height);
-            if (++shown % cols == 0) { total += rowH + Gap; rowH = 0; }
+            double cell = double.IsInfinity(available.Width) ? MinCellWidth : CellWidth(available.Width, cols, start, visible.Count);
+            double rowH = 0;
+            for (int i = start; i < Math.Min(start + cols, visible.Count); i++)
+            {
+                visible[i].Measure(new Size(cell, double.PositiveInfinity));
+                rowH = Math.Max(rowH, visible[i].DesiredSize.Height);
+            }
+            total += rowH + Gap;
         }
-        if (shown % cols != 0) total += rowH + Gap;
-        if (shown > 0) total -= Gap;
-        return new Size(double.IsInfinity(available.Width) ? cols * cell + (cols - 1) * Gap : available.Width, total);
+        if (visible.Count > 0) total -= Gap;
+        return new Size(double.IsInfinity(available.Width) ? cols * MinCellWidth + (cols - 1) * Gap : available.Width, total);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         int cols = Columns(finalSize.Width);
-        double cell = (finalSize.Width - (cols - 1) * Gap) / cols;
         var visible = Children.Where(c => c.Visibility != Visibility.Collapsed).ToList();
         double y = 0;
         for (int start = 0; start < visible.Count; start += cols)
         {
             int end = Math.Min(start + cols, visible.Count);
+            double cell = CellWidth(finalSize.Width, cols, start, visible.Count);
             double rowH = 0;
             for (int i = start; i < end; i++) rowH = Math.Max(rowH, visible[i].DesiredSize.Height);
             for (int i = start; i < end; i++)
