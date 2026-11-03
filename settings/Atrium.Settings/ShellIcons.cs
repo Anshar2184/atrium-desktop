@@ -115,10 +115,23 @@ internal static class ShellIcons
         int lines = GetDIBits(dc, bitmap, 0, (uint)bm.Height, pixels, ref header, 0);
         ReleaseDC(IntPtr.Zero, dc);
         if (lines == 0) return null;
-        bool hasAlpha = false;
-        for (int i = 3; i < pixels.Length && !hasAlpha; i += 4) hasAlpha = pixels[i] != 0;
+        // Executable artwork can use straight alpha; XAML's bitmap buffer expects
+        // premultiplied BGRA, as the native taskbar does. Otherwise its edges glow white.
+        bool hasAlpha = false, straight = false;
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            byte a = pixels[i + 3];
+            hasAlpha |= a != 0;
+            straight |= pixels[i] > a || pixels[i + 1] > a || pixels[i + 2] > a;
+        }
         if (!hasAlpha)
             for (int i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
+        else if (straight)
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                int a = pixels[i + 3];
+                for (int c = 0; c < 3; c++) pixels[i + c] = (byte)((pixels[i + c] * a + 127) / 255);
+            }
         return new Image(bm.Width, bm.Height, pixels);
     }
 

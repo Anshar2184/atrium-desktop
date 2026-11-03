@@ -480,7 +480,7 @@ public sealed partial class MainWindow
             space.Children.Add(row);
         }
 
-        var colours = new ResponsiveGrid { MinCellWidth = 120, Gap = 14 };
+        var colours = new ResponsiveGrid { MinCellWidth = 148, Gap = 12 };
         (string Key, string Name)[] tokens =
         {
             ("AccentBrush", "强调色"), ("InkBrush", "主文字"), ("InkSecondaryBrush", "次文字"), ("InkTertiaryBrush", "弱文字"),
@@ -491,7 +491,7 @@ public sealed partial class MainWindow
         foreach (var (c, name) in new[] { (WidgetFaces.Green, "正常 · 绿"), (WidgetFaces.Orange, "提醒 · 橙"), (WidgetFaces.Red, "警示 · 红"), (WidgetFaces.Blue, "日历 · 蓝") })
             colours.Children.Add(Chip(new SolidColorBrush(c), name));
 
-        var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28 };
+        var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28, StretchLastRow = true };
         grid.Children.Add(space);
         grid.Children.Add(colours);
         return Card(grid);
@@ -499,12 +499,18 @@ public sealed partial class MainWindow
 
     private static UIElement Chip(Brush brush, string name)
     {
-        var s = new StackPanel { Spacing = 6 };
-        s.Children.Add(new Border { Height = 40, CornerRadius = new CornerRadius(10), Background = brush, BorderBrush = Tokens.Brush("CardStrokeBrush"), BorderThickness = new Thickness(1) });
-        s.Children.Add(Text(name, "RowNoteStyle"));
+        var row = new Grid { ColumnSpacing = 10 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.Children.Add(new Border { Width = 28, Height = 28, VerticalAlignment = VerticalAlignment.Center, CornerRadius = new CornerRadius(8),
+                                      Background = brush, BorderBrush = Tokens.Brush("CardStrokeBrush"), BorderThickness = new Thickness(1) });
+        var labels = new StackPanel();
+        labels.Children.Add(Text(name, "RowNoteStyle"));
         string hex = brush is SolidColorBrush b ? (b.Color.A == 255 ? $"#{b.Color.R:X2}{b.Color.G:X2}{b.Color.B:X2}" : $"#{b.Color.A:X2}{b.Color.R:X2}{b.Color.G:X2}{b.Color.B:X2}") : "";
-        s.Children.Add(Tabular(Text(hex, "FootnoteStyle")));
-        return s;
+        labels.Children.Add(Tabular(Text(hex, "FootnoteStyle")));
+        Grid.SetColumn(labels, 1);
+        row.Children.Add(labels);
+        return row;
     }
 
     // ---- Interaction: a dock that magnifies under the pointer and hops once, a card that pops ----
