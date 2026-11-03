@@ -89,6 +89,8 @@ public sealed class ResponsiveGrid : Panel
     public double MinCellWidth { get => (double)GetValue(MinCellWidthProperty); set => SetValue(MinCellWidthProperty, value); }
     public double Gap { get => (double)GetValue(GapProperty); set => SetValue(GapProperty, value); }
     public bool StretchLastRow { get; set; }
+    public int MaxColumns { get; set; } = int.MaxValue;
+    public bool DistributeRows { get; set; }
 
     // The width of each cell in the row that starts at `start` of `count` visible children.
     private double CellWidth(double width, int cols, int start, int count)
@@ -101,7 +103,7 @@ public sealed class ResponsiveGrid : Panel
     private int Columns(double width)
     {
         if (double.IsInfinity(width) || width <= 0) return 1;
-        return Math.Max(1, (int)Math.Floor((width + Gap) / (MinCellWidth + Gap)));
+        return Math.Max(1, Math.Min(MaxColumns, (int)Math.Floor((width + Gap) / (MinCellWidth + Gap))));
     }
 
     protected override Size MeasureOverride(Size available)
@@ -128,6 +130,9 @@ public sealed class ResponsiveGrid : Panel
     {
         int cols = Columns(finalSize.Width);
         var visible = Children.Where(c => c.Visibility != Visibility.Collapsed).ToList();
+        int rows = (visible.Count + cols - 1) / cols;
+        // Share surplus height between rows, keeping the first and last edges aligned.
+        double gap = Gap + (DistributeRows && rows > 1 ? Math.Max(0, finalSize.Height - DesiredSize.Height) / (rows - 1) : 0);
         double y = 0;
         for (int start = 0; start < visible.Count; start += cols)
         {
@@ -137,7 +142,7 @@ public sealed class ResponsiveGrid : Panel
             for (int i = start; i < end; i++) rowH = Math.Max(rowH, visible[i].DesiredSize.Height);
             for (int i = start; i < end; i++)
                 visible[i].Arrange(new Rect((i - start) * (cell + Gap), y, cell, rowH));
-            y += rowH + Gap;
+            y += rowH + gap;
         }
         return finalSize;
     }

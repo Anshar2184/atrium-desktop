@@ -41,6 +41,7 @@ internal sealed class BarSettings
     public string WidgetBackdrop { get; set; } = "desktop"; // desktop (captured live) | wallpaper (the files, least work)
     public bool HideTaskbar { get; set; }              // the system taskbar is hidden while Atrium runs
     public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
+    public bool StartOnLogin { get; set; } = true;
     // Null = the key was absent (never saved); the core then imports the Windows pins.
     public List<PinnedApp>? Pins { get; set; }
 
@@ -109,6 +110,7 @@ internal sealed class BarSettings
             ["widgetBackdrop"] = WidgetBackdrop,
             ["hideTaskbar"] = HideTaskbar,
             ["hideBanners"] = HideBanners,
+            ["startOnLogin"] = StartOnLogin,
         };
         if (Pins != null)
         {
@@ -165,6 +167,7 @@ internal sealed class BarSettings
             : f.WidgetBackdrop;
         s.HideTaskbar = Flag("hideTaskbar", f.HideTaskbar);
         s.HideBanners = Flag("hideBanners", f.HideBanners);
+        s.StartOnLogin = Flag("startOnLogin", f.StartOnLogin);
         s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
             ? (tcs is "light" or "dark" ? tcs : "auto")
             : f.TextColor;
@@ -192,6 +195,7 @@ internal sealed class BarSettings
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners &&
+        StartOnLogin == o.StartOnLogin &&
         (Pins == o.Pins || (Pins != null && o.Pins != null && Pins.SequenceEqual(o.Pins)));
 
     public bool SameMaterial(BarSettings o) =>

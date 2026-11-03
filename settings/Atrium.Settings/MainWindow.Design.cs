@@ -87,11 +87,11 @@ public sealed partial class MainWindow
     {
         ("Large Title", 30, "TitleFont", "Semibold 520", "Large Title · 26", "页标题、产品名"),
         ("Title", 20, "TitleFont", "Semibold 520", "Title 1 · 22", "空状态标题、日历的月份"),
-        ("Row", 15, "TextFont", "Medium 380", "Body · 13", "设置中心的行标题"),
         ("Value", 15, "EmphasisFont", "Demibold 450", "—", "滑块的数值（等宽数字）"),
+        ("Row", 15, "TextFont", "Medium 380", "Body · 13", "设置中心的行标题"),
         ("Body", 13.5, "TextFont", "Medium 380", "Body · 13", "面板正文、通知内容"),
-        ("Note", 13, "TextFont", "Medium 380", "Callout · 12", "行下方的说明"),
         ("Section", 13, "EmphasisFont", "Demibold 450", "—", "分组标题"),
+        ("Note", 13, "TextFont", "Medium 380", "Callout · 12", "行下方的说明"),
         ("Footnote", 12, "TextFont", "Medium 380", "Footnote · 10", "补充说明；玻璃上升为 Demibold"),
     };
 
@@ -465,7 +465,7 @@ public sealed partial class MainWindow
 
     private static UIElement SpaceAndColour()
     {
-        var space = new StackPanel { Spacing = 10 };
+        var space = new ResponsiveGrid { MinCellWidth = 280, MaxColumns = 1, Gap = 10, DistributeRows = true };
         foreach (var (name, value, _) in Spacing)
         {
             var row = new Grid { ColumnSpacing = 12 };
@@ -480,7 +480,7 @@ public sealed partial class MainWindow
             space.Children.Add(row);
         }
 
-        var colours = new ResponsiveGrid { MinCellWidth = 148, Gap = 12 };
+        var colours = new ResponsiveGrid { MinCellWidth = 112, MaxColumns = 4, Gap = 12, DistributeRows = true };
         (string Key, string Name)[] tokens =
         {
             ("AccentBrush", "强调色"), ("InkBrush", "主文字"), ("InkSecondaryBrush", "次文字"), ("InkTertiaryBrush", "弱文字"),

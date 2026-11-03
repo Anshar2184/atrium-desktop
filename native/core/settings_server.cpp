@@ -245,8 +245,8 @@ std::string SettingsServer::Handle(const std::string& request)
             return Reply(L"error", L"invalid settings");
         if (op == L"commit") {
             if (!SaveSettings(next)) {
-                Log(L"pipe: commit failed, %s not writable", SettingsPath().c_str());
-                return Reply(L"error", L"could not write the settings file");
+                Log(L"pipe: could not save settings or update Windows startup (%s)", SettingsPath().c_str());
+                return Reply(L"error", L"could not save settings or update Windows startup");
             }
             Log(L"pipe: commit saved");
             std::lock_guard g(lock_);

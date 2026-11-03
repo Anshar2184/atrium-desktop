@@ -71,6 +71,8 @@ public sealed partial class MainWindow : Window
     private int _page;
     private bool _folded; // a narrow window: the inspector's groups under the workspace
     private int _flashId;
+    private bool _updatingCoreSwitch, _coreChanging = true;
+    private Process? _coreProcess;
 
     public MainWindow()
     {
@@ -92,6 +94,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Closing += OnClosing;
         Closed += (_, _) =>
         {
+            _coreProcess?.Dispose();
             _widgetWatcher?.Dispose();
             StopDesignAnimations();
             _renderWorker?.Stop();
@@ -319,11 +322,13 @@ public sealed partial class MainWindow : Window
     private async Task ConnectAndLoadAsync()
     {
         // ATRIUM_SETTINGS_OFFLINE=1: never talk to a running core (development aid).
-        bool connected = Environment.GetEnvironmentVariable("ATRIUM_SETTINGS_OFFLINE") != "1" && await _client.ConnectAsync(800);
+        if (Environment.GetEnvironmentVariable("ATRIUM_SETTINGS_OFFLINE") != "1") await _client.ConnectAsync(800);
         var (saved, current) = await _client.GetAsync();
         _saved = saved;
         _current = current;
-        ShowStatus(connected);
+        _coreChanging = false;
+        WatchCore();
+        ShowStatus(_client.Connected);
         LoadIntoControls();
         UpdateButtons();
     }
@@ -333,20 +338,12 @@ public sealed partial class MainWindow : Window
 
     private void ShowStatus(bool connected)
     {
-        if (connected)
-        {
-            StatusDot.Fill = RunningBrush;
-            StatusTitle.Text = "Atrium 正在运行";
-            StatusMessage.Text = "修改会实时显示在玻璃栏上。";
-            StartCoreButton.Visibility = Visibility.Collapsed;
-        }
-        else
-        {
-            StatusDot.Fill = IdleBrush;
-            StatusTitle.Text = "Atrium 未运行";
-            StatusMessage.Text = "可以继续修改并保存，下次启动时生效。";
-            StartCoreButton.Visibility = CoreExe() != null ? Visibility.Visible : Visibility.Collapsed;
-        }
+        StatusDot.Fill = connected ? RunningBrush : IdleBrush;
+        _updatingCoreSwitch = true;
+        CoreSwitch.IsOn = connected;
+        _updatingCoreSwitch = false;
+        CoreSwitch.IsEnabled = !_coreChanging && CoreClient.CoreExe() != null && Environment.GetEnvironmentVariable("ATRIUM_SETTINGS_OFFLINE") != "1";
+        if (!_coreChanging) StatusMessage.Text = connected ? "正在运行" : "已关闭，系统任务栏已恢复";
     }
 
     private void ShowMessage(InfoBarSeverity severity, string title, string message)
@@ -357,29 +354,71 @@ public sealed partial class MainWindow : Window
         Status.IsOpen = true;
     }
 
-    private static string? CoreExe()
+    // Follow the process exit event rather than polling the pipe while the settings window is idle.
+    private void WatchCore()
     {
-        foreach (var p in new[] { Path.Combine(AppContext.BaseDirectory, "..", "Atrium.Core.exe"), Path.Combine(AppContext.BaseDirectory, "Atrium.Core.exe") })
-            if (File.Exists(p)) return Path.GetFullPath(p);
-        return null;
+        _coreProcess?.Dispose();
+        _coreProcess = null;
+        if (!_client.Connected) return;
+        try
+        {
+            var process = Process.GetProcessById(_client.ProcessId);
+            _coreProcess = process;
+            process.Exited += (_, _) => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_coreProcess != process) return;
+                _client.Disconnect();
+                _coreProcess.Dispose();
+                _coreProcess = null;
+                ShowStatus(false);
+            });
+            process.EnableRaisingEvents = true;
+        }
+        catch (ArgumentException) { _client.Disconnect(); }
     }
 
-    private async void OnStartCore(object sender, RoutedEventArgs e)
+    private async void OnCoreToggled(object sender, RoutedEventArgs e)
     {
-        var exe = CoreExe();
-        if (exe == null) return;
-        Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
-        StartCoreButton.IsEnabled = false;
-        for (int i = 0; i < 20 && !_client.Connected; i++)
+        if (_updatingCoreSwitch || _coreChanging) return;
+        bool start = CoreSwitch.IsOn;
+        _coreChanging = true;
+        CoreSwitch.IsEnabled = false;
+        StatusMessage.Text = start ? "正在启动…" : "正在关闭…";
+        Status.IsOpen = false;
+        try
         {
-            await Task.Delay(250);
-            await _client.ConnectAsync(250);
+            var exe = CoreClient.CoreExe() ?? throw new FileNotFoundException("没有找到 Atrium.Core.exe");
+            if (start)
+            {
+                using var launched = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+                if (!await _client.ConnectAsync(8000)) throw new TimeoutException("未能连接 Atrium，请稍后重试。");
+                bool dirty = !_current.SameAs(_saved);
+                var (saved, current) = await _client.GetAsync();
+                _saved = saved;
+                if (!dirty) _current = current;
+                LoadIntoControls();
+                UpdateButtons();
+                if (dirty) SchedulePreview();
+            }
+            else
+            {
+                _client.Disconnect();
+                WatchCore();
+                using var quit = Process.Start(new ProcessStartInfo(exe, "--exit") { UseShellExecute = false, CreateNoWindow = true })
+                    ?? throw new InvalidOperationException("未能发送退出请求。");
+                await quit.WaitForExitAsync();
+                if (quit.ExitCode != 0) throw new InvalidOperationException("Atrium 尚未退出，请稍后重试。");
+            }
         }
-        StartCoreButton.IsEnabled = true;
-        if (_client.Connected)
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException or TimeoutException or IOException)
         {
-            ShowStatus(true);
-            if (!_current.SameAs(_saved)) SchedulePreview();
+            ShowMessage(InfoBarSeverity.Error, start ? "启动失败" : "关闭失败", error.Message);
+        }
+        finally
+        {
+            _coreChanging = false;
+            WatchCore();
+            ShowStatus(_client.Connected);
         }
     }
 
@@ -407,6 +446,7 @@ public sealed partial class MainWindow : Window
         HideTaskbarSwitch.IsOn = _current.HideTaskbar;
         (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
         HideBannersSwitch.IsOn = _current.HideBanners;
+        StartupSwitch.IsOn = _current.StartOnLogin;
         (_current.TextColor switch { "light" => TextLight, "dark" => TextDark, _ => TextAuto }).IsChecked = true;
         UpdateGallery();
         RebuildPins();
@@ -535,6 +575,13 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.HideTaskbar = HideTaskbarSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnStartupToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.StartOnLogin = StartupSwitch.IsOn;
         Changed();
     }
 
@@ -675,6 +722,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
+        if (_coreChanging) { args.Cancel = true; return; }
         if (_closingConfirmed || _current.SameAs(_saved))
         {
             _client.Dispose(); // the core reverts any unsaved preview on disconnect

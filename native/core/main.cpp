@@ -914,6 +914,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ChangeWindowMessageFilterEx(g_app.host, g_app.taskbarCreated, MSGFLT_ALLOW, nullptr);
 
     Settings settings = LoadSettings();
+    if (!SetStartOnLogin(settings.startOnLogin))
+        Log(L"startup: could not update the Windows logon entry");
     if (!settings.pins) {
         // First run: start from the user's Windows taskbar pins (saved on the next save).
         settings.pins = TaskModel::ImportWindowsPins();

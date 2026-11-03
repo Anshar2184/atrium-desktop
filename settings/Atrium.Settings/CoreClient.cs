@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Win32;
 
 namespace Atrium.Settings;
 
@@ -22,6 +23,14 @@ internal sealed class CoreClient : IDisposable
     private NamedPipeClientStream? _pipe;
 
     public bool Connected => _pipe is { IsConnected: true };
+    public int ProcessId { get; private set; }
+
+    public static string? CoreExe()
+    {
+        foreach (var p in new[] { Path.Combine(AppContext.BaseDirectory, "..", "Atrium.Core.exe"), Path.Combine(AppContext.BaseDirectory, "Atrium.Core.exe") })
+            if (File.Exists(p)) return Path.GetFullPath(p);
+        return null;
+    }
 
     public async Task<bool> ConnectAsync(int timeoutMs)
     {
@@ -39,6 +48,7 @@ internal sealed class CoreClient : IDisposable
                 return false;
             }
             _pipe = pipe;
+            ProcessId = (int)pid;
             return true;
         }
         catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
@@ -52,6 +62,7 @@ internal sealed class CoreClient : IDisposable
     {
         _pipe?.Dispose();
         _pipe = null;
+        ProcessId = 0;
     }
 
     private async Task<JsonObject?> RequestAsync(JsonObject request)
@@ -173,6 +184,13 @@ internal sealed class CoreClient : IDisposable
         var tmp = SettingsPath + ".tmp";
         File.WriteAllText(tmp, s.ToJson().ToJsonString(), new UTF8Encoding(false));
         File.Move(tmp, SettingsPath, overwrite: true);
+        using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+        if (s.StartOnLogin)
+        {
+            var exe = CoreExe() ?? throw new FileNotFoundException("没有找到 Atrium.Core.exe");
+            run.SetValue("Atrium", $"\"{exe}\"");
+        }
+        else run.DeleteValue("Atrium", throwOnMissingValue: false);
     }
 
     public void Dispose()

@@ -104,6 +104,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"widgetBackdrop", json::JsonValue::CreateStringValue(widgetBackdrop));
     o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
     o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
+    o.SetNamedValue(L"startOnLogin", json::JsonValue::CreateBooleanValue(startOnLogin));
     if (pins) {
         json::JsonArray a;
         for (const auto& p : *pins) {
@@ -172,6 +173,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"widgetsOnRight", s.widgetsOnRight);
     flag(L"hideTaskbar", s.hideTaskbar);
     flag(L"hideBanners", s.hideBanners);
+    flag(L"startOnLogin", s.startOnLogin);
     if (o.HasKey(L"widgetBackdrop") && o.GetNamedValue(L"widgetBackdrop").ValueType() == json::JsonValueType::String)
         s.widgetBackdrop = std::wstring(o.GetNamedString(L"widgetBackdrop")) == L"wallpaper" ? L"wallpaper" : L"desktop";
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
@@ -253,6 +255,24 @@ Settings LoadSettings()
     return s;
 }
 
-bool SaveSettings(const Settings& s) { return WriteTextFile(SettingsPath(), s.ToJson()); }
+bool SetStartOnLogin(bool enabled)
+{
+    constexpr auto key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    if (!enabled) {
+        LSTATUS result = RegDeleteKeyValueW(HKEY_CURRENT_USER, key, L"Atrium");
+        return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
+    }
+    wchar_t exe[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH))
+        return false;
+    std::wstring command = L"\"" + std::wstring(exe) + L"\"";
+    wchar_t current[MAX_PATH + 3]{};
+    DWORD size = sizeof(current);
+    if (RegGetValueW(HKEY_CURRENT_USER, key, L"Atrium", RRF_RT_REG_SZ, nullptr, current, &size) == ERROR_SUCCESS && command == current)
+        return true;
+    return RegSetKeyValueW(HKEY_CURRENT_USER, key, L"Atrium", REG_SZ, command.c_str(), DWORD((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}
+
+bool SaveSettings(const Settings& s) { return WriteTextFile(SettingsPath(), s.ToJson()) && SetStartOnLogin(s.startOnLogin); }
 
 } // namespace atrium

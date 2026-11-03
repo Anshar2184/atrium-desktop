@@ -53,6 +53,7 @@ struct Settings {
     // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
     bool hideTaskbar = false;        // the system taskbar is hidden while Atrium runs
     bool hideBanners = false;        // Do Not Disturb: no system banners, the notifications still become cards
+    bool startOnLogin = true;        // independent of starting/stopping the current session
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;
 
@@ -73,7 +74,9 @@ std::wstring SettingsPath();
 std::wstring ReadTextFile(const std::wstring& path);
 bool WriteTextFile(const std::wstring& path, const std::wstring& text);
 Settings LoadSettings();
-// Atomic replace; returns false if the file could not be written.
+// Atomic file replace, followed by updating the Windows logon entry.
 bool SaveSettings(const Settings& s);
+// The current user's Windows logon entry, pointing at this core executable.
+bool SetStartOnLogin(bool enabled);
 
 } // namespace atrium
