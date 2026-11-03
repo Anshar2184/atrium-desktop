@@ -2,6 +2,8 @@
   <img src="docs/images/readme/hero.jpg" alt="Atrium Desktop" width="100%">
 </p>
 
+<h1 align="center">Atrium Desktop</h1>
+
 <p align="center">
   <b>A new desktop layer for Windows 11.</b><br>
   The taskbar, start menu, control centre, notifications and desktop widgets share one piece of real-time refracting glass, one motion system and one typeface.
@@ -205,8 +207,6 @@ settings/     Atrium.Settings  C# · WinUI 3 · .NET 10
 | Core private memory (7 widgets; about 260 MB of it shared GPU memory) | about 270 MB |
 | Core private memory (no widgets) | about 180–215 MB |
 
-Methods and data: [docs/VERIFICATION.md](docs/VERIFICATION.md).
-
 <br>
 
 ## Quick start
@@ -225,24 +225,11 @@ Requires Windows 10 19041 or later (Windows 11 recommended), the .NET 10 SDK, an
 ```powershell
 # Native core and settings app into the portable folder dist/Atrium (-Zip also packs it)
 ./tools/build.ps1
-
-# Tests (they briefly start Atrium and drive the settings window, then restore the settings file)
-./tests/e2e-settings.ps1 -Package
-./tests/pipe-protocol.ps1
-
-# These move the mouse, click or type; they only run after 30 seconds without input
-./tests/e2e-bar.ps1
-./tests/e2e-start.ps1
-./tests/e2e-notify.ps1
-./tests/e2e-tray.ps1
-./tests/e2e-widgets.ps1
-./tests/e2e-motion.ps1
-./tests/e2e-stacking.ps1
 ```
 
 ## Status
 
-Atrium is a v0.9 development build: usable every day, still changing quickly. Everything above is covered by end-to-end tests with real mouse and keyboard input, recorded in [VERIFICATION](docs/VERIFICATION.md); the current decisions are in [DECISIONS](docs/DECISIONS.md).
+Atrium is a v0.9 development build: usable every day, still changing quickly. Everything above is covered by end-to-end tests with real mouse and keyboard input.
 
 | Status | What |
 | :--- | :--- |
@@ -256,48 +243,19 @@ Atrium is a v0.9 development build: usable every day, still changing quickly. Ev
 ```text
 native/core    Atrium.Core: glass bar, start menu, notifications, control centre, desktop widgets, settings pipe
 settings/      the settings app Atrium.Settings
-tools/         build.ps1, icon generation, the README artwork (tools/readme)
-tests/         end-to-end and protocol tests
-docs/          design specification, current decisions, verification, settings protocol, handoff
+tools/         build.ps1
+assets/        icons, the MiSans interface face, the settings' preview photographs
+docs/          design specification (DESIGN), settings pipe protocol (SETTINGS-PROTOCOL)
 ```
 
-Suggested reading order: [HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [DESIGN](docs/DESIGN.md) → [VERIFICATION](docs/VERIFICATION.md).
 
-<details>
-<summary><b>Screenshots</b></summary>
-<br>
-
-<p align="center">
-  <img src="docs/images/v04-magnify.png" alt="Magnification" width="80%"><br>
-  <sub>The icon under the pointer grows, its neighbours less and less, and the glass stretches with them (test backdrop)</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/v06-control.png" alt="Control centre" width="60%"><br>
-  <sub>The control centre: Wi-Fi networks in range, volume, battery (network names hidden)</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/v05-start.png" alt="Start menu" width="52%">
-  <img src="docs/images/v05-center.png" alt="Notifications" width="39%"><br>
-  <sub>Start menu and notifications, exactly the bar's material (Windows' own apps as pins; account and network names hidden)</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/v02-bar-liquid.png" alt="Liquid" width="80%"><br>
-  <img src="docs/images/v02-bar-frosted.png" alt="Frosted" width="80%"><br>
-  <img src="docs/images/v02-bar-light.png" alt="Light backdrop" width="80%"><br>
-  <sub>An early version: Liquid, Frosted, and the dark ink chosen automatically over a light backdrop</sub>
-</p>
-
-</details>
 
 ## Contributing
 
-The most valuable contributions now are design review and test results from other hardware and systems, especially stable Windows 11, multiple monitors and HDR. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The most valuable contributions now are design review and feedback from other hardware and systems, especially stable Windows 11, multiple monitors and HDR. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 [MIT](LICENSE). Visually inspired by Apple's Liquid Glass; not affiliated with Apple or Microsoft.
 
-<sub>The artwork on this page is rendered offline, not captured: the glass is a port of `glass.hlsl`, the bar, the status ring and the widgets are redrawn from the core's drawing code and metrics; the backdrops are the settings app's preview photographs (Martin Martz / Unsplash), the app icons original drawings. For the real thing, see Screenshots above.</sub>
+<sub>The artwork on this page is rendered offline, not captured: the glass is a port of `glass.hlsl`, the bar, the status ring and the widgets are redrawn from the core's drawing code and metrics; the backdrops are the settings app's preview photographs (Martin Martz / Unsplash), the app icons original drawings.</sub>

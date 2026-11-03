@@ -13,4 +13,4 @@ body:
     id: constraints
     attributes:
       label: Windows constraints
-      description: Public APIs involved, known limitations, or decisions in docs/DECISIONS.md this touches.
+      description: Public APIs involved, or known limitations.

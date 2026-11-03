@@ -2,6 +2,8 @@
   <img src="docs/images/readme/hero.jpg" alt="Atrium Desktop" width="100%">
 </p>
 
+<h1 align="center">Atrium Desktop</h1>
+
 <p align="center">
   <b>为 Windows 11 重新做的一层桌面。</b><br>
   任务栏、开始菜单、控制中心、通知和桌面小组件，用的是同一块实时折射的玻璃、同一套动效和同一种字体。
@@ -205,8 +207,6 @@ settings/     Atrium.Settings  C# · WinUI 3 · .NET 10
 | 核心私有内存（7 个小组件，其中约 260 MB 是显卡共享内存） | 约 270 MB |
 | 核心私有内存（不开小组件） | 约 180–215 MB |
 
-完整的测量方法和数据见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
-
 <br>
 
 ## 快速开始
@@ -225,24 +225,11 @@ settings/     Atrium.Settings  C# · WinUI 3 · .NET 10
 ```powershell
 # 原生 Core 与设置中心，输出便携目录 dist/Atrium（加 -Zip 同时打包）
 ./tools/build.ps1
-
-# 测试（会短暂启动 Atrium 并操作设置窗口，结束后恢复设置文件）
-./tests/e2e-settings.ps1 -Package
-./tests/pipe-protocol.ps1
-
-# 以下几个会移动鼠标、点击或输入，只在你 30 秒没有操作时运行
-./tests/e2e-bar.ps1
-./tests/e2e-start.ps1
-./tests/e2e-notify.ps1
-./tests/e2e-tray.ps1
-./tests/e2e-widgets.ps1
-./tests/e2e-motion.ps1
-./tests/e2e-stacking.ps1
 ```
 
 ## 当前状态
 
-Atrium 是 v0.9 开发版，可以日常使用，仍在快速迭代。上面列出的功能都经过真实鼠标和键盘的端到端测试，结果记录在 [VERIFICATION](docs/VERIFICATION.md) 里；当前有效的决策见 [DECISIONS](docs/DECISIONS.md)。
+Atrium 是 v0.9 开发版，可以日常使用，仍在快速迭代。上面列出的功能都经过真实鼠标和键盘的端到端测试。
 
 | 状态 | 内容 |
 | :--- | :--- |
@@ -256,48 +243,18 @@ Atrium 是 v0.9 开发版，可以日常使用，仍在快速迭代。上面列�
 ```text
 native/core    Atrium.Core：玻璃栏、开始菜单、通知、控制中心、桌面小组件、设置管道
 settings/      设置中心 Atrium.Settings
-tools/         打包脚本 build.ps1、图标生成、README 配图（tools/readme）
-tests/         端到端与协议测试脚本
-docs/          设计规范、有效决策、验证记录、设置协议、交接文档
+tools/         打包脚本 build.ps1
+assets/        图标、界面字体 MiSans、设置中心的预览照片
+docs/          设计规范（DESIGN）、设置管道协议（SETTINGS-PROTOCOL）
 ```
 
-建议的阅读顺序：[HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [DESIGN](docs/DESIGN.md) → [VERIFICATION](docs/VERIFICATION.md)。
-
-<details>
-<summary><b>实机截图</b></summary>
-<br>
-
-<p align="center">
-  <img src="docs/images/v04-magnify.png" alt="悬停放大" width="80%"><br>
-  <sub>指针下的图标放大，两侧依次变小，玻璃栏随之伸展（背景为测试图案）</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/v06-control.png" alt="控制中心" width="60%"><br>
-  <sub>控制中心：附近的 Wi-Fi、音量、电池（截图隐藏了网络名称）</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/v05-start.png" alt="开始菜单" width="52%">
-  <img src="docs/images/v05-center.png" alt="通知" width="39%"><br>
-  <sub>开始菜单与通知：材质与任务栏完全相同（截图用 Windows 自带应用作固定项，隐藏了账户与网络名称）</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/v02-bar-liquid.png" alt="液态" width="80%"><br>
-  <img src="docs/images/v02-bar-frosted.png" alt="磨砂" width="80%"><br>
-  <img src="docs/images/v02-bar-light.png" alt="浅色背景" width="80%"><br>
-  <sub>早期版本：液态、磨砂，以及浅色背景下自动换成的深色文字</sub>
-</p>
-
-</details>
 
 ## 参与贡献
 
-现在最有价值的是设计评审，以及在其他硬件和系统上运行测试的结果，尤其是稳定版 Windows 11、多显示器和 HDR。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+现在最有价值的是设计评审，以及在其他硬件和系统上的使用反馈，尤其是稳定版 Windows 11、多显示器和 HDR。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
 [MIT](LICENSE)。视觉灵感来自 Apple 的 Liquid Glass；本项目与 Apple、Microsoft 无关。
 
-<sub>本页配图不是截图，而是离线渲染的：玻璃移植自 `glass.hlsl`，任务栏、状态圆环和小组件按核心的绘制代码与尺寸重画；背景是设置中心自带的预览照片（Martin Martz / Unsplash），应用图标是原创图形。实机画面见上方的“实机截图”。</sub>
+<sub>本页配图不是截图，而是离线渲染的：玻璃移植自 `glass.hlsl`，任务栏、状态圆环和小组件按核心的绘制代码与尺寸重画；背景是设置中心自带的预览照片（Martin Martz / Unsplash），应用图标是原创图形。</sub>

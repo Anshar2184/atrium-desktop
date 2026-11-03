@@ -6,11 +6,10 @@
 
 - Windows build:
 - Hardware (monitors, GPUs):
-- Tests run (tests/*.ps1):
+- What you tried on the desktop:
 
 ## Checklist
 
 - [ ] `./tools/build.ps1` passes
-- [ ] Core or settings changes: `./tests/e2e-settings.ps1 -Package` and `./tests/pipe-protocol.ps1` pass
 - [ ] No injection into Explorer/DWM, no system files touched, no security features disabled
 - [ ] No personal content in screenshots or results
