@@ -16,13 +16,11 @@ SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 
 def main():
     master = Image.open(os.path.join(ROOT, "assets", "atrium-1024.png")).convert("RGBA")
-    # The tile fills 824/1024 of the canvas; small sizes crop the shadow margin so the tile reads larger.
+    # Match other taskbar apps: the tile fills the icon at every scale, not just at <=32 px.
+    margin = 100
+    src = master.crop((margin, margin, 1024 - margin, 1024 - margin))
     images = []
     for s in SIZES:
-        src = master
-        if s <= 32:
-            m = 84
-            src = master.crop((m, m, 1024 - m, 1024 - m))
         images.append(src.resize((s, s), Image.LANCZOS))
     images[-1].save(os.path.join(ROOT, "assets", "atrium-256.png"))
     images[-1].save(os.path.join(ROOT, "assets", "atrium.ico"), sizes=[(s, s) for s in SIZES], append_images=images[:-1])
