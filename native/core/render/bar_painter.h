@@ -15,7 +15,6 @@
 
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -37,7 +36,6 @@ struct SceneItem {
     std::wstring glyph;        // Segoe Fluent Icons glyph instead of an image (bar entries)
     int badge = 0;             // > 0: count badge on the icon (unread notifications)
     double bounceMs = 0;       // ClockMs() when a launch bounce started; 0 = none
-    int bounces = 0;           // hops asked for (the painter plays one, v0.9.8)
 };
 
 struct BarScene {
@@ -71,8 +69,6 @@ struct BarScene {
 struct BarFrame {
     D2D1_RECT_F shape{};
     float rippleX = 0, rippleY = 0, rippleR = 0, rippleA = 0;
-    float magnified = 0; // strength of the magnification, 0..1
-    float hop = 0;       // highest launch hop, 0..1
     float slideY = 0;    // auto-hide: how far the bar is down (px; the content and the glass move together)
 };
 
@@ -120,6 +116,7 @@ private:
         float lift = 0;    // 0..1, while dragged
         float x = 0;       // displayed plate centre; slides to the layout position
         bool placed = false;
+        bool inScene = false;
         float hop = 0;       // current bounce height, px
         float dot = 0;       // 0..1, the running dot
         bool darkDot = false;
@@ -131,6 +128,7 @@ private:
     void DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const SceneItem& it, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink,
                   D2D1_COLOR_F wash);
     winrt::com_ptr<IDWriteFactory3> dwrite_;
+    winrt::com_ptr<ID2D1SolidColorBrush> contentBrush_;
     winrt::com_ptr<ID2D1Effect> shadow_;
     winrt::com_ptr<ID2D1LinearGradientBrush> logoBlue_; // the start logo's panes and their lit edge (DrawLogo)
     winrt::com_ptr<ID2D1SolidColorBrush> logoSheen_;
@@ -141,7 +139,7 @@ private:
     winrt::com_ptr<ID2D1PathGeometry> chargingBolt_;
     std::map<std::wstring, Motion> motion_;
     std::map<uint64_t, winrt::com_ptr<ID2D1Bitmap1>> bitmaps_;
-    std::set<uint64_t> usedBitmaps_; // during one DrawContent
+    std::vector<uint64_t> usedBitmaps_; // scratch storage for one DrawContent
     std::map<std::tuple<int, int, std::wstring>, winrt::com_ptr<IDWriteTextFormat>> formats_;
     double lastMs_ = 0;
     float lastWindowW_ = 0, lastTop_ = 0, lastBottom_ = 0;

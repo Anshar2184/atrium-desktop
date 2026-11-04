@@ -47,6 +47,7 @@ float ApproachPx(float v, float target, double dtMs, float rate)
 BarPainter::BarPainter(ID2D1DeviceContext2* d2d, IDWriteFactory3* dwrite)
 {
     dwrite_.copy_from(dwrite);
+    winrt::check_hresult(d2d->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), contentBrush_.put()));
     winrt::check_hresult(d2d->CreateEffect(CLSID_D2D1Shadow, shadow_.put()));
 }
 
@@ -148,10 +149,11 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     moving |= amount != amount_;
     amount_ = amount;
 
-    std::set<std::wstring> alive;
+    for (auto& [key, m] : motion_)
+        m.inScene = false;
     auto step = [&](const std::wstring& key, const SceneItem* item) {
-        alive.insert(key);
         Motion& m = motion_[key];
+        m.inScene = true;
         float h = Approach(m.hover, scene.hoverKey == key || scene.dragKey == key ? 1.f : 0.f, dt, 18);
         float p = Approach(m.press, scene.pressedKey == key && scene.dragKey != key ? 1.f : 0.f, dt, 30);
         float a = Approach(m.appear, 1.f, dt, 10);
@@ -197,7 +199,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     // others close up; other entries just go.
     for (auto it = motion_.begin(); it != motion_.end();) {
         Motion& m = it->second;
-        if (alive.count(it->first)) {
+        if (m.inScene) {
             ++it;
             continue;
         }
@@ -208,6 +210,7 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
             m.hover = m.press = m.lift = 0;
             m.hop = 0;
         }
+        lastApps_.erase(it->first);
         if (m.leaving) {
             m.appear = Approach(m.appear, 0.f, dt, 11);
             m.dot = Approach(m.dot, 0.f, dt, 14);
@@ -219,7 +222,6 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
             ++it;
         }
     }
-    lastApps_.clear();
     for (const auto& it : scene.items)
         lastApps_[it.key] = it;
 
@@ -290,10 +292,6 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
     frame_.slideY = slide_ * std::max(0.f, scene.windowH - scene.bar.top);
 
     // What the glass shows this frame: the stretched shape and the ripple.
-    frame_.magnified = amount_;
-    frame_.hop = 0;
-    for (const auto& [key, m] : motion_)
-        frame_.hop = std::max(frame_.hop, m.hop);
     frame_.shape = D2D1::RectF(MapX(barL_), scene.bar.top + frame_.slideY, MapX(barR_), scene.bar.bottom + frame_.slideY);
     frame_.rippleA = 0;
     if (scene.rippleMs > 0) {
@@ -392,8 +390,8 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
     D2D1_COLOR_F ink = inkFor(inks.darkApps);
     D2D1_COLOR_F halo = haloFor(darkText);
     D2D1_COLOR_F wash = washFor(inks.darkApps);
-    winrt::com_ptr<ID2D1SolidColorBrush> brush;
-    d2d->CreateSolidColorBrush(ink, brush.put());
+    const auto& brush = contentBrush_;
+    brush->SetColor(ink);
     d2d->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     d2d->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE); // premultiplied target: no ClearType
 
@@ -413,7 +411,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
             DrawItem(d2d, scene, it, brush.get(), ink, wash); // on top of the others
     // Drop bitmaps of icons that are gone or were replaced.
     for (auto it = bitmaps_.begin(); it != bitmaps_.end();)
-        it = usedBitmaps_.count(it->first) ? std::next(it) : bitmaps_.erase(it);
+        it = std::find(usedBitmaps_.begin(), usedBitmaps_.end(), it->first) != usedBitmaps_.end() ? std::next(it) : bitmaps_.erase(it);
 
     if (sepX_ >= 0) {
         D2D1_COLOR_F c = inkFor(darkText);
@@ -503,7 +501,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
             d2d->DrawText(it.glyph.c_str(), UINT32(it.glyph.size()), f, icon, brush);
         }
     } else if (ID2D1Bitmap1* bmp = BitmapFor(d2d, it)) {
-        usedBitmaps_.insert(it.imageId);
+        usedBitmaps_.push_back(it.imageId);
         shadow_->SetInput(0, bmp);
         shadow_->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, (1.6f + 1.6f * lift + 1.2f * m.hop) * s);
         shadow_->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(0, 0, 0, (0.38f + 0.12f * lift) * m.appear));

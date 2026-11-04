@@ -384,10 +384,7 @@ void AppCatalog::Worker()
                 GetFileAttributesExW(bin.c_str(), GetFileExInfoStandard, &fa);
                 if (CompareFileTime(&fa.ftLastWriteTime, &layoutTime_) != 0 || layout_.empty()) {
                     ULONGLONG t1 = GetTickCount64();
-                    // Tests and screenshots: ATRIUM_START_LAYOUT names a file in the same format
-                    // (the user's own pins stay out of the pictures).
-                    wchar_t fixture[MAX_PATH] = {};
-                    std::wstring json = GetEnvironmentVariableW(L"ATRIUM_START_LAYOUT", fixture, MAX_PATH) ? ReadUtf8File(fixture) : ExportStartLayout();
+                    std::wstring json = ExportStartLayout();
                     // Only a complete export replaces the pins; otherwise the old ones stay and the next refresh tries again.
                     if (json.find(L"\"pinnedList\"") != std::wstring::npos) {
                         layout_ = JsonStringPairs(json);

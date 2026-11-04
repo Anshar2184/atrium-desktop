@@ -1,5 +1,5 @@
 // User-adjustable appearance and layout. One flat JSON object, shared with
-// Atrium.Settings (settings/Atrium.Settings/Model/BarSettings.cs) and the pipe
+// Atrium.Settings (settings/Atrium.Settings/BarSettings.cs) and the pipe
 // protocol (docs/SETTINGS-PROTOCOL.md). Lengths are in DIP.
 #pragma once
 
@@ -56,9 +56,6 @@ struct Settings {
     bool startOnLogin = true;        // independent of starting/stopping the current session
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;
-
-    static Settings Liquid();
-    static Settings Frosted();
 
     // Clamps every value into its valid range (input from disk or the pipe).
     void Clamp();

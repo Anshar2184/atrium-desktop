@@ -19,23 +19,6 @@ namespace json = winrt::Windows::Data::Json;
 
 namespace atrium {
 
-Settings Settings::Liquid() { return Settings{}; }
-
-Settings Settings::Frosted()
-{
-    Settings s;
-    s.preset = L"frosted";
-    s.transparency = 0.80;
-    s.blur = 1.0;
-    s.refraction = 6;
-    s.edge = 10;
-    s.dispersion = 0.04;
-    s.highlight = 0.45;
-    s.shadow = 0.30;
-    s.tint = 0xF5F5FA;
-    return s;
-}
-
 void Settings::Clamp()
 {
     auto c = [](double& v, double lo, double hi, double fallback) {

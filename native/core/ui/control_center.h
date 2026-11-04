@@ -36,9 +36,6 @@ public:
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
     void SetBarHeight(float dip) { barH_ = dip; }
     HWND Hwnd() const { return surface_.Hwnd(); }
-    // Test hooks: log what is shown (screen px); act as a click on `id`.
-    void LogState() const;
-    void TestClick(const std::wstring& id);
     // Windows reported the built-in screen's brightness (keys, quick settings).
     void BrightnessChanged(int percent);
 

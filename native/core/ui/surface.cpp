@@ -17,8 +17,8 @@
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
-#include <set>
 #include <thread>
+#include <vector>
 
 #pragma comment(lib, "dcomp.lib")
 
@@ -49,7 +49,7 @@ RECT PopupRect(RECT bar, D2D1_SIZE_F sizeDip, PopupAlign align)
 namespace {
 
 constexpr wchar_t kClass[] = L"AtriumSurface";
-constexpr UINT_PTR kHideTimer = 0x5A01, kFrameTimer = 0x5A02, kGlassWaitTimer = 0x5A03;
+constexpr UINT_PTR kHideTimer = 0x5A01, kGlassWaitTimer = 0x5A03;
 constexpr UINT kHideMs = 140;     // the closing pop (PopVisual) lasts 130 ms
 constexpr double kGlassWaitMs = 300; // then a plain panel stands in for missing glass
 
@@ -70,7 +70,8 @@ public:
     void Want(HWND h)
     {
         std::lock_guard g(mutex_);
-        wanting_.insert(h);
+        if (std::find(wanting_.begin(), wanting_.end(), h) == wanting_.end())
+            wanting_.push_back(h);
         if (!thread_.joinable())
             thread_ = std::thread([this] { Run(); });
         cv_.notify_one();
@@ -89,6 +90,7 @@ private:
     }
     void Run()
     {
+        std::vector<HWND> due;
         for (;;) {
             {
                 std::unique_lock g(mutex_);
@@ -98,18 +100,18 @@ private:
             }
             if (FAILED(DwmFlush()))
                 Sleep(8);
-            std::set<HWND> due;
             {
                 std::lock_guard g(mutex_);
                 due.swap(wanting_);
             }
             for (HWND h : due)
                 PostMessageW(h, WM_SURFACE_FRAME, 0, 0);
+            due.clear();
         }
     }
     std::mutex mutex_;
     std::condition_variable cv_;
-    std::set<HWND> wanting_;
+    std::vector<HWND> wanting_;
     bool stop_ = false;
     std::thread thread_;
 };
@@ -674,11 +676,6 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
             self->FinishHide();
             return 0;
         }
-        if (w == kFrameTimer) { // older requests
-            KillTimer(h, kFrameTimer);
-            self->Paint();
-            return 0;
-        }
         if (w == kGlassWaitTimer) {
             KillTimer(h, kGlassWaitTimer);
             self->Invalidate(); // a plain panel if the glass still has not come
@@ -815,7 +812,6 @@ void Surface::Hide(bool animate)
     if (!visible_)
         return;
     visible_ = false;
-    KillTimer(hwnd_, kFrameTimer);
     if (!animate || !visual_ || !shared_) {
         FinishHide();
         return;
@@ -861,12 +857,6 @@ void Surface::Invalidate()
 {
     if (visible_)
         Paint();
-}
-
-void Surface::RequestFrame()
-{
-    if (visible_)
-        FramePump::Get().Want(hwnd_);
 }
 
 void Surface::ResetDevice()
@@ -1024,8 +1014,8 @@ void Surface::Paint()
         }
         burst_ = Burst{};
     }
-    if (frameWanted_)
-        RequestFrame();
+    if (frameWanted_ && visible_)
+        FramePump::Get().Want(hwnd_);
 }
 
 } // namespace atrium

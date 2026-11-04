@@ -38,7 +38,6 @@ bool ToggleMute();
 void WatchVolume(HWND hwnd, UINT msg);
 
 enum class PowerAction { Sleep, Restart, Shutdown };
-// ATRIUM_POWER_DRYRUN=1 only logs the action (tests).
 bool RunPowerAction(PowerAction action);
 
 } // namespace atrium

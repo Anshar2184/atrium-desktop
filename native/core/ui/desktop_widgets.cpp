@@ -257,8 +257,6 @@ DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
     SetWindowLongPtrW(host_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     world_.city = LocalCity();
     world_.lunar = &lunar_;
-    wchar_t test[8] = {};
-    test_ = GetEnvironmentVariableW(L"ATRIUM_WIDGETS_TEST", test, 8) && test[0] == L'1';
 }
 
 DesktopWidgets::~DesktopWidgets()
@@ -716,20 +714,11 @@ void DesktopWidgets::Restack()
 {
     if (!enabled_ || widgets_.empty())
         return;
-    if (std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->dragging; }))
-        return; // the one being dragged stays over the windows
     zMoving_ = true;
     struct Done {
         bool& flag;
         ~Done() { flag = false; }
     } done{zMoving_};
-    if (test_) {
-        // Screenshots: over the test backdrop.
-        for (auto& w : widgets_)
-            if (w->surface)
-                SetWindowPos(w->surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        return;
-    }
     HWND fg = GetForegroundWindow();
     // Atrium's own windows (the bar, its menus) and the taskbar change nothing.
     bool neutral = fg && (IsOurs(fg) || ClassOf(fg) == L"Shell_TrayWnd" || ClassOf(fg) == L"Shell_SecondaryTrayWnd");
@@ -1000,7 +989,7 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
         // The widgets stay where Restack put them: a window shown or touched is not raised
         // over the windows by Windows (a note being typed into may come forward).
         auto* pos = reinterpret_cast<WINDOWPOS*>(lp);
-        if (!zMoving_ && !w.dragging && !w.content.editing && GetTickCount64() - w.activating > 500)
+        if (!zMoving_ && !w.content.editing && (w.dragging || GetTickCount64() - w.activating > 500))
             pos->flags |= SWP_NOZORDER;
         return false;
     }
@@ -1058,10 +1047,7 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
             w.dragging = true;
             w.glideMs = 0;
             EndEdit(w);
-            // Over the windows while it moves, as macOS lifts a dragged widget.
-            zMoving_ = true;
-            SetWindowPos(w.surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            zMoving_ = false;
+            Restack(); // dragging stays on the desktop, below open application windows
         }
         if (w.dragging)
             w.surface->Move(RECT{w.downRect.left + dx, w.downRect.top + dy, w.downRect.right + dx, w.downRect.bottom + dy});
@@ -1447,69 +1433,6 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
     }
     if (w.content.editing)
         PlaceImeWindow(w);
-}
-
-// ---- tests ---------------------------------------------------------------------
-
-void DesktopWidgets::LogState() const
-{
-    Log(L"widgets: state enabled=%d raised=%d count=%zu cols=%d rows=%d", enabled_ ? 1 : 0, raised_ ? 1 : 0, widgets_.size(), Cols(), Rows());
-    for (size_t i = 0; i < widgets_.size(); ++i) {
-        const Widget& w = *widgets_[i];
-        RECT r = w.surface ? w.surface->Rect() : RECT{};
-        // What is right under it: the next visible window that is not a widget.
-        std::wstring under;
-        bool topmost = false;
-        if (w.surface) {
-            topmost = (GetWindowLongPtrW(w.surface->Hwnd(), GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
-            for (HWND h = GetWindow(w.surface->Hwnd(), GW_HWNDNEXT); h; h = GetWindow(h, GW_HWNDNEXT)) {
-                bool widget = std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& o) { return o->surface && o->surface->Hwnd() == h; });
-                if (!widget && IsWindowVisible(h)) {
-                    under = ClassOf(h);
-                    break;
-                }
-            }
-        }
-        Log(L"widgets: w%zu kind=%s size=%s cell=%d,%d visible=%d topmost=%d under=%s rect=%ld,%ld,%ld,%ld text=%zu items=%zu photo=%d", i,
-            NameOf(w.kind), SizeName(w.size), w.col, w.row, w.surface && w.surface->Visible() ? 1 : 0, topmost ? 1 : 0,
-            under.empty() ? L"-" : under.c_str(), r.left, r.top, r.right, r.bottom, w.content.text.size(), w.content.items.size(),
-            w.content.image ? 1 : 0);
-    }
-}
-
-void DesktopWidgets::TestAction(const std::wstring& arg)
-{
-    auto part = [&](int n) {
-        size_t b = 0;
-        for (int i = 0; i < n && b != std::wstring::npos; ++i)
-            b = arg.find(L':', b) == std::wstring::npos ? std::wstring::npos : arg.find(L':', b) + 1;
-        if (b == std::wstring::npos)
-            return std::wstring();
-        size_t e = arg.find(L':', b);
-        return arg.substr(b, e == std::wstring::npos ? std::wstring::npos : e - b);
-    };
-    std::wstring verb = part(0);
-    if (verb == L"add") {
-        AddNamed(part(1), part(2));
-    } else if (verb == L"remove" || verb == L"size" || verb == L"type") {
-        size_t i = size_t(_wtoi(part(1).c_str()));
-        if (i >= widgets_.size())
-            return;
-        Widget& w = *widgets_[i];
-        if (verb == L"remove") {
-            Remove(w);
-        } else if (verb == L"size") {
-            Resize(w, ParseSize(part(2)));
-        } else if (Editable(w.kind) && w.surface) {
-            if (w.kind == WidgetKind::Reminders)
-                w.content.items.push_back({});
-            StartEdit(w, w.kind == WidgetKind::Reminders ? int(w.content.items.size()) - 1 : -1);
-            Insert(w, part(2));
-            EndEdit(w);
-        }
-    } else if (verb == L"restack") {
-        Restack();
-    }
 }
 
 } // namespace atrium

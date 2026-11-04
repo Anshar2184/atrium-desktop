@@ -189,19 +189,6 @@ void SystemChrome::Enforce()
     }
 }
 
-void SystemChrome::LogState() const
-{
-    int visible = 0, total = 0;
-    for (HWND w : Taskbars()) {
-        ++total;
-        visible += IsWindowVisible(w) ? 1 : 0;
-    }
-    QUERY_USER_NOTIFICATION_STATE quns = QUNS_ACCEPTS_NOTIFICATIONS;
-    SHQueryUserNotificationState(&quns);
-    Log(L"chrome: state taskbarHidden=%d taskbars=%d visible=%d autoHide=%d autoHideOurs=%d quietOurs=%d profile=%s quns=%d", taskbarHidden_ ? 1 : 0,
-        total, visible, AutoHide() ? 1 : 0, autoHideOurs_ ? 1 : 0, quietOurs_ ? 1 : 0, QuietProfile().c_str(), int(quns));
-}
-
 void SystemChrome::EmergencyRestore()
 {
     if (g_chrome && g_chrome->taskbarHidden_)

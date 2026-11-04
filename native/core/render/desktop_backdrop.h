@@ -42,7 +42,6 @@ public:
     POINT Origin() const { return origin_; }
     // Bumped with every new picture.
     unsigned Version() const { return version_; }
-    const wchar_t* Source() const;
 
 private:
     bool StartCapture();

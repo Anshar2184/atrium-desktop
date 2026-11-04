@@ -215,50 +215,6 @@ void TrayPanel::Activate(const std::wstring& id, bool right)
         Close();
 }
 
-void TrayPanel::TestClick(const std::wstring& which, bool right)
-{
-    int index = -1;
-    if (!which.empty() && iswdigit(which[0]))
-        index = _wtoi(which.c_str());
-    else
-        for (size_t i = 0; i < icons_.size() && index < 0; ++i)
-            if (icons_[i].tip.find(which) != std::wstring::npos)
-                index = int(i);
-    Log(L"tray: test click on icon %d", index);
-    if (index >= 0)
-        Activate(L"icon:" + std::to_wstring(index), right);
-}
-
-void TrayPanel::LogFind(const std::wstring& which) const
-{
-    const RECT r = surface_.Rect();
-    const float s = surface_.Scale();
-    for (size_t i = 0; i < icons_.size() && i < hits_.size(); ++i)
-        if (icons_[i].tip.find(which) != std::wstring::npos) {
-            const D2D1_RECT_F& h = hits_[i].rect;
-            Log(L"tray: found icon:%zu@%d,%d recognised=%d", i, int(float(r.left) + (h.left + h.right) / 2 * s), int(float(r.top) + (h.top + h.bottom) / 2 * s),
-                icons_[i].exe.empty() ? 0 : 1);
-            return;
-        }
-    Log(L"tray: not found");
-}
-
-void TrayPanel::LogState() const
-{
-    const RECT r = surface_.Rect();
-    const float s = surface_.Scale();
-    std::wstring spots;
-    for (const Hit& h : hits_)
-        spots += L" " + h.id + L"@" + std::to_wstring(int(float(r.left) + (h.rect.left + h.rect.right) / 2 * s)) + L"," +
-                 std::to_wstring(int(float(r.top) + (h.rect.top + h.rect.bottom) / 2 * s));
-    Log(L"tray: spots%s", spots.c_str());
-    int recognised = int(std::count_if(icons_.begin(), icons_.end(), [](const TrayIcon& t) { return !t.exe.empty(); }));
-    int pictured = int(std::count_if(icons_.begin(), icons_.end(), [](const TrayIcon& t) { return bool(t.image); }));
-    Log(L"tray: state visible=%d foreground=%d icons=%zu recognised=%d pictured=%d available=%d rect=%ld,%ld,%ld,%ld", surface_.Visible() ? 1 : 0,
-        GetForegroundWindow() == surface_.Hwnd() ? 1 : 0, icons_.size(), recognised, pictured, model_.Available() ? 1 : 0, r.left, r.top, r.right,
-        r.bottom);
-}
-
 bool TrayPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};

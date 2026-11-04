@@ -164,8 +164,8 @@ public:
     // Plays the closing animation, then hides the window. Visible() is false at once.
     void Hide(bool animate = true);
     bool Visible() const { return visible_; }
+    // Input and content changes paint immediately; continuing animation frames use the frame pump.
     void Invalidate();
-    void RequestFrame();
     HWND Hwnd() const { return hwnd_; }
     float Scale() const { return scale_; }
     RECT Rect() const { return rect_; } // the content, screen px
@@ -177,8 +177,6 @@ public:
     // Separate pieces of glass (content DIP), back to front; empty: the whole
     // content with the radius. Published to the glass when they change.
     void SetShapes(const std::vector<ShapeDip>& shapes);
-    bool DarkInk() const { return darkInk_; }
-    size_t Shapes() const { return shapes_.size(); }
     // A press at (x, y) DIP in content coordinates: the glass ripples from there.
     void Ripple(float x, float y);
     POINT ScreenToContent(POINT screen) const;

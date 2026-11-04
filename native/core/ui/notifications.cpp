@@ -105,8 +105,6 @@ int Notifications::Unread() const
 
 int Notifications::QuietState() const
 {
-    if (quietOverride_)
-        return quietOverride_;
     QUERY_USER_NOTIFICATION_STATE state = QUNS_ACCEPTS_NOTIFICATIONS;
     if (FAILED(SHQueryUserNotificationState(&state)))
         return QUNS_ACCEPTS_NOTIFICATIONS;
@@ -962,36 +960,6 @@ bool Notifications::Message(Mode mode, UINT m, WPARAM w, LPARAM l, LRESULT& resu
     }
     (void)result;
     return false;
-}
-
-void Notifications::LogState() const
-{
-    for (Mode mode : {Mode::Popup, Mode::Center}) {
-        const View& v = ViewOf(mode);
-        if (!v.surface->Visible())
-            continue;
-        // Screen px, for tests.
-        const RECT r = v.surface->Rect();
-        const float s = v.surface->Scale();
-        std::wstring spots;
-        for (const Hit& h : v.hits)
-            spots += L" " + h.id + L"@" + std::to_wstring(int(float(r.left) + (h.rect.left + h.rect.right) / 2 * s)) + L"," +
-                     std::to_wstring(int(float(r.top) + (h.rect.top + h.rect.bottom) / 2 * s));
-        Log(L"notify: spots %s%s", mode == Mode::Popup ? L"popup" : L"center", spots.c_str());
-    }
-    // Cards that are flying out are already gone for the user.
-    std::vector<const Notice*> live;
-    for (const auto& n : notices_)
-        if (!leaving_.count(n.id))
-            live.push_back(&n);
-    RECT p = popup_.surface->Rect(), c = center_.surface->Rect();
-    HWND fg = GetForegroundWindow();
-    Log(L"notify: state count=%zu unread=%d popup=%d popupCards=%zu center=%d expanded=%d bodyHidden=%d quiet=%d "
-        L"popupRect=%ld,%ld,%ld,%ld centerRect=%ld,%ld,%ld,%ld fgPopup=%d fgCenter=%d first='%s' firstCount=%d radius=%.0f popupShapes=%zu centerShapes=%zu popupFront=%d centerFront=%d",
-        live.size(), Unread(), popup_.surface->Visible() ? 1 : 0, popupIds_.size(), center_.surface->Visible() ? 1 : 0, expanded_ ? 1 : 0,
-        BodyHidden() ? 1 : 0, QuietState(), p.left, p.top, p.right, p.bottom, c.left, c.top, c.right, c.bottom, fg == popup_.surface->Hwnd() ? 1 : 0,
-        fg == center_.surface->Hwnd() ? 1 : 0, live.empty() ? L"" : live[0]->title.c_str(), live.empty() ? 0 : live[0]->count, radius_, popup_.surface->Shapes(),
-        center_.surface->Shapes(), popup_.front, center_.front);
 }
 
 } // namespace atrium

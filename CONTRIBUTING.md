@@ -1,6 +1,6 @@
 # Contributing to Atrium Desktop
 
-Thanks for your interest. Atrium is in development (v0.9), so the most valuable contributions right now are:
+Thanks for your interest. The most valuable contributions to Atrium right now are:
 
 - **Reports from other machines**: stable Windows 11 builds, multiple monitors, HDR, high refresh rates, desktop icons enabled, AMD/NVIDIA-only systems. Describe what you saw and attach `%LOCALAPPDATA%\Atrium\logs\core.log` to an issue.
 - **Design review**: the design language is in [docs/DESIGN.md](docs/DESIGN.md).

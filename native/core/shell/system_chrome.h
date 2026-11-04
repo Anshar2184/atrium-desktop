@@ -28,7 +28,6 @@ public:
     // Do Not Disturb is on because Atrium turned it on (Atrium's own cards
     // still pop up then).
     bool QuietIsOurs() const { return quietOurs_; }
-    void LogState() const;
     // From a crash handler: shows the taskbars (no allocation, no COM).
     static void EmergencyRestore();
 

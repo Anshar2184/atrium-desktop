@@ -58,11 +58,6 @@ public:
     // Corner radius (DIP), the bar's; the cards are concentric with it.
     void SetRadius(float dip);
     int Unread() const;
-    // Tests: pretend SHQueryUserNotificationState returned `state` (0: use the real one).
-    void SetQuietOverride(int state) { quietOverride_ = state; }
-    void LogState() const;
-    // As a click on `id` ("stack", "collapse", ...) in the open list, else the popup.
-    void TestClick(const std::wstring& id) { Click(center_.surface->Visible() ? Mode::Center : Mode::Popup, id); }
 
 private:
     enum class Mode { Popup, Center };
@@ -136,7 +131,6 @@ private:
     uint64_t nextId_ = 1;
     double timeout_ = 6;
     bool hideBody_ = false;
-    int quietOverride_ = 0;
     ULONGLONG centerClosed_ = 0;
     float radius_ = 20;
     std::map<uint64_t, double> leaving_; // closing cards: ClockMs() when closed

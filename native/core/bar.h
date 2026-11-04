@@ -38,9 +38,7 @@ public:
     // debugCapturable: development only. Leaves the bar visible to screen capture
     // and freezes the backdrop after the first frame so the glass never samples
     // itself; used to take screenshots of the real surface.
-    // debugLayout: development only; logs the screen rectangle of every app
-    // after each layout (used by tests/e2e-bar.ps1 to click real items).
-    Bar(HINSTANCE instance, bool debugCapturable, bool debugLayout = false);
+    Bar(HINSTANCE instance, bool debugCapturable);
     ~Bar();
     Bar(const Bar&) = delete;
     Bar& operator=(const Bar&) = delete;
@@ -63,10 +61,6 @@ public:
     HWND PreviousForeground() const { return previousForeground_; }
     // Glass layers of popup windows (GlassHost).
     void SetPanel(const GlassPanel& panel) override;
-    // Launch feedback: the app's icon hops up to `hops` times (fewer once it runs).
-    void Bounce(const std::wstring& key, int hops);
-    // Test hook: logs the stacking state now and the next rendered frame.
-    void LogState();
     // Stops the render thread, pumping this (UI) thread's messages meanwhile, before the popups and
     // widgets it draws for go. False if it did not stop within `timeoutMs` (a stuck driver call).
     bool StopRendering(DWORD timeoutMs);
@@ -129,6 +123,7 @@ private:
     static LRESULT CALLBACK VisualProc(HWND, UINT, WPARAM, LPARAM);
     static LRESULT CALLBACK InputProc(HWND, UINT, WPARAM, LPARAM);
     LRESULT OnInput(HWND h, UINT m, WPARAM w, LPARAM l);
+    void Bounce(const std::wstring& key);
     std::wstring HitTest(POINT client) const;
     // Copies scene state to the render thread; `bar` false: only the popups'
     // glass changed (the bar is not drawn again for it).
@@ -156,7 +151,6 @@ private:
 
     bool debugCapturable_ = false;
     void ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread
-    bool debugLayout_ = false;
     HWND visual_ = nullptr;
     HWND input_ = nullptr;
     HWND tooltip_ = nullptr;
@@ -195,7 +189,7 @@ private:
     int rise_ = 0;        // how far magnified or hopping icons reach above the shape
     int radius_ = 0;
     bool regionExtended_ = false;
-    std::map<std::wstring, std::pair<double, int>> bounces_; // key -> start (ClockMs), hops
+    std::map<std::wstring, double> bounces_; // key -> start (ClockMs)
     std::map<HWND, GlassPanel> panels_;
     // Stacking guard.
     HWINEVENTHOOK hooks_[3]{};
@@ -206,7 +200,6 @@ private:
     ULONGLONG leftAt_ = 0; // when the pointer left a revealed bar
     std::map<HWND, std::pair<int, ULONGLONG>> raises_; // windows we were raised over: count, first time
     HWND lastCover_ = nullptr;
-    std::atomic<bool> frameLog_{false}; // the render thread logs its next frame
     bool appliedVisible_ = false;
     std::wstring fileHoverKey_;
     winrt::com_ptr<IDropTarget> dropTarget_;

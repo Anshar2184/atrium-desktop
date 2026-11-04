@@ -280,24 +280,6 @@ void CalendarPanel::Activate(const std::wstring& id)
     }
 }
 
-void CalendarPanel::TestClick(const std::wstring& id) { Activate(id); }
-
-void CalendarPanel::LogState() const
-{
-    const RECT r = surface_.Rect();
-    const float s = surface_.Scale();
-    std::wstring spots;
-    for (const Hit& h : hits_)
-        if (h.id.rfind(L"day:", 0) != 0 || h.id == L"day:0" || h.id == L"day:41")
-            spots += L" " + h.id + L"@" + std::to_wstring(int(float(r.left) + (h.rect.left + h.rect.right) / 2 * s)) + L"," +
-                     std::to_wstring(int(float(r.top) + (h.rect.top + h.rect.bottom) / 2 * s));
-    Log(L"calendar: spots%s", spots.c_str());
-    std::wstring first = days_.empty() ? L"" : std::to_wstring(days_[0].m) + L"/" + std::to_wstring(days_[0].d) + L" " + days_[0].lunar;
-    Log(L"calendar: state visible=%d month=%d-%02d selected=%d-%02d-%02d first=%s lunar=%s shapes=%zu rect=%ld,%ld,%ld,%ld", surface_.Visible() ? 1 : 0, year_,
-        month_, selected_.wYear, selected_.wMonth, selected_.wDay, first.c_str(), lunar_.Line(selected_.wYear, selected_.wMonth, selected_.wDay).c_str(),
-        surface_.Shapes(), r.left, r.top, r.right, r.bottom);
-}
-
 bool CalendarPanel::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
 {
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};

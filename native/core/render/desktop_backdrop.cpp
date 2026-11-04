@@ -115,11 +115,6 @@ DesktopBackdrop::~DesktopBackdrop()
     StopWallpaper();
 }
 
-const wchar_t* DesktopBackdrop::Source() const
-{
-    return session_ ? L"desktop window" : worker_.joinable() ? L"wallpaper" : L"none";
-}
-
 void DesktopBackdrop::Update(const std::wstring& mode)
 {
     const std::wstring want = mode == L"wallpaper" || mode == L"off" ? mode : L"desktop";

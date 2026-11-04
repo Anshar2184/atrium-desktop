@@ -40,11 +40,6 @@ public:
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
     // Height of the bar (DIP): the status capsule has the same.
     void SetBarHeight(float dip) { barH_ = dip; }
-    // Test hooks (Atrium.Core.exe --command): type through the real WM_CHAR
-    // path, and log what the menu shows (positions in screen px).
-    void Type(const std::wstring& text);
-    void LogState() const;
-    void TestClick(const std::wstring& id) { Activate(id); } // as a click on `id` ("power", "page:1", ...)
 
     std::function<void(const PinnedApp&)> onPin;            // pin to the bar (the dock)
     std::function<void(const std::wstring& what)> onSystem; // "network", "volume", "battery", "tray", "account"

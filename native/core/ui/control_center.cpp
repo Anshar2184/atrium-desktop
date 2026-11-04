@@ -1077,8 +1077,6 @@ void ControlCenter::Activate(const std::wstring& id)
     Log(L"control: %s", id.rfind(L"net:", 0) == 0 ? L"connect" : id.rfind(L"bt:", 0) == 0 ? L"device" : id.rfind(L"disp:", 0) == 0 ? L"project" : id.c_str());
 }
 
-void ControlCenter::TestClick(const std::wstring& id) { Activate(id); }
-
 void ControlCenter::BrightnessChanged(int percent)
 {
     // Not while the slider's own value is on its way, nor where WMI cannot set it.
@@ -1091,36 +1089,6 @@ void ControlCenter::BrightnessChanged(int percent)
     if (Size().height != before)
         Place();
     surface_.Invalidate();
-}
-
-void ControlCenter::LogState() const
-{
-    const RECT r = surface_.Rect();
-    const float s = surface_.Scale();
-    std::wstring spots;
-    for (const Hit& h : hits_)
-        if ((h.id.rfind(L"net:", 0) != 0 && h.id.rfind(L"bt:", 0) != 0 && h.id.rfind(L"app:", 0) != 0 && h.id.rfind(L"amute:", 0) != 0 &&
-             h.id.rfind(L"disp:", 0) != 0) ||
-            h.id == L"net:0" || h.id == L"bt:0" || h.id == L"app:0" || h.id == L"amute:0" || h.id == L"disp:0")
-            spots += L" " + h.id + L"@" + std::to_wstring(int(float(r.left) + (h.rect.left + h.rect.right) / 2 * s)) + L"," +
-                     std::to_wstring(int(float(r.top) + (cardTop_ + (h.rect.top + h.rect.bottom) / 2) * s));
-    Log(L"control: spots%s", spots.c_str());
-    const wchar_t* page = page_ == Page::Main       ? L"main"
-                          : page_ == Page::Wifi      ? L"wifi"
-                          : page_ == Page::Bluetooth ? L"bluetooth"
-                          : page_ == Page::Sound     ? L"sound"
-                                                     : L"cast";
-    int def = -1;
-    for (size_t i = 0; i < outputs_.size(); ++i)
-        if (outputs_[i].isDefault)
-            def = int(i);
-    Log(L"control: state visible=%d page=%s connected=%d wifi=%d wifiRadio=%d signal=%d networks=%zu scanning=%d bluetooth=%d btOn=%d devices=%zu "
-        L"brightness=%d volume=%d muted=%d battery=%d percent=%d outputs=%zu defaultOutput=%d apps=%zu displays=%zu searching=%d mode=%d "
-        L"monitors=%d shapes=%zu rect=%ld,%ld,%ld,%ld",
-        surface_.Visible() ? 1 : 0, page, status_.connected ? 1 : 0, status_.wifi ? 1 : 0, radios_.wifiOn ? 1 : 0, status_.signal, networks_.size(),
-        scanning_ ? 1 : 0, radios_.btPresent ? 1 : 0, radios_.btOn ? 1 : 0, devices_.size(), brightness_, status_.volume, status_.muted ? 1 : 0,
-        status_.battery ? 1 : 0, status_.batteryPercent, outputs_.size(), def, apps_.size(), displays_.size(), finder_.Searching() ? 1 : 0,
-        int(mode_), monitors_, surface_.Shapes(), r.left, r.top, r.right, r.bottom);
 }
 
 bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)

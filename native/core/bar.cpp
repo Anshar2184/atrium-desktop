@@ -118,15 +118,15 @@ GlassParams ParamsFor(const Settings& s, float scale)
 
 // The popups' glass: exactly the bar's material (D26), one set of parameters
 // per piece of glass in the window.
-std::vector<GlassParams> PanelParams(const Settings& s, float scale, const GlassPanel& p)
+void PanelParams(const Settings& s, float scale, const GlassPanel& p, std::vector<GlassParams>& out)
 {
-    std::vector<GlassParams> out;
+    out.clear();
     GlassParams g = ParamsFor(s, scale);
     g.inset = p.inset;
     if (p.shapes.empty()) {
         g.radius = p.radius;
         out.push_back(g);
-        return out;
+        return;
     }
     for (const GlassShape& sh : p.shapes) {
         g.shapeL = sh.left;
@@ -149,7 +149,6 @@ std::vector<GlassParams> PanelParams(const Settings& s, float scale, const Glass
         }
         out.push_back(g);
     }
-    return out;
 }
 
 // Luminance of what the glass shows (backdrop mixed with the tint), the
@@ -255,7 +254,7 @@ struct BarDropTarget : winrt::implements<BarDropTarget, IDropTarget> {
     }
 };
 
-Bar::Bar(HINSTANCE instance, bool debugCapturable, bool debugLayout) : debugCapturable_(debugCapturable), debugLayout_(debugLayout)
+Bar::Bar(HINSTANCE instance, bool debugCapturable) : debugCapturable_(debugCapturable)
 {
     RegisterClasses(instance);
     wake_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -571,7 +570,7 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
             // Starting an app (or another instance) hops its icon, as in the macOS Dock.
             auto t = std::find_if(items_.begin(), items_.end(), [&](const TaskItem& i) { return i.key == key; });
             if (t != items_.end() && (launch || t->windows.empty()))
-                Bounce(key, t->windows.empty() ? 4 : 1);
+                Bounce(key);
             (launch ? onLaunch : onActivate)(key);
         }
         return 0;
@@ -844,10 +843,10 @@ void Bar::Relayout()
         }
     }
 
-    // Launch bounces older than their longest possible run are over.
+    // Launch feedback is one 480 ms hop.
     const double now = ClockMs();
     for (auto it = bounces_.begin(); it != bounces_.end();)
-        it = now - it->second.first > 4000 ? bounces_.erase(it) : std::next(it);
+        it = now - it->second > 480 ? bounces_.erase(it) : std::next(it);
 
     // Scene in window coordinates.
     BarScene scene;
@@ -924,8 +923,7 @@ void Bar::Relayout()
         it.active = t.active;
         it.attention = t.attention;
         if (auto b = bounces_.find(t.key); b != bounces_.end()) {
-            it.bounceMs = b->second.first;
-            it.bounces = b->second.second;
+            it.bounceMs = b->second;
         }
         // Icons are cached per key until the model reports a new version.
         CachedIcon c;
@@ -1009,9 +1007,6 @@ void Bar::Relayout()
     SetRegion(regionExtended_);
     UpdateTooltips();
     Publish();
-    if (debugLayout_ && !dragging_)
-        for (const auto& hit : hits_)
-            Log(L"layout: %s %ld,%ld,%ld,%ld", hit.key.c_str(), x + hit.rect.left, y + insetTop, x + hit.rect.right, y + hit.rect.bottom);
 }
 
 void Bar::SetRegion(bool extended)
@@ -1039,40 +1034,14 @@ void Bar::SetRegion(bool extended)
     appliedRgn_[5] = ext;
 }
 
-void Bar::LogState()
+void Bar::Bounce(const std::wstring& key)
 {
-    // Place in the z-order: windows above the bar that overlap it.
-    RECT bar = BarRect(), r{}, overlap{};
-    int above = 0, overlapping = 0;
-    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
-    bool trayAbove = false;
-    for (HWND w = GetTopWindow(nullptr); w && w != visual_; w = GetWindow(w, GW_HWNDNEXT)) {
-        if (!IsWindowVisible(w))
-            continue;
-        ++above;
-        if (w == tray)
-            trayAbove = true;
-        DWORD pid = 0;
-        GetWindowThreadProcessId(w, &pid);
-        if (pid != GetCurrentProcessId() && GetWindowRect(w, &r) && IntersectRect(&overlap, &r, &bar) && !IgnoredCover(w) && w != tray)
-            ++overlapping;
-    }
-    Log(L"bar: state visible=%d tucked=%d topmost=%d shown=%d coveredBy=%d trayAbove=%d bar=%ld,%ld,%ld,%ld", visible_ ? 1 : 0,
-        tucked_ ? 1 : 0, (GetWindowLongW(visual_, GWL_EXSTYLE) & WS_EX_TOPMOST) ? 1 : 0, IsWindowVisible(visual_) ? 1 : 0, overlapping,
-        trayAbove ? 1 : 0, bar.left, bar.top, bar.right, bar.bottom);
-    frameLog_ = true;
-    SetEvent(wake_);
-}
-
-void Bar::Bounce(const std::wstring& key, int hops)
-{
-    Log(L"bar: bounce %s (%d)", key.c_str(), hops);
+    Log(L"bar: bounce %s", key.c_str());
     double now = ClockMs();
-    bounces_[key] = {now, hops};
+    bounces_[key] = now;
     for (auto& it : scene_.items)
         if (it.key == key) {
             it.bounceMs = now;
-            it.bounces = hops;
         }
     Publish();
 }
@@ -1528,9 +1497,6 @@ bool Bar::RenderSession()
     // itself (so screenshots may show them); else Windows.Graphics.Capture
     // with Atrium kept out of every capture.
     std::unique_ptr<BackdropSource> capture;
-    wchar_t forced[8] = {};
-    if (GetEnvironmentVariableW(L"ATRIUM_CAPTURE", forced, 8) && _wcsicmp(forced, L"wgc") == 0)
-        duplicationFailed_ = true; // ATRIUM_CAPTURE=wgc: the old way (comparisons)
     if (!duplicationFailed_) {
         HRESULT why = S_OK;
         bool elsewhere = false;
@@ -1638,6 +1604,7 @@ bool Bar::RenderSession()
         }
         gpu.context->CopyResource(lastFrame.get(), frame);
     };
+    std::vector<GlassParams> gp;
     // Draws the panels; true while one of them animates.
     auto renderPanels = [&](const Snapshot& snap, ID3D11Texture2D* source, bool& lost) {
         for (auto it = panels.begin(); it != panels.end();) {
@@ -1710,7 +1677,7 @@ bool Bar::RenderSession()
             } else if (ID3D11Texture2D* below = source ? source : (moved || !r.HasBackdrop()) ? lastFrame.get() : nullptr) {
                 r.UpdateBackdrop(below, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
             }
-            std::vector<GlassParams> gp = PanelParams(snap.settings, snap.scale, p);
+            PanelParams(snap.settings, snap.scale, p, gp);
             if (auto rb = r.Poll()) {
                 changed |= rb->changed;
                 under = rb->changed;
@@ -2001,11 +1968,6 @@ bool Bar::RenderSession()
         appsInk.Target(darkIcons ? 1.f : 0.f, nowMs);
         animating |= clockInk.Moving(nowMs) || appsInk.Moving(nowMs);
         const Ink inks{clockInk.Value(nowMs), appsInk.Value(nowMs)};
-        if (frameLog_.exchange(false)) {
-            const BarFrame& f = painter.Frame();
-            Log(L"bar: frame shape=%.0f-%.0f base=%.0f-%.0f magnified=%.2f hop=%.2f ripple=%.2f", f.shape.left, f.shape.right, snap.scene.bar.left,
-                snap.scene.bar.right, f.magnified, f.hop, f.rippleA);
-        }
         ULONGLONG now = GetTickCount64();
         bool force = snap.generation != drawnGeneration || textKey != drawnText || dark != drawnDark || darkIcons != drawnDarkIcons ||
                      animating || barOwed || now - lastPresent > kStaleMs;

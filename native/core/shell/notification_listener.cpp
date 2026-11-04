@@ -8,7 +8,6 @@
 #include <winrt/Windows.UI.Notifications.Management.h>
 #include <winrt/Windows.UI.Notifications.h>
 
-#include <functional>
 #include <map>
 
 namespace atrium {
@@ -64,40 +63,6 @@ Notice ToNotice(const wun::UserNotification& un)
 
 } // namespace
 
-std::wstring NotificationListener::Probe()
-{
-    std::wstring out;
-    try {
-        (void)winrt::Windows::ApplicationModel::Package::Current();
-        out += L"identity=packaged";
-    } catch (...) {
-        out += L"identity=none";
-    }
-    try {
-        auto listener = wunm::UserNotificationListener::Current();
-        auto access = listener.GetAccessStatus();
-        out += std::wstring(L" access=") + AccessName(access);
-        if (access == wunm::UserNotificationListenerAccessStatus::Allowed) {
-            auto list = listener.GetNotificationsAsync(wun::NotificationKinds::Toast).get();
-            out += L" readable=" + std::to_wstring(list.Size());
-            try {
-                auto token = listener.NotificationChanged([](auto&&, auto&&) {});
-                listener.NotificationChanged(token);
-                out += L" event=ok";
-            } catch (const winrt::hresult_error& e) {
-                wchar_t hr[16];
-                swprintf_s(hr, L"0x%08X", unsigned(e.code()));
-                out += std::wstring(L" event=") + hr;
-            }
-        }
-    } catch (const winrt::hresult_error& e) {
-        wchar_t hr[16];
-        swprintf_s(hr, L"0x%08X", unsigned(e.code()));
-        out += std::wstring(L" error=") + hr;
-    }
-    return out;
-}
-
 NotificationListener::NotificationListener(HWND notify, UINT msg) : notify_(notify), msg_(msg)
 {
     wake_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -122,29 +87,25 @@ void NotificationListener::Run()
             // Asking needs a user prompt, which belongs to the settings, not to a
             // background thread; the user grants it in Windows privacy settings.
             Log(L"listener: access %s, not mirroring Windows notifications", AccessName(access));
-            winrt::uninit_apartment();
-            return;
         }
         // NotificationChanged fails for unpackaged processes (VERIFICATION 8.3):
         // poll instead. The first pass only records what is already there;
         // later a toast is posted when it appears and again when its text
         // changes (senders update a toast in place).
         std::map<uint32_t, size_t> seen; // id -> hash of its text
-        bool first = true, allowed = true;
-        int round = 0, posted = 0;
-        Log(L"listener: mirroring Windows notifications (polling every second)");
+        bool first = true;
+        int posted = 0;
+        if (access == wunm::UserNotificationListenerAccessStatus::Allowed)
+            Log(L"listener: mirroring Windows notifications (polling every second)");
         while (!stop_) {
             try {
                 // The user can withdraw the access in Windows' privacy settings at any time.
-                if (++round % 10 == 0) {
-                    bool now = listener.GetAccessStatus() == wunm::UserNotificationListenerAccessStatus::Allowed;
-                    if (now != allowed)
-                        Log(L"listener: access %s", now ? L"granted again" : L"withdrawn, not mirroring");
-                    if (now && !allowed)
-                        first = true; // a fresh start: what is there now is not new
-                    allowed = now;
+                auto nowAccess = listener.GetAccessStatus();
+                if (nowAccess != access) {
+                    Log(L"listener: access %s", AccessName(nowAccess));
+                    access = nowAccess;
                 }
-                if (allowed) {
+                if (access == wunm::UserNotificationListenerAccessStatus::Allowed) {
                     auto list = listener.GetNotificationsAsync(wun::NotificationKinds::Toast).get();
                     std::map<uint32_t, size_t> now;
                     for (const auto& un : list) {
@@ -163,11 +124,14 @@ void NotificationListener::Run()
                     }
                     seen = std::move(now);
                     first = false;
+                } else {
+                    seen.clear();
+                    first = true; // access restored later: existing notifications form a new baseline
                 }
             } catch (const winrt::hresult_error& e) {
                 Log(L"listener: read failed 0x%08X", unsigned(e.code()));
             }
-            WaitForSingleObject(wake_, 1000);
+            WaitForSingleObject(wake_, access == wunm::UserNotificationListenerAccessStatus::Allowed ? 1000 : 10000);
         }
     } catch (const winrt::hresult_error& e) {
         Log(L"listener: unavailable 0x%08X", unsigned(e.code()));

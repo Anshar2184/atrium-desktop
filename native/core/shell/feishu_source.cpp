@@ -193,9 +193,13 @@ void FeishuSource::Run()
                 }
                 std::map<HWND, std::wstring> now;
                 for (const auto& [h, pid] : popups) {
+                    auto old = seen.find(h);
                     const bool firstRead = !watch.Contains(h);
                     std::vector<std::wstring> t = Texts(uia.get(), text.get(), cache.get(), h, watch);
                     if (t.empty()) {
+                        // Keep startup popups in the baseline even before their text loads.
+                        if (!baseline || old != seen.end())
+                            now[h] = old != seen.end() ? old->second : L"";
                         loading = loading || firstRead; // one settling pass; later changes wake through UIA
                         continue; // still loading: read again next time
                     }
@@ -203,8 +207,7 @@ void FeishuSource::Run()
                     for (const auto& s : t)
                         key += s + L"\n";
                     now[h] = key;
-                    auto old = seen.find(h);
-                    if (!baseline || (old != seen.end() && old->second == key))
+                    if (!baseline || (old != seen.end() && (old->second.empty() || old->second == key)))
                         continue;
                     auto* n = new Notice();
                     n->source = L"feishu";

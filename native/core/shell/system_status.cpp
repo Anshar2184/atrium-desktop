@@ -200,11 +200,6 @@ bool ToggleMute()
 bool RunPowerAction(PowerAction action)
 {
     const wchar_t* names[] = {L"sleep", L"restart", L"shutdown"};
-    wchar_t dry[8] = {};
-    if (GetEnvironmentVariableW(L"ATRIUM_POWER_DRYRUN", dry, 8) && dry[0] == L'1') {
-        Log(L"power: %s (dry run)", names[int(action)]);
-        return true;
-    }
     Log(L"power: %s", names[int(action)]);
     if (action == PowerAction::Sleep)
         return SetSuspendState(FALSE, FALSE, FALSE) != FALSE;

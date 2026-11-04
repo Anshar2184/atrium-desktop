@@ -30,11 +30,6 @@ public:
     void Refresh(); // the model has a new list
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
     HWND Hwnd() const { return surface_.Hwnd(); }
-    // Test hooks: log the icons and their places (screen px); click the icon
-    // at an index, or the first whose tooltip contains `which`.
-    void LogState() const;
-    void TestClick(const std::wstring& which, bool right);
-    void LogFind(const std::wstring& which) const; // where the first icon whose tooltip contains `which` is
 
     std::function<void()> onSystemTray; // the fallback button
 

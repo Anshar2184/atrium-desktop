@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -105,8 +104,6 @@ public sealed partial class MainWindow
             _swatchWorker?.Post(_swatchSettings);
         };
     }
-
-    private static Color RgbColor(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
     private double RasterScale => Math.Clamp(HeroFrame.XamlRoot?.RasterizationScale ?? 1.0, 1.0, 2.0);
 
@@ -318,7 +315,6 @@ public sealed partial class MainWindow
 
     private void RenderFrame(RenderJob j)
     {
-        var sw = Stopwatch.StartNew();
         int pw = (int)Math.Round(j.W * j.Rs), ph = (int)Math.Round(j.H * j.Rs);
         if (pw < 8 || ph < 8) return;
         var L = j.L;
@@ -375,19 +371,8 @@ public sealed partial class MainWindow
             _loupeKey = "";
         }
 
-        sw.Stop();
-        LogRender(sw.Elapsed.TotalMilliseconds, pw, ph, lw, lh);
         if (Interlocked.Exchange(ref _uiPending, 1) == 0)
             DispatcherQueue.TryEnqueue(ApplyFrames);
-    }
-
-    // Development aid: ATRIUM_SETTINGS_PREVIEW_LOG=<file> appends the time of every frame.
-    private static readonly string? PreviewLog = Environment.GetEnvironmentVariable("ATRIUM_SETTINGS_PREVIEW_LOG");
-
-    private static void LogRender(double ms, int pw, int ph, int lw, int lh)
-    {
-        if (PreviewLog == null) return;
-        try { File.AppendAllText(PreviewLog, $"{ms:F1} ms  hero {pw}x{ph}  loupe {lw}x{lh}\n"); } catch (IOException) { }
     }
 
     // ---- UI thread: frames to bitmaps ----

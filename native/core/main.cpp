@@ -35,7 +35,6 @@
 #include <algorithm>
 #include <memory>
 #include <string>
-#include <thread>
 
 namespace {
 
@@ -49,7 +48,6 @@ constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
 constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
 constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
 constexpr UINT WM_VOLUME = WM_APP + 7;        // the default playback device's volume changed
-constexpr UINT WM_CHROME_STATE = WM_APP + 8;  // test command chrome-state
 constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
@@ -134,6 +132,7 @@ void AddTrayIcon()
                                               GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     wcscpy_s(nid.szTip, L"Atrium");
     Shell_NotifyIconW(NIM_ADD, &nid);
+    DestroyIcon(nid.hIcon);
     nid.uVersion = NOTIFYICON_VERSION_4;
     Shell_NotifyIconW(NIM_SETVERSION, &nid);
 }
@@ -219,15 +218,7 @@ void OpenSystem(const std::wstring& what)
         Log(L"start: system entry tray (tray panel)");
         return;
     }
-    if (what == L"network")
-        ShellExecuteW(nullptr, L"open", L"ms-availablenetworks:", nullptr, nullptr, SW_SHOWNORMAL);
-    else if (what == L"volume")
-        SendWinShortcut('V', true); // Win+Ctrl+V: sound output in quick settings
-    else if (what == L"battery")
-        ShellExecuteW(nullptr, L"open", L"ms-settings:batterysaver", nullptr, nullptr, SW_SHOWNORMAL);
-    else if (what == L"tray")
-        OpenTray();
-    else if (what == L"account")
+    if (what == L"account")
         ShellExecuteW(nullptr, L"open", L"ms-settings:yourinfo", nullptr, nullptr, SW_SHOWNORMAL);
     Log(L"start: system entry %s", what.c_str());
 }
@@ -236,150 +227,9 @@ void ToggleTray(RECT);
 void ToggleControl(RECT);
 void ToggleCalendar();
 void UpdateStatus();
-void FakeStatus(const std::wstring& arg);
-
-// Test and automation commands from a second process: Atrium.Core.exe --command <verb> [argument]
-void RunCommand(const std::wstring& line)
-{
-    size_t sp = line.find(L' ');
-    std::wstring verb = line.substr(0, sp), arg = sp == std::wstring::npos ? L"" : line.substr(sp + 1);
-    while (!arg.empty() && iswspace(arg.back()))
-        arg.pop_back();
-    while (!verb.empty() && iswspace(verb.back()))
-        verb.pop_back();
-    Log(L"command: %s", line.c_str());
-    if (verb == L"start") {
-        g_app.start->Visible() ? g_app.start->Close(false)
-                               : g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), GetForegroundWindow());
-        g_app.notes->PanelsChanged();
-    }
-    else if (verb == L"start-type")
-        g_app.start->Type(arg);
-    else if (verb == L"start-key" && !arg.empty())
-        SendMessageW(g_app.start->Hwnd(), WM_CHAR, arg == L"enter" ? 13 : arg == L"esc" ? 27 : arg == L"back" ? 8 : arg[0], 0);
-    else if (verb == L"start-state")
-        g_app.start->LogState();
-    else if (verb == L"start-click")
-        g_app.start->TestClick(arg);
-    else if (verb == L"bar-state")
-        g_app.bar->LogState();
-    else if (verb == L"notify") {
-        // notify <app>|<title>|<body>|<action>
-        std::vector<std::wstring> f;
-        size_t from = 0;
-        for (;;) {
-            size_t bar = arg.find(L'|', from);
-            f.push_back(arg.substr(from, bar == std::wstring::npos ? std::wstring::npos : bar - from));
-            if (bar == std::wstring::npos)
-                break;
-            from = bar + 1;
-        }
-        f.resize(4);
-        Notice n;
-        n.source = L"test";
-        n.app = f[0];
-        n.appId = f[0];
-        n.title = f[1];
-        n.body = f[2];
-        n.action = f[3];
-        g_app.notes->Post(std::move(n));
-    } else if (verb == L"tray-open")
-        ToggleTray(RECT{});
-    else if (verb == L"tray-state")
-        g_app.trayPanel->LogState();
-    else if (verb == L"tray-click" || verb == L"tray-rclick")
-        g_app.trayPanel->TestClick(arg, verb == L"tray-rclick");
-    else if (verb == L"control-open")
-        ToggleControl(RECT{});
-    else if (verb == L"control-state")
-        g_app.control->LogState();
-    else if (verb == L"control-click")
-        g_app.control->TestClick(arg);
-    else if (verb == L"calendar-open")
-        ToggleCalendar();
-    else if (verb == L"widgets-state")
-        g_app.widgets->LogState();
-    else if (verb == L"widgets-do")
-        g_app.widgets->TestAction(arg);
-    else if (verb == L"calendar-state")
-        g_app.calendar->LogState();
-    else if (verb == L"calendar-click")
-        g_app.calendar->TestClick(arg);
-    else if (verb == L"tray-find")
-        g_app.trayPanel->LogFind(arg);
-    else if (verb == L"status-fake") { // screenshots: "battery=15,charging=0,volume=40,muted=0,signal=80,brightness=60" or "off"
-        FakeStatus(arg);
-        UpdateStatus();
-    }
-    else if (verb == L"control-volume") { // tests: put the volume back
-        SetVolume(_wtoi(arg.c_str()));
-        UpdateStatus();
-    }
-    else if (verb == L"notify-state")
-        g_app.notes->LogState();
-    else if (verb == L"notify-open")
-        g_app.notes->ToggleCenter();
-    else if (verb == L"notify-click")
-        g_app.notes->TestClick(arg);
-    else if (verb == L"notify-clear")
-        g_app.notes->Clear();
-    else if (verb == L"chrome-state")
-        PostMessageW(g_app.host, WM_CHROME_STATE, 0, 0); // COM calls out: not inside this sent message
-    else if (verb == L"notify-quiet")
-        g_app.notes->SetQuietOverride(_wtoi(arg.c_str()));
-    else if (verb == L"notify-probe") {
-        // Blocking WinRT calls are not allowed on this STA thread.
-        std::wstring result;
-        std::thread([&] {
-            winrt::init_apartment(winrt::apartment_type::multi_threaded);
-            result = NotificationListener::Probe();
-            winrt::uninit_apartment();
-        }).join();
-        Log(L"listener: probe %s", result.c_str());
-    }
-}
-
-// Test override of the status shown on the bar (`status-fake`): key=value
-// pairs replace what the system reports; "off" ends it.
-std::vector<std::pair<std::wstring, int>> g_fakeStatus;
-
-void FakeStatus(const std::wstring& arg)
-{
-    g_fakeStatus.clear();
-    if (arg == L"off")
-        return;
-    size_t at = 0;
-    while (at < arg.size()) {
-        size_t end = arg.find(L',', at);
-        std::wstring pair = arg.substr(at, end == std::wstring::npos ? std::wstring::npos : end - at);
-        size_t eq = pair.find(L'=');
-        if (eq != std::wstring::npos)
-            g_fakeStatus.emplace_back(pair.substr(0, eq), _wtoi(pair.c_str() + eq + 1));
-        at = end == std::wstring::npos ? arg.size() : end + 1;
-    }
-}
-
 void UpdateStatus()
 {
     SystemStatus st = QuerySystemStatus();
-    for (const auto& [key, value] : g_fakeStatus) {
-        if (key == L"battery") {
-            st.battery = value >= 0;
-            st.batteryPercent = value;
-        } else if (key == L"charging") {
-            st.charging = value != 0;
-        } else if (key == L"volume") {
-            st.audio = value >= 0;
-            st.volume = std::max(value, 0);
-        } else if (key == L"muted") {
-            st.muted = value != 0;
-        } else if (key == L"signal") {
-            st.connected = st.wifi = value >= 0;
-            st.signal = std::max(value, 0);
-        } else if (key == L"brightness") {
-            g_app.brightness = value;
-        }
-    }
     st.brightness = g_app.brightness;
     // Volume notifications follow the default playback device.
     static std::wstring watched;
@@ -730,12 +580,6 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_OPEN_SETTINGS:
         OpenSettings();
         return 0;
-    case WM_COPYDATA: {
-        auto* cd = reinterpret_cast<const COPYDATASTRUCT*>(l);
-        if (cd && cd->dwData == 0xA7C0 && cd->cbData % sizeof(wchar_t) == 0 && cd->cbData < 8192)
-            RunCommand(std::wstring(static_cast<const wchar_t*>(cd->lpData), cd->cbData / sizeof(wchar_t)));
-        return TRUE;
-    }
     case WM_NOTICE:
         if (auto* n = reinterpret_cast<Notice*>(l)) {
             // Only from sources still turned on (a notice may arrive just after).
@@ -762,10 +606,6 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             }
         }
         return TRUE;
-    case WM_CHROME_STATE:
-        if (g_app.chrome)
-            g_app.chrome->LogState();
-        return 0;
     case WM_TRAY_ICONS:
         if (w == 1) // a click was forwarded: see where the focus ends up
             SetTimer(h, kTrayFocusTimer, 600, nullptr);
@@ -872,19 +712,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
             CloseHandle(process);
         return wait == WAIT_OBJECT_0 ? 0 : 1;
     }
-    // `Atrium.Core.exe --command <verb> [argument]` hands a command to the running instance.
-    if (const wchar_t* c = wcsstr(cmdLine, L"--command ")) {
-        HWND other = FindWindowW(kHostClass, nullptr);
-        if (!other)
-            return 2;
-        DWORD pid = 0;
-        GetWindowThreadProcessId(other, &pid);
-        AllowSetForegroundWindow(pid);
-        std::wstring text(c + 10);
-        COPYDATASTRUCT cd{0xA7C0, DWORD(text.size() * sizeof(wchar_t)), text.data()};
-        DWORD_PTR result = 0;
-        return SendMessageTimeoutW(other, WM_COPYDATA, 0, LPARAM(&cd), SMTO_ABORTIFHUNG, 5000, &result) ? 0 : 1;
-    }
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // Already running: launching it again opens the settings instead.
@@ -922,7 +749,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         Log(L"core: imported %zu Windows taskbar pins", settings.pins->size());
     }
     const bool capturable = wcsstr(cmdLine, L"--debug-capturable") != nullptr;
-    g_app.bar = std::make_unique<Bar>(instance, capturable, wcsstr(cmdLine, L"--debug-layout") != nullptr);
+    g_app.bar = std::make_unique<Bar>(instance, capturable);
     // The bar's render thread draws the popups' glass from its capture.
     Surface::SetGlassHost(g_app.bar.get());
     Surface::SetCapturable(capturable);

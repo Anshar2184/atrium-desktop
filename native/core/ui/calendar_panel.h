@@ -28,9 +28,6 @@ public:
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
     void SetBarHeight(float dip) { barH_ = dip; }
     HWND Hwnd() const { return surface_.Hwnd(); }
-    // Test hooks: log what is shown (screen px); act as a click on `id` ("prev", "next", "today", "day:<n>").
-    void LogState() const;
-    void TestClick(const std::wstring& id);
 
 private:
     struct Hit {

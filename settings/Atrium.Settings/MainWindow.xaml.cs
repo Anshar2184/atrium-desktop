@@ -116,7 +116,7 @@ public sealed partial class MainWindow : Window
         };
         PathText.Text = CoreClient.SettingsPath;
         var v = typeof(MainWindow).Assembly.GetName().Version;
-        VersionText.Text = "版本 " + (v?.ToString(3) ?? "0.9");
+        VersionText.Text = "版本 " + (v?.ToString(3) ?? "1.0.0");
         ShowStatus(false);
         // `--page widgets` (the widgets' menu): open on that page.
         var args = Environment.GetCommandLineArgs();
@@ -321,8 +321,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ConnectAndLoadAsync()
     {
-        // ATRIUM_SETTINGS_OFFLINE=1: never talk to a running core (development aid).
-        if (Environment.GetEnvironmentVariable("ATRIUM_SETTINGS_OFFLINE") != "1") await _client.ConnectAsync(800);
+        await _client.ConnectAsync(800);
         var (saved, current) = await _client.GetAsync();
         _saved = saved;
         _current = current;
@@ -342,7 +341,7 @@ public sealed partial class MainWindow : Window
         _updatingCoreSwitch = true;
         CoreSwitch.IsOn = connected;
         _updatingCoreSwitch = false;
-        CoreSwitch.IsEnabled = !_coreChanging && CoreClient.CoreExe() != null && Environment.GetEnvironmentVariable("ATRIUM_SETTINGS_OFFLINE") != "1";
+        CoreSwitch.IsEnabled = !_coreChanging && CoreClient.CoreExe() != null;
         if (!_coreChanging) StatusMessage.Text = connected ? "正在运行" : "已关闭，系统任务栏已恢复";
     }
 

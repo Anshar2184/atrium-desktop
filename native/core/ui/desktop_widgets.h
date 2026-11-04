@@ -34,10 +34,6 @@ public:
     bool Add(WidgetKind kind, WidgetSize size);
     // The same by name ("clock", "medium"; the settings app's gallery).
     bool AddNamed(const std::wstring& kind, const std::wstring& size);
-    // Test hooks: log what is shown (screen px); "add:<kind>:<size>", "remove:<i>", "size:<i>:<size>",
-    // "restack", "type:<i>:<text>" (types into a note, or a new reminder).
-    void LogState() const;
-    void TestAction(const std::wstring& arg);
 
     std::function<void()> onCalendar;    // a calendar widget was clicked
     std::function<void()> onAddWidgets;  // "添加小组件…": the settings app's widget gallery
@@ -107,9 +103,8 @@ private:
     int lastMinute_ = -1;
     uint64_t cpuIdle_ = 0, cpuTotal_ = 0; // the last GetSystemTimes
     unsigned photoGen_ = 0;
-    bool test_ = false; // ATRIUM_WIDGETS_TEST=1: over everything (screenshots)
     bool restackPosted_ = false;
-    // Only Restack (and a drag) may change a widget's place in the z-order: anything else
+    // Only Restack may change a widget's place in the z-order: anything else
     // (showing the window, a click, the system) is held back in WM_WINDOWPOSCHANGING.
     bool zMoving_ = false;
 };

@@ -41,11 +41,12 @@
 | `widgetBackdrop` | string | `desktop` / `wallpaper` | `desktop` | 小组件玻璃的背景：实时抓取桌面窗口，或直接读取壁纸图片（省电）；都不含上层窗口（D38） |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37） |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |
+| `startOnLogin` | bool | | true | 当前用户开机自启；与本次启动或关闭任务栏独立，保存时同步 Windows 开机项 |
 | `pins` | array | | 见下 | 固定的应用，按顺序显示 |
 
 `pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空"}`。识别同一应用时 `aumid` 优先，其次是 `path` 指向的程序。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。
 
-预设只改材质键（transparency、blur、refraction、edge、dispersion、highlight、shadow、tint），不改布局与内容键。数值以 `native/core/settings.cpp` 中的 `Settings::Liquid()` / `Settings::Frosted()` 为准，`BarSettings.cs` 必须一致。
+预设只改材质键（transparency、blur、refraction、edge、dispersion、highlight、shadow、tint），不改布局与内容键。预设由 `BarSettings.cs` 的 `Liquid()` / `Frosted()` 定义，液态默认值与 `native/core/settings.h` 保持一致。
 
 ## 管道
 
@@ -59,6 +60,7 @@
 | `{"op":"preview","settings":{…}}` | `{"op":"ok"}` | 只改内存，立即重绘；可只发部分键 |
 | `{"op":"commit","settings":{…}}` | `{"op":"ok"}` 或 `{"op":"error","message":…}` | 写文件成功后才更新已保存值 |
 | `{"op":"cancel"}` | `{"op":"ok"}` | 恢复到已保存值 |
+| `{"op":"add-widget","kind":"clock","size":"small"}` | `{"op":"ok"}` 或 `{"op":"error","message":…}` | 添加小组件并保存布局；不改变设置预览租约 |
 
 客户端断开时若当前值与已保存值不同，Core 自动撤销预览（预览租约）。Settings 端拖动滑块时同一时间只有一个预览请求在途，返回后再发送最新状态，不积压。
 

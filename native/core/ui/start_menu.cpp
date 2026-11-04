@@ -167,42 +167,6 @@ void StartMenu::Close(bool launched)
     Log(L"start: closed%s%s%s", launched ? L" (launched)" : L"", cls[0] ? L", focus back to " : L"", cls);
 }
 
-void StartMenu::Type(const std::wstring& text)
-{
-    for (wchar_t ch : text)
-        SendMessageW(surface_.Hwnd(), WM_CHAR, ch, 0);
-}
-
-void StartMenu::LogState() const
-{
-    const RECT r = surface_.Rect();
-    const float s = surface_.Scale();
-    auto screen = [&](const D2D1_RECT_F& d) {
-        return std::to_wstring(int(float(r.left) + (d.left + d.right) / 2 * s)) + L"," + std::to_wstring(int(float(r.top) + (d.top + d.bottom) / 2 * s));
-    };
-    // Screen px centres of the fixed buttons and the first entries shown, for tests.
-    std::wstring spots;
-    int content = 0;
-    for (const Hit& h : hits_) {
-        bool entry = h.id.rfind(L"pin:", 0) == 0 || h.id.rfind(L"app:", 0) == 0;
-        std::wstring name = h.id;
-        if (entry)
-            name = content == 0 ? L"first" : content == 1 ? L"second" : L"";
-        content += entry ? 1 : 0;
-        if (!name.empty())
-            spots += L" " + name + L"@" + screen(h.rect);
-    }
-    Log(L"start: spots%s", spots.c_str());
-    const auto& shown = Shown();
-    D2D1_RECT_F main = MainRect(), shelf = ShelfRect();
-    Log(L"start: state visible=%d foreground=%d view=%s query='%s' entries=%zu first='%s' catalog=%zu pins=%zu page=%d/%d rect=%ld,%ld,%ld,%ld "
-        L"power=%d radius=%.0f panel=%.0fx%.0f shelf=%.0fx%.0f shelfRadius=%.0f ink=%s",
-        surface_.Visible() ? 1 : 0, GetForegroundWindow() == surface_.Hwnd() ? 1 : 0, query_.empty() ? L"pins" : L"search", query_.c_str(), shown.size(),
-        shown.empty() ? L"" : shown[0].name.c_str(), apps_.size(), pins_.size(), page_ + 1, Pages(), r.left, r.top, r.right, r.bottom, powerOpen_ ? 1 : 0,
-        radius_, main.right - main.left, main.bottom - main.top, shelf.right - shelf.left, shelf.bottom - shelf.top, (shelf.bottom - shelf.top) / 2,
-        surface_.DarkInk() ? L"dark" : L"light");
-}
-
 void StartMenu::Refresh()
 {
     if (!surface_.Visible())
