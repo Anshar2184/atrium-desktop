@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -14,6 +17,11 @@ namespace Atrium.Settings;
 public sealed partial class MainWindow : Window
 {
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
+    private delegate IntPtr SubclassProc(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(IntPtr hwnd, SubclassProc proc, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(IntPtr hwnd, SubclassProc proc, UIntPtr id);
+    [DllImport("comctl32.dll")] private static extern IntPtr DefSubclassProc(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam);
+    private SubclassProc? _updateMessage;
 
     // One slider tile: its group, UI range, and the mapping between the stored
     // value and the slider value (percentages are stored as 0..1).
@@ -65,7 +73,7 @@ public sealed partial class MainWindow : Window
     private BarSettings _current = new();
     private bool _loading;
     private bool _previewBusy, _previewPending;
-    private bool _closingConfirmed;
+    private bool _closePending;
     private FrameworkElement[] _mains = Array.Empty<FrameworkElement>();
     private FrameworkElement?[] _sides = Array.Empty<FrameworkElement?>();
     private int _page;
@@ -73,6 +81,7 @@ public sealed partial class MainWindow : Window
     private int _flashId;
     private bool _updatingCoreSwitch, _coreChanging = true;
     private Process? _coreProcess;
+    private CancellationTokenSource? _updateCheck;
 
     public MainWindow()
     {
@@ -92,8 +101,17 @@ public sealed partial class MainWindow : Window
             presenter.PreferredMinimumHeight = (int)(680 * scale);
         }
         AppWindow.Closing += OnClosing;
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        _updateMessage = (handle, message, wparam, lparam, id, data) =>
+        {
+            if (message == App.OpenAboutMessage) { Nav.SelectedIndex = 7; return IntPtr.Zero; }
+            return DefSubclassProc(handle, message, wparam, lparam);
+        };
+        SetWindowSubclass(hwnd, _updateMessage, (UIntPtr)1, UIntPtr.Zero);
         Closed += (_, _) =>
         {
+            RemoveWindowSubclass(hwnd, _updateMessage, (UIntPtr)1);
+            _updateCheck?.Cancel();
             _coreProcess?.Dispose();
             _widgetWatcher?.Dispose();
             StopDesignAnimations();
@@ -120,9 +138,11 @@ public sealed partial class MainWindow : Window
         ShowStatus(false);
         // `--page widgets` (the widgets' menu): open on that page.
         var args = Environment.GetCommandLineArgs();
-        int page = Array.IndexOf(args, "--page") is int i && i >= 0 && i + 1 < args.Length && args[i + 1] == "widgets" ? 4 : 0;
+        int page = Array.IndexOf(args, "--page") is int i && i >= 0 && i + 1 < args.Length
+            ? args[i + 1] switch { "widgets" => 4, "about" => 7, _ => 0 } : 0;
         Nav.SelectedIndex = page;
         _ = ConnectAndLoadAsync();
+        _ = CheckForUpdatesAsync(); // once per settings window; no resident polling
     }
 
     // ---- Pages ----
@@ -317,6 +337,130 @@ public sealed partial class MainWindow : Window
         foreach (var (rgb, _, ring) in _tintButtons) ring.Opacity = rgb == _current.Tint ? 1 : 0;
     }
 
+    // ---- Updates ----
+
+    private ReleaseInfo? _latestRelease;
+    private ReleaseInstaller.Prepared? _preparedRelease, _restartUpdate;
+
+    private void ShowInstallAction()
+    {
+        InstallRelease.Content = _preparedRelease != null ? "重启并完成更新" : "下载并安装";
+        InstallRelease.Visibility = _preparedRelease != null || _latestRelease?.Download != null
+            && _latestRelease.Version > typeof(MainWindow).Assembly.GetName().Version!
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void OnInstallRelease(object sender, RoutedEventArgs e)
+    {
+        if (_updateCheck != null) return;
+        if (_preparedRelease != null)
+        {
+            _restartUpdate = _preparedRelease;
+            await CloseRequestedAsync();
+            return;
+        }
+        if (_latestRelease?.Download == null) return;
+        using var cancel = new CancellationTokenSource();
+        _updateCheck = cancel;
+        CheckUpdateButton.IsEnabled = InstallRelease.IsEnabled = false;
+        UpdateProgress.Visibility = Visibility.Visible;
+        UpdateProgress.IsActive = true;
+        UpdateStatus.Text = "正在下载…";
+        try
+        {
+            _preparedRelease = await ReleaseInstaller.PrepareAsync(_latestRelease,
+                new Progress<string>(text => { if (!cancel.IsCancellationRequested) UpdateStatus.Text = text; }), cancel.Token);
+            UpdateStatus.Text = "更新已准备好，重启后生效";
+            ShowInstallAction();
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or UnauthorizedAccessException
+            or OperationCanceledException)
+        {
+            if (!cancel.IsCancellationRequested)
+                UpdateStatus.Text = error is HttpRequestException ? "下载失败，请检查网络后重试" : $"更新未完成：{error.Message}";
+        }
+        finally
+        {
+            _updateCheck = null;
+            if (!cancel.IsCancellationRequested)
+            {
+                CheckUpdateButton.IsEnabled = InstallRelease.IsEnabled = true;
+                UpdateProgress.IsActive = false;
+                UpdateProgress.Visibility = Visibility.Collapsed;
+            }
+        }
+    }
+
+    private void OnOpenUpdate(object sender, RoutedEventArgs e) => Nav.SelectedIndex = 7;
+
+    private async void OnCheckForUpdates(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync();
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_updateCheck != null) return;
+        using var cancel = new CancellationTokenSource();
+        _updateCheck = cancel;
+        CheckUpdateButton.IsEnabled = false;
+        UpdateProgress.Visibility = Visibility.Visible;
+        UpdateProgress.IsActive = true;
+        ReleaseLinks.Visibility = Visibility.Collapsed;
+        UpdateStatus.Text = "正在检查…";
+        try
+        {
+            string? installFailure = ReleaseInstaller.ReadFailure();
+            _preparedRelease = ReleaseInstaller.ReadPrepared(typeof(MainWindow).Assembly.GetName().Version!);
+            if (_preparedRelease != null)
+            {
+                UpdateAvailableButton.Visibility = ReleaseLinks.Visibility = Visibility.Visible;
+                UpdateStatus.Text = installFailure == null ? "更新已准备好，重启后生效" : $"更新未安装：{installFailure}";
+                ReleaseNotes.NavigateUri = new Uri("https://github.com/wynter-yaxley/atrium-desktop/releases/latest");
+                ShowInstallAction();
+                return;
+            }
+            var release = await ReleaseInfo.FetchLatestAsync(cancel.Token);
+            if (cancel.IsCancellationRequested) return;
+            if (release == null)
+            {
+                UpdateAvailableButton.Visibility = Visibility.Collapsed;
+                UpdateStatus.Text = "暂无正式版本";
+                return;
+            }
+            var current = typeof(MainWindow).Assembly.GetName().Version!;
+            int comparison = release.Version.CompareTo(current);
+            UpdateAvailableButton.Visibility = comparison > 0 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateStatus.Text = comparison > 0 ? $"有可用更新 {release.Tag}"
+                : comparison == 0 ? "已是最新版本" : $"当前版本高于最新正式版 {release.Tag}";
+            ReleaseNotes.NavigateUri = release.Page;
+            _latestRelease = release;
+            ShowInstallAction();
+            ReleaseLinks.Visibility = Visibility.Visible;
+        }
+        catch (Exception error) when (error is HttpRequestException or OperationCanceledException
+            or JsonException or FormatException or InvalidOperationException or KeyNotFoundException or IOException or UnauthorizedAccessException)
+        {
+            if (cancel.IsCancellationRequested) return; // the window closed while checking
+            UpdateStatus.Text = error switch
+            {
+                OperationCanceledException => "连接超时，请重试",
+                HttpRequestException { StatusCode: HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests }
+                    => "GitHub 暂时无法响应，请稍后重试",
+                HttpRequestException => "无法连接 GitHub，请重试",
+                IOException or UnauthorizedAccessException => $"无法准备更新：{error.Message}",
+                _ => "无法读取版本信息，请稍后重试",
+            };
+        }
+        finally
+        {
+            _updateCheck = null;
+            if (!cancel.IsCancellationRequested)
+            {
+                UpdateProgress.IsActive = false;
+                UpdateProgress.Visibility = Visibility.Collapsed;
+                CheckUpdateButton.IsEnabled = true;
+            }
+        }
+    }
+
     // ---- Connection ----
 
     private async Task ConnectAndLoadAsync()
@@ -386,7 +530,7 @@ public sealed partial class MainWindow : Window
         Status.IsOpen = false;
         try
         {
-            var exe = CoreClient.CoreExe() ?? throw new FileNotFoundException("没有找到 Atrium.Core.exe");
+            var exe = CoreClient.CoreExe() ?? throw new FileNotFoundException("没有找到 Atrium.exe");
             if (start)
             {
                 using var launched = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
@@ -721,27 +865,47 @@ public sealed partial class MainWindow : Window
 
     private async void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        if (_coreChanging) { args.Cancel = true; return; }
-        if (_closingConfirmed || _current.SameAs(_saved))
-        {
-            _client.Dispose(); // the core reverts any unsaved preview on disconnect
-            return;
-        }
         args.Cancel = true;
-        var dialog = new ContentDialog
+        await CloseRequestedAsync();
+    }
+
+    // Window.Close does not raise AppWindow.Closing. Both the title-bar close
+    // and update button explicitly use the same save/exit path before calling it.
+    private async Task CloseRequestedAsync()
+    {
+        if (_closePending || _coreChanging) return;
+        _closePending = true;
+        try
         {
-            XamlRoot = Content.XamlRoot,
-            Title = "保存修改？",
-            Content = "未保存的修改在关闭后会被撤销。",
-            PrimaryButtonText = "保存",
-            SecondaryButtonText = "不保存",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.None) return;
-        if (result == ContentDialogResult.Primary && !await SaveAsync()) return;
-        _closingConfirmed = true;
-        Close();
+            if (!_current.SameAs(_saved))
+            {
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = Content.XamlRoot,
+                    Title = "保存修改？",
+                    Content = "未保存的修改在关闭后会被撤销。",
+                    PrimaryButtonText = "保存",
+                    SecondaryButtonText = "不保存",
+                    CloseButtonText = "取消",
+                    DefaultButton = ContentDialogButton.Primary,
+                };
+                var result = await dialog.ShowAsync();
+                if (result == ContentDialogResult.None) { _restartUpdate = null; return; }
+                if (result == ContentDialogResult.Primary && !await SaveAsync()) { _restartUpdate = null; return; }
+            }
+            if (_restartUpdate != null)
+            {
+                try { ReleaseInstaller.Restart(_restartUpdate, _client.Connected); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+                {
+                    _restartUpdate = null;
+                    UpdateStatus.Text = error is UnauthorizedAccessException ? "安装目录不可写，更新未安装" : $"无法重启更新：{error.Message}";
+                    return;
+                }
+            }
+            _client.Dispose(); // the core reverts any unsaved preview on disconnect
+            Close();
+        }
+        finally { _closePending = false; }
     }
 }

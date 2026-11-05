@@ -159,7 +159,7 @@ internal static class WidgetFaces
                 const double RowH = 27, Top = Pad + 28;
                 int slots = Math.Max(1, (int)((h - Pad - Top) / RowH));
                 int shown = 0;
-                foreach (var it in items.OrderBy(i => i.Done))
+                foreach (var it in items)
                 {
                     if (shown >= slots - 1) break;
                     double y = Top + RowH * shown, cx = Pad + 9, cy = y + RowH / 2;
@@ -170,6 +170,7 @@ internal static class WidgetFaces
                     }
                     else Arc(c, cx, cy, 7.4, -90, 360, p.Sub, 1.5, false);
                     Text(c, it.Text, Pad + 26, y, w - Pad, y + RowH, 13.5, it.Done ? p.Sub : p.Text, 0, 0, p);
+                    if (it.Done) Line(c, Pad + 26, cy, Math.Min(w - Pad, Pad + 26 + TextWidth(it.Text, 13.5, "TextFont")), cy, p.Sub, 1);
                     shown++;
                 }
                 if (shown < slots)

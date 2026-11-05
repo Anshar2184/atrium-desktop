@@ -43,6 +43,7 @@ struct WidgetContent {
     int item = -1;     // reminders: the item being edited
     size_t caret = 0;  // in the text being edited
     bool caretOn = true; // blinking
+    float scroll = 0;   // reminders: viewport offset, not saved
 };
 
 // What every widget may show.
@@ -62,6 +63,9 @@ struct WidgetHit {
     D2D1_RECT_F rect;
     std::wstring id;
 };
+
+constexpr float kReminderTop = 42, kReminderRow = 27, kReminderBottom = 14;
+float ReminderScrollMax(const WidgetContent& content, WidgetSize size);
 
 void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, const WidgetContent& content, const WidgetWorld& world, std::vector<WidgetHit>& hits);
 

@@ -224,7 +224,6 @@ struct DesktopWidgets::Widget {
     bool growLeft = false; // the selected grip is at the bottom left
     WidgetSize downSize = WidgetSize::Small;
     int downCol = 0;
-    ULONGLONG activating = 0; // a click activates a note or reminders: it may come forward
     POINT downAt{};
     RECT downRect{};
     RECT glideFrom{}, glideTo{};
@@ -281,7 +280,7 @@ void DesktopWidgets::SetEnabled(bool on)
         hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, nullptr, OnWinEvent, 0, 0, flags);
         // A window that appears without taking the foreground, or uncloaks
         // after it did (WinUI), must also send raised widgets back down.
-        showHook_ = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, nullptr, OnWinEvent, 0, 0, flags);
+        showHook_ = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, nullptr, OnWinEvent, 0, 0, flags);
         uncloakHook_ = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, OnWinEvent, 0, 0, flags);
         SetTimer(host_, kTickTimer, 1000, nullptr);
         SetTimer(host_, kSafetyTimer, 3000, nullptr);
@@ -515,8 +514,7 @@ void DesktopWidgets::Build()
         if (w.surface)
             continue;
         // Notes and reminders take the keyboard: their windows can be activated.
-        w.surface = std::make_unique<Surface>(instance_, L"Atrium Widget", Editable(w.kind), 14.f);
-        w.surface->SetDesktopLayer(true);
+        w.surface = std::make_unique<Surface>(instance_, L"Atrium Widget", Editable(w.kind), 14.f, true);
         w.surface->SetRadius(kWidgetRadius);
         w.surface->paint = [this, &w](Canvas& c) { Paint(w, c); };
         w.surface->message = [this, &w](UINT m, WPARAM wp2, LPARAM lp, LRESULT& r) { return Message(w, m, wp2, lp, r); };
@@ -696,10 +694,9 @@ void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD event, HWND h, LON
 {
     if (!g_widgets || obj != OBJID_WINDOW || child != CHILDID_SELF)
         return;
-    // Shown or uncloaked windows matter only to widgets over the desktop, and
-    // only top-level ones (menus, tooltips and child windows show all the time).
-    bool appeared = event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED;
-    if (appeared && (!g_widgets->raised_ || !h || GetAncestor(h, GA_ROOT) != h))
+    // Only top-level show/hide events: child controls change constantly.
+    bool appeared = event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_HIDE || event == EVENT_OBJECT_UNCLOAKED;
+    if (appeared && (!h || GetAncestor(h, GA_ROOT) != h))
         return;
     if (!g_widgets->restackPosted_) {
         g_widgets->restackPosted_ = true; // a burst of events, one restack right after it
@@ -707,9 +704,8 @@ void CALLBACK DesktopWidgets::OnWinEvent(HWINEVENTHOOK, DWORD event, HWND h, LON
     }
 }
 
-// Just above the desktop, under every window; over it when every app is
-// minimised (Win+D raises the desktop over windows at the bottom, D14). A
-// note or reminders being typed into stays where its click put it.
+// Always non-topmost, above the desktop when possible and under application windows.
+// Clicking or editing never lifts a widget over another application's window.
 void DesktopWidgets::Restack()
 {
     if (!enabled_ || widgets_.empty())
@@ -719,22 +715,19 @@ void DesktopWidgets::Restack()
         bool& flag;
         ~Done() { flag = false; }
     } done{zMoving_};
-    HWND fg = GetForegroundWindow();
-    // Atrium's own windows (the bar, its menus) and the taskbar change nothing.
-    bool neutral = fg && (IsOurs(fg) || ClassOf(fg) == L"Shell_TrayWnd" || ClassOf(fg) == L"Shell_SecondaryTrayWnd");
-    // Every app on this screen minimised (or none), and none in front.
+    // Find the lowest visible application on this screen.
     struct Scan {
         const DesktopWidgets* self;
         HMONITOR monitor;
-        bool open = false;
+        HWND lowest = nullptr;
     } scan{this, monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY)};
     EnumWindows(
         [](HWND h, LPARAM l) -> BOOL {
             auto* s = reinterpret_cast<Scan*>(l);
             if (!IsWindowVisible(h) || IsIconic(h) || s->self->IsOurs(h) || IsDesktopWindow(h))
                 return TRUE;
-            LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-            if ((ex & WS_EX_TOOLWINDOW) || (GetWindow(h, GW_OWNER) && !(ex & WS_EX_APPWINDOW)) || !HasTitle(h))
+            RECT rect{};
+            if (!GetWindowRect(h, &rect) || IsRectEmpty(&rect) || (!HasTitle(h) && !(GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION)))
                 return TRUE;
             BOOL cloaked = FALSE;
             DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
@@ -743,56 +736,49 @@ void DesktopWidgets::Restack()
                 return TRUE;
             if (MonitorFromWindow(h, MONITOR_DEFAULTTONULL) != s->monitor)
                 return TRUE;
-            s->open = true;
-            return FALSE;
+            s->lowest = h;
+            return TRUE;
         },
         reinterpret_cast<LPARAM>(&scan));
-    bool raise = !scan.open && (!fg || IsDesktopWindow(fg) || neutral);
     const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
-    if (raise) {
-        // Over the desktop, but under Atrium's own windows there (the bar, a menu, a popup):
-        // right after the lowest of them, or at the top when none is up.
-        HWND after = HWND_TOPMOST;
-        for (HWND h = GetTopWindow(nullptr); h; h = GetWindow(h, GW_HWNDNEXT)) {
-            if (!(GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_TOPMOST))
-                break;
-            bool widget = std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& w) { return w->surface && w->surface->Hwnd() == h; });
-            if (!widget && IsWindowVisible(h) && IsOurs(h))
-                after = h;
+    // Inserting after a topmost window does not remove WS_EX_TOPMOST.
+    // Always leave that band first, including while Explorer is starting.
+    for (auto& w : widgets_)
+        if (w->surface && (GetWindowLongPtrW(w->surface->Hwnd(), GWL_EXSTYLE) & WS_EX_TOPMOST))
+            SetWindowPos(w->surface->Hwnd(), HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+    // The window just above the desktop's top window (Progman, or the
+    // WorkerW with the icons); the widgets go right under it.
+    HWND above = nullptr, h = GetTopWindow(nullptr);
+    bool found = false;
+    for (; h; h = GetWindow(h, GW_HWNDNEXT)) {
+        if (IsWindowVisible(h) && IsDesktopWindow(h)) {
+            found = true;
+            break;
         }
-        for (auto& w : widgets_)
-            if (w->surface) {
-                SetWindowPos(w->surface->Hwnd(), after, 0, 0, 0, 0, flags);
-                if (after != HWND_TOPMOST && !(GetWindowLongPtrW(w->surface->Hwnd(), GWL_EXSTYLE) & WS_EX_TOPMOST))
-                    SetWindowPos(w->surface->Hwnd(), HWND_TOPMOST, 0, 0, 0, 0, flags); // not made topmost by its place: the top, then
-                after = w->surface->Hwnd();
-            }
-    } else {
-        // The window just above the desktop's top window (Progman, or the
-        // WorkerW with the icons); the widgets go right under it.
-        HWND above = nullptr, h = GetTopWindow(nullptr);
-        bool found = false;
-        for (; h; h = GetWindow(h, GW_HWNDNEXT)) {
-            if (IsWindowVisible(h) && IsDesktopWindow(h)) {
-                found = true;
-                break;
-            }
-            bool widget = std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& w) { return w->surface && w->surface->Hwnd() == h; });
-            if (!widget)
-                above = h;
-        }
-        if (!found)
-            above = nullptr; // no desktop window: keep them at the bottom of the windows
-        HWND after = found ? (above ? above : HWND_TOP) : HWND_BOTTOM;
-        for (auto& w : widgets_) {
-            if (!w->surface || w->content.editing)
-                continue;
-            // Placed after a window that is not topmost, a topmost one stops being topmost.
-            SetWindowPos(w->surface->Hwnd(), after, 0, 0, 0, 0, flags);
-            after = w->surface->Hwnd();
-        }
+        bool widget = std::any_of(widgets_.begin(), widgets_.end(), [&](const auto& w) { return w->surface && w->surface->Hwnd() == h; });
+        if (!widget)
+            above = h;
     }
-    raised_ = raise;
+    if (!found)
+        above = nullptr; // no desktop window: keep them at the bottom of the windows
+    HWND after = found ? (above ? above : HWND_TOP) : HWND_BOTTOM;
+    // Show-desktop and startup can put Progman/WorkerW above an application.
+    // Never use that temporary desktop position to jump over the application.
+    if (scan.lowest)
+        for (HWND below = found ? h : nullptr; below; below = GetWindow(below, GW_HWNDNEXT))
+            if (below == scan.lowest) {
+                after = scan.lowest;
+                break;
+            }
+    if (after != HWND_TOP && after != HWND_BOTTOM && (GetWindowLongPtrW(after, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        after = HWND_TOP; // widgets have already been made non-topmost
+    for (auto& w : widgets_) {
+        if (!w->surface)
+            continue;
+        // Every widget is now non-topmost, below applications and above the desktop when possible.
+        SetWindowPos(w->surface->Hwnd(), after, 0, 0, 0, 0, flags);
+        after = w->surface->Hwnd();
+    }
 }
 
 LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -981,18 +967,20 @@ void DesktopWidgets::LoadPhoto(Widget& w, bool another)
 bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r)
 {
     switch (m) {
-    case WM_MOUSEACTIVATE:
-        if (Editable(w.kind))
-            w.activating = GetTickCount64();
-        return false;
     case WM_WINDOWPOSCHANGING: {
-        // The widgets stay where Restack put them: a window shown or touched is not raised
-        // over the windows by Windows (a note being typed into may come forward).
+        // Activation still gives editable widgets keyboard focus, without changing their layer.
         auto* pos = reinterpret_cast<WINDOWPOS*>(lp);
-        if (!zMoving_ && !w.content.editing && (w.dragging || GetTickCount64() - w.activating > 500))
+        if (!zMoving_)
             pos->flags |= SWP_NOZORDER;
         return false;
     }
+    case WM_MOUSEWHEEL:
+        if (w.kind != WidgetKind::Reminders)
+            return false;
+        w.content.scroll = std::clamp(w.content.scroll - float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA * kReminderRow * 3,
+                                      0.f, ReminderScrollMax(w.content, w.size));
+        w.surface->Invalidate();
+        return true;
     case WM_SETCURSOR: {
         POINT p;
         GetCursorPos(&p);
@@ -1209,6 +1197,11 @@ void DesktopWidgets::StartEdit(Widget& w, int item)
     c.item = item;
     c.caret = w.kind == WidgetKind::Notes ? c.text.size() : c.items[size_t(item)].text.size();
     c.caretOn = true;
+    if (w.kind == WidgetKind::Reminders) {
+        float view = WidgetHeight(w.size) - kReminderTop - kReminderBottom;
+        float top = float(item) * kReminderRow;
+        c.scroll = std::clamp(c.scroll, std::max(0.f, top + kReminderRow - view), top);
+    }
     SetTimer(host_, kCaretTimer, kCaretMs, nullptr);
     if (GetForegroundWindow() != w.surface->Hwnd())
         SetForegroundWindow(w.surface->Hwnd());
@@ -1424,6 +1417,8 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
     if (c.panel)
         c.Fill(D2D1::RectF(0, 0, WidgetWidth(w.size), WidgetHeight(w.size)), kWidgetRadius, c.theme.panel);
     GetLocalTime(&world_.now);
+    if (w.kind == WidgetKind::Reminders)
+        w.content.scroll = std::clamp(w.content.scroll, 0.f, ReminderScrollMax(w.content, w.size));
     PaintWidget(c, w.kind, w.size, w.content, world_, w.hits);
     if ((w.hover || w.resizing) && !w.dragging && Resizable(w.kind)) {
         // Both corners use the same quiet arc; either can be dragged to resize.

@@ -27,7 +27,7 @@ internal sealed class CoreClient : IDisposable
 
     public static string? CoreExe()
     {
-        foreach (var p in new[] { Path.Combine(AppContext.BaseDirectory, "..", "Atrium.Core.exe"), Path.Combine(AppContext.BaseDirectory, "Atrium.Core.exe") })
+        foreach (var p in new[] { Path.Combine(AppContext.BaseDirectory, "..", "Atrium.exe"), Path.Combine(AppContext.BaseDirectory, "Atrium.exe") })
             if (File.Exists(p)) return Path.GetFullPath(p);
         return null;
     }
@@ -42,7 +42,7 @@ internal sealed class CoreClient : IDisposable
             pipe.ReadMode = PipeTransmissionMode.Message;
             // Only talk to the real core, not to another process holding the name.
             if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid) ||
-                !string.Equals(Process.GetProcessById((int)pid).ProcessName, "Atrium.Core", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(Process.GetProcessById((int)pid).ProcessName, "Atrium", StringComparison.OrdinalIgnoreCase))
             {
                 pipe.Dispose();
                 return false;
@@ -187,7 +187,7 @@ internal sealed class CoreClient : IDisposable
         using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
         if (s.StartOnLogin)
         {
-            var exe = CoreExe() ?? throw new FileNotFoundException("没有找到 Atrium.Core.exe");
+            var exe = CoreExe() ?? throw new FileNotFoundException("没有找到 Atrium.exe");
             run.SetValue("Atrium", $"\"{exe}\"");
         }
         else run.DeleteValue("Atrium", throwOnMissingValue: false);

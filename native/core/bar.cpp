@@ -48,7 +48,6 @@ constexpr wchar_t kMoreKey[] = L"#more";
 bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
-constexpr double kDesktopFollowMs = 100; // widgets follow a changing desktop at most this often
 constexpr UINT_PTR kTooltipTimer = 1;
 constexpr UINT kTooltipDelayMs = 450;
 constexpr UINT kPreviewSwapMs = 60;
@@ -1556,8 +1555,6 @@ bool Bar::RenderSession()
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         RECT window{};        // where it was last drawn: a moved panel is drawn again at once
         unsigned desktopVersion = 0; // a widget: the desktop picture its backdrop came from
-        double desktopMs = -1e9;     // ... and when it took it
-        bool desktopDue = false;     // a newer picture, taken a little later (kDesktopFollowMs)
         // Presents of an animation, logged when it ends (smoothness checks).
         double burstStart = 0, burstLast = 0, burstGap = 0;
         int burstFrames = 0;
@@ -1663,16 +1660,11 @@ bool Bar::RenderSession()
                 // first copy (before any present) is not compared, and a still desktop
                 // would leave a widget with the default ink over any wallpaper.
                 bool fresh = ps.desktopVersion != desktop.Version();
-                // A desktop that keeps changing (a slideshow's cross-fade) is followed ten times a
-                // second, the last picture always: under the blur more would not show, and the GPU
-                // is busy with the fade itself.
-                bool soon = fresh && !changed && r.HasBackdrop() && ps.grid.w != 0 && now - ps.desktopMs < kDesktopFollowMs;
-                ps.desktopDue = soon; // woken by the clock until it is time
-                if (!soon && pic && (changed || fresh || !r.HasBackdrop() || ps.grid.w == 0)) {
+                // Consume the latest desktop frame on the same render loop as the bar.
+                if (pic && (changed || fresh || !r.HasBackdrop() || ps.grid.w == 0)) {
                     r.UpdateBackdrop(pic, p.window.left - desktop.Origin().x, p.window.top - desktop.Origin().y);
                     newDesktop = fresh;
                     ps.desktopVersion = desktop.Version();
-                    ps.desktopMs = now;
                 }
             } else if (ID3D11Texture2D* below = source ? source : (moved || !r.HasBackdrop()) ? lastFrame.get() : nullptr) {
                 r.UpdateBackdrop(below, p.window.left - snap.monitor.left, p.window.top - snap.monitor.top);
@@ -1797,7 +1789,7 @@ bool Bar::RenderSession()
         // clock (D45): one wake-up per composed frame, at the display's rate. A timeout would
         // be rounded up to 15.6 ms, and the popups' latency objects (no vsync) would spin.
         // Pending readbacks are polled soon.
-        bool owed = barOwed || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed || e.second.desktopDue; });
+        bool owed = barOwed || std::any_of(panels.begin(), panels.end(), [](const auto& e) { return e.second.owed; });
         bool paced = animating || panelsMoving || owed;
         bool readback = renderer.ReadbackPending() || std::any_of(panels.begin(), panels.end(), [](const auto& e) {
             return e.second.renderer && e.second.renderer->ReadbackPending();

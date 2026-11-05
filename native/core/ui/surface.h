@@ -135,7 +135,7 @@ public:
     // paint: draws the content (DIP coordinates, the window is width x height DIP).
     // message: window messages before default handling; return true if handled (result in `result`).
     // insetDip: the margin around the content for the glass's shadow.
-    Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip = 12);
+    Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip = 12, bool desktopLayer = false);
     ~Surface();
     Surface(const Surface&) = delete;
     Surface& operator=(const Surface&) = delete;
@@ -169,9 +169,6 @@ public:
     HWND Hwnd() const { return hwnd_; }
     float Scale() const { return scale_; }
     RECT Rect() const { return rect_; } // the content, screen px
-    // A window on the desktop (a widget) instead of a popup: it is not made
-    // topmost; its owner keeps it in its place among the windows.
-    void SetDesktopLayer(bool on);
     // Corner radius of the glass shape (DIP), matching the bar's.
     void SetRadius(float dip);
     // Separate pieces of glass (content DIP), back to front; empty: the whole

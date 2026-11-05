@@ -536,7 +536,8 @@ std::shared_ptr<Surface::Shared> Surface::SharedDevice()
     return s;
 }
 
-Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip) : activatable_(activatable), insetDip_(insetDip)
+Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, float insetDip, bool desktopLayer)
+    : activatable_(activatable), desktopLayer_(desktopLayer), insetDip_(insetDip)
 {
     static bool registered = false;
     if (!registered) {
@@ -548,7 +549,7 @@ Surface::Surface(HINSTANCE instance, const wchar_t* title, bool activatable, flo
         RegisterClassExW(&wc);
         registered = true;
     }
-    DWORD ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP | (activatable ? 0 : WS_EX_NOACTIVATE);
+    DWORD ex = WS_EX_TOOLWINDOW | (desktopLayer ? 0 : WS_EX_TOPMOST) | WS_EX_NOREDIRECTIONBITMAP | (activatable ? 0 : WS_EX_NOACTIVATE);
     hwnd_ = CreateWindowExW(ex, kClass, title, WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, this);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     // The glass below the content samples the screen: the window must not be
@@ -747,7 +748,7 @@ void Surface::Place(RECT rect)
     scale_ = PopupScale(rect);
     int inset = InsetPx();
     window_ = RECT{rect.left - inset, rect.top - inset, rect.right + inset, rect.bottom + inset};
-    SetWindowPos(hwnd_, HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top,
+    SetWindowPos(hwnd_, desktopLayer_ ? nullptr : HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top,
                  SWP_NOACTIVATE | (desktopLayer_ ? SWP_NOZORDER : 0));
 }
 
@@ -785,13 +786,6 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
     }
     Paint();
     PublishPanel();
-}
-
-void Surface::SetDesktopLayer(bool on)
-{
-    desktopLayer_ = on;
-    if (on) // created topmost, as popups are
-        SetWindowPos(hwnd_, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void Surface::Move(RECT rect)

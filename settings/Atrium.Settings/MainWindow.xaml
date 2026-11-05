@@ -73,6 +73,10 @@
             </ListView>
 
             <StackPanel Grid.Row="1" Spacing="4" Margin="10,0,6,0">
+                <Button x:Name="UpdateAvailableButton" Content="有可用更新" Visibility="Collapsed"
+                        HorizontalAlignment="Stretch" Margin="0,0,0,12"
+                        Style="{StaticResource PrimaryButtonStyle}" Click="OnOpenUpdate"
+                        AutomationProperties.Name="有可用更新，查看更新" />
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -345,6 +349,32 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
+
+                        <StackPanel>
+                            <TextBlock Text="软件更新" Style="{StaticResource SectionStyle}" />
+                            <Border Style="{StaticResource TileStyle}">
+                                <StackPanel Spacing="12">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="UpdateStatus" Text="尚未检查" Style="{StaticResource RowTitleStyle}"
+                                                   TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                                        <ProgressRing x:Name="UpdateProgress" Grid.Column="1" Width="18" Height="18"
+                                                      IsActive="False" Visibility="Collapsed" VerticalAlignment="Center"
+                                                      AutomationProperties.Name="正在检查更新" />
+                                        <Button x:Name="CheckUpdateButton" Grid.Column="2" Content="检查更新" MinWidth="104"
+                                                VerticalAlignment="Center" Click="OnCheckForUpdates" />
+                                    </Grid>
+                                    <StackPanel x:Name="ReleaseLinks" Orientation="Horizontal" Spacing="20" Visibility="Collapsed">
+                                        <Button x:Name="InstallRelease" Content="下载并安装" Click="OnInstallRelease" Visibility="Collapsed" />
+                                        <HyperlinkButton x:Name="ReleaseNotes" Content="发布说明" Padding="0" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
 
                         <StackPanel>
                             <TextBlock Text="设置文件" Style="{StaticResource SectionStyle}" />

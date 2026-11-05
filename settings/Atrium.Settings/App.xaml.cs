@@ -8,6 +8,8 @@ public partial class App : Application
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string? cls, string title);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int cmd);
+    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam);
+    internal const uint OpenAboutMessage = 0x8000 + 31;
 
     public const string WindowTitle = "Atrium 设置";
     private static Mutex? s_instance;
@@ -44,6 +46,10 @@ public partial class App : Application
             {
                 ShowWindow(other, 9 /* SW_RESTORE */);
                 SetForegroundWindow(other);
+                var command = Environment.GetCommandLineArgs();
+                int page = Array.IndexOf(command, "--page");
+                if (page >= 0 && page + 1 < command.Length && command[page + 1] == "about")
+                    PostMessage(other, OpenAboutMessage, UIntPtr.Zero, IntPtr.Zero);
             }
             Exit();
             return;

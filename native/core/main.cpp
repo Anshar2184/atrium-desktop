@@ -1,4 +1,4 @@
-// Atrium.Core: the resident process. Owns the glass bar, its popups, the desktop
+// Atrium: the resident process. Owns the glass bar, its popups, the desktop
 // widgets, the tray icon and the settings pipe. Explorer's taskbar stays
 // unless the user hides it (setting hideTaskbar, shell/system_chrome.h; D37).
 
@@ -8,6 +8,8 @@
 #include "settings.h"
 #include "settings_server.h"
 #include "shell/app_catalog.h"
+#include "shell/app_registration.h"
+#include "shell/update_checker.h"
 #include "shell/task_model.h"
 #include "shell/notification_listener.h"
 #include "shell/system_chrome.h"
@@ -43,7 +45,7 @@ using namespace atrium;
 constexpr wchar_t kHostClass[] = L"AtriumCoreHost";
 constexpr wchar_t kInstanceMutex[] = L"Local\\Atrium.Core";
 constexpr UINT WM_TRAY = WM_APP + 2;
-constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.Core.exe
+constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.exe
 constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
 constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
 constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
@@ -63,6 +65,7 @@ struct App {
     HINSTANCE instance = nullptr;
     HWND host = nullptr;
     UINT taskbarCreated = 0;
+    bool trayAdded = false;
     std::unique_ptr<Bar> bar;
     std::unique_ptr<SettingsServer> server;
     std::unique_ptr<TaskModel> tasks;
@@ -70,6 +73,7 @@ struct App {
     std::unique_ptr<StartMenu> start;
     std::unique_ptr<Notifications> notes;
     std::unique_ptr<NotificationListener> listener;
+    std::unique_ptr<UpdateChecker> updates;
     std::unique_ptr<WeChatSource> wechat;
     std::unique_ptr<FeishuSource> feishu;
     std::unique_ptr<TrayModel> tray;
@@ -118,7 +122,7 @@ void OpenSettings(const wchar_t* page = nullptr)
             return;
     }
     Log(L"settings: Atrium.Settings.exe not found next to %s", dir.c_str());
-    MessageBoxW(nullptr, L"没有找到 Atrium.Settings.exe。请确认它与 Atrium.Core.exe 位于同一安装目录。", L"Atrium", MB_ICONWARNING);
+    MessageBoxW(nullptr, L"没有找到 Atrium.Settings.exe。请确认安装目录中的 Settings 文件夹完整。", L"Atrium", MB_ICONWARNING);
 }
 
 void AddTrayIcon()
@@ -131,10 +135,16 @@ void AddTrayIcon()
     nid.hIcon = static_cast<HICON>(LoadImageW(g_app.instance, MAKEINTRESOURCEW(IDI_ATRIUM), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
                                               GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     wcscpy_s(nid.szTip, L"Atrium");
-    Shell_NotifyIconW(NIM_ADD, &nid);
+    g_app.trayAdded = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
     DestroyIcon(nid.hIcon);
+    if (!g_app.trayAdded) {
+        Log(L"tray: could not add Atrium's notification icon; will retry when the taskbar is ready");
+        return;
+    }
     nid.uVersion = NOTIFYICON_VERSION_4;
-    Shell_NotifyIconW(NIM_SETVERSION, &nid);
+    if (!Shell_NotifyIconW(NIM_SETVERSION, &nid))
+        Log(L"tray: could not set notification icon version");
+    Log(L"tray: Atrium notification icon added");
 }
 
 void RemoveTrayIcon()
@@ -143,6 +153,7 @@ void RemoveTrayIcon()
     nid.hWnd = g_app.host;
     nid.uID = kTrayId;
     Shell_NotifyIconW(NIM_DELETE, &nid);
+    g_app.trayAdded = false;
 }
 
 // Win+<key> (or Win+Ctrl+<key>), a public system shortcut (D11).
@@ -368,6 +379,10 @@ const TrayIcon* TrayIconOf(const Notice& n)
 // front (start it if it is not running).
 bool RunNoticeAction(const Notice& n)
 {
+    if (n.action == L"settings:updates") {
+        OpenSettings(L"about");
+        return true;
+    }
     if (n.action.rfind(L"uri:", 0) == 0) {
         std::wstring target = n.action.substr(4);
         return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
@@ -558,7 +573,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     if (g_app.tasks && g_app.tasks->HandleMessage(m, w, l))
         return 0;
     if (m == g_app.taskbarCreated && m != 0) {
+        g_app.trayAdded = false;
         AddTrayIcon(); // Explorer restarted
+        if (g_app.tray)
+            g_app.tray->Refresh();
         if (g_app.chrome)
             g_app.chrome->Enforce(); // its new taskbar
         return 0;
@@ -583,7 +601,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_NOTICE:
         if (auto* n = reinterpret_cast<Notice*>(l)) {
             // Only from sources still turned on (a notice may arrive just after).
-            bool on = n->source == L"wechat" ? bool(g_app.wechat) : n->source == L"feishu" ? bool(g_app.feishu) : bool(g_app.listener);
+            bool on = n->source == L"atrium" ? true : n->source == L"wechat" ? bool(g_app.wechat)
+                       : n->source == L"feishu" ? bool(g_app.feishu) : bool(g_app.listener);
             if (g_app.notes && on)
                 g_app.notes->Post(*n);
             delete n;
@@ -618,6 +637,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         if (w == kStatusTimer) {
+            if (!g_app.trayAdded)
+                AddTrayIcon();
             UpdateStatus();
             if (g_app.chrome)
                 g_app.chrome->Enforce();
@@ -698,7 +719,18 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
 {
-    // `Atrium.Core.exe --exit` asks a running instance to quit (installer, updater).
+    if (wcscmp(cmdLine, L"--uninstall") == 0) {
+        if (MessageBoxW(nullptr, L"卸载 Atrium？个人设置和桌面小组件布局将会保留。", L"Atrium",
+                        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
+            return 0;
+        wchar_t system[MAX_PATH]{};
+        GetSystemDirectoryW(system, MAX_PATH);
+        std::wstring powershell = std::wstring(system) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+        std::wstring arguments = L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + ExeDir() + L"\\Uninstall.ps1\" -Confirmed";
+        // The launcher exits before the script removes this executable.
+        return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", powershell.c_str(), arguments.c_str(), nullptr, SW_HIDE)) > 32 ? 0 : 1;
+    }
+    // `Atrium.exe --exit` asks a running instance to quit (installer, updater).
     if (wcsstr(cmdLine, L"--exit")) {
         HWND other = FindWindowW(kHostClass, nullptr);
         if (!other)
@@ -720,8 +752,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         return 0;
     }
     winrt::init_apartment(winrt::apartment_type::single_threaded);
+    SetCurrentProcessExplicitAppUserModelID(kAppId);
     g_app.instance = instance;
     Log(L"core: starting");
+    RegisterApplication(ExeDir());
     // A crash must not leave the user without a taskbar.
     SetUnhandledExceptionFilter([](EXCEPTION_POINTERS*) -> LONG {
         SystemChrome::EmergencyRestore();
@@ -841,6 +875,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.brightnessNotify = RegisterPowerSettingNotification(g_app.host, &kBrightnessSetting, DEVICE_NOTIFY_WINDOW_HANDLE);
     SetTimer(g_app.host, kStatusTimer, kStatusMs, nullptr);
     g_app.tray->Refresh(); // the panel opens with the icons already read
+    g_app.updates = std::make_unique<UpdateChecker>(g_app.host, WM_NOTICE);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -860,6 +895,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         TerminateProcess(GetCurrentProcess(), 0);
     }
     g_app.server.reset();
+    g_app.updates.reset();
     g_app.listener.reset();
     g_app.wechat.reset();
     g_app.feishu.reset();

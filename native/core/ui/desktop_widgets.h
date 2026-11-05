@@ -1,8 +1,8 @@
 // Desktop widgets after macOS's (Sonoma and later): pieces of the bar's glass
 // on the desktop, in a grid on the bar's monitor whose halves hug its left and right edges. They
 // stand just above the desktop, under every window, always clear glass with
-// its ink and a few of macOS's colours (widget_faces); Win+D (every app
-// minimised) lifts them over the desktop. Drag one to move it (it snaps to the
+// its ink and a few of macOS's colours (widget_faces). Widgets never become
+// topmost. Drag one to move it (it snaps to the
 // grid), or by its bottom corner to resize it; right-click for its sizes, to
 // remove it or to add another. Notes and reminders take typing (the input
 // method too) after a click. The layout and the widgets' content are saved in
@@ -97,7 +97,6 @@ private:
     // Saved widgets this screen has no room for (JSON): kept in the layout
     // file, with their notes, until a larger screen shows them again.
     std::vector<std::wstring> unplaced_;
-    bool raised_ = false; // every app minimised: over the desktop
     WidgetWorld world_;
     ChineseCalendar lunar_;
     int lastMinute_ = -1;

@@ -12,6 +12,7 @@
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <string_view>
 
 namespace atrium {
 
@@ -235,6 +236,11 @@ std::vector<CatalogApp> ResolvePins(const std::vector<std::pair<std::wstring, st
         if (key != L"desktopAppLink")
             continue;
         std::wstring expanded = ExpandFolders(value);
+        // Start layouts exported before the rename still refer to this shortcut.
+        constexpr std::wstring_view legacy = L"\\Atrium.Core.lnk";
+        if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES && expanded.size() >= legacy.size() &&
+            SameText(expanded.substr(expanded.size() - legacy.size()), std::wstring(legacy)))
+            expanded.replace(expanded.size() - legacy.size(), legacy.size(), L"\\Atrium.lnk");
         if (GetFileAttributesW(expanded.c_str()) == INVALID_FILE_ATTRIBUTES) {
             Log(L"catalog: start pin %s not found", value.c_str());
             continue;

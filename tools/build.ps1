@@ -5,7 +5,7 @@
 .DESCRIPTION
   native (CMake, MSVC) -> settings (dotnet publish, self-contained WinUI 3) -> dist.
   Layout:
-    dist/Atrium/Atrium.Core.exe
+    dist/Atrium/Atrium.exe
     dist/Atrium/Settings/Fonts/ (MiSans, D40; the core reads it from there)
     dist/Atrium/Settings/Atrium.Settings.exe (+ runtime)
   -Zip also writes dist/Atrium-<version>-win-x64.zip.
@@ -36,7 +36,8 @@ try {
     dotnet publish settings/Atrium.Settings/Atrium.Settings.csproj -c $Configuration -o (Join-Path $dist "Settings")
     if ($LASTEXITCODE) { throw "settings publish failed" }
 
-    Copy-Item (Join-Path "native/build/win-x64/$Configuration" "Atrium.Core.exe") $dist
+    Copy-Item (Join-Path "native/build/win-x64/$Configuration" "Atrium.exe") $dist
+    Copy-Item (Join-Path $PSScriptRoot "Uninstall.ps1") $dist
     Copy-Item LICENSE $dist
 
     if ($Zip) {

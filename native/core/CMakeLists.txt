@@ -1,4 +1,4 @@
-# Atrium.Core: resident process (glass bar, tray icon, settings pipe).
+# Atrium: resident process (glass bar, tray icon, settings pipe).
 
 # HLSL is compiled at build time into headers; the runtime needs no compiler.
 find_program(ATRIUM_FXC fxc
@@ -31,6 +31,8 @@ add_executable(atrium_core WIN32
     settings_server.cpp
     shell/task_model.cpp
     shell/app_catalog.cpp
+    shell/app_registration.cpp
+    shell/update_checker.cpp
     shell/system_chrome.cpp
     shell/system_status.cpp
     shell/wifi.cpp
@@ -63,8 +65,8 @@ add_executable(atrium_core WIN32
     core.rc
     core.manifest
     ${shader_headers})
-# build/win-x64/<Config>/Atrium.Core.exe
-set_target_properties(atrium_core PROPERTIES OUTPUT_NAME "Atrium.Core" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+# build/win-x64/<Config>/Atrium.exe
+set_target_properties(atrium_core PROPERTIES OUTPUT_NAME "Atrium" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 target_include_directories(atrium_core PRIVATE ${shader_out})
 # The interface face (D40) next to the exe, as in the package.
 set(ui_fonts MiSans-Medium.otf MiSans-Demibold.otf MiSans-Semibold.otf)

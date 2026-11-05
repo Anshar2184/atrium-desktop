@@ -345,61 +345,64 @@ void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float W, float 
     hits.push_back({caret, L"caret"});
 }
 
-// Reminders: the title and the count still to do, then the list (open ones
-// first), each with its circle; a last row adds one.
+// Reminders: the title and the count still to do, then the list
+// in their original order, each with its circle; a last row adds one.
 void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, float H, std::vector<WidgetHit>& hits)
 {
     int open = int(std::count_if(r.items.begin(), r.items.end(), [](const Reminder& i) { return !i.done; }));
     c.Text(L"提醒事项", D2D1::RectF(kPad + 2, kPad - 2, W - kPad - 40, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(std::to_wstring(open), D2D1::RectF(W - kPad - 48, kPad - 6, W - kPad - 2, kPad + 22), 22, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
-    const float rowH = 27, top = kPad + 28;
-    const int slots = std::max(1, int((H - kPad - top) / rowH));
-    std::vector<int> order;
-    for (int pass = 0; pass < 2; ++pass)
-        for (int i = 0; i < int(r.items.size()); ++i)
-            if (r.items[size_t(i)].done == (pass == 1))
-                order.push_back(i);
-    // The item being edited is always shown.
-    if (r.editing && r.item >= 0) {
-        auto at = std::find(order.begin(), order.end(), r.item);
-        if (at - order.begin() >= slots - 1 && at != order.end()) {
-            order.erase(at);
-            order.insert(order.begin() + std::min<ptrdiff_t>(slots - 1, ptrdiff_t(order.size())), r.item);
-        }
-    }
-    int shown = 0;
-    for (int idx : order) {
-        if (shown >= slots - (r.editing ? 0 : 1) && !(r.editing && idx == r.item))
-            break;
+    const float bottom = H - kReminderBottom, view = bottom - kReminderTop;
+    const float limit = std::max(0.f, float(r.items.size() + 1) * kReminderRow - view);
+    const float scroll = std::clamp(r.scroll, 0.f, limit);
+    auto hit = [&](D2D1_RECT_F rect, std::wstring id) {
+        rect.top = std::max(rect.top, kReminderTop);
+        rect.bottom = std::min(rect.bottom, bottom);
+        if (rect.bottom > rect.top)
+            hits.push_back({rect, std::move(id)});
+    };
+    c.Clip(D2D1::RectF(kPad - 4, kReminderTop, W - kPad, bottom));
+    int first = int(scroll / kReminderRow);
+    int last = std::min(int(r.items.size()), int(std::ceil((scroll + view) / kReminderRow)));
+    for (int idx = first; idx < last; ++idx) {
         const Reminder& it = r.items[size_t(idx)];
-        float y = top + rowH * float(shown);
-        float cx = kPad + 9, cy = y + rowH / 2;
+        float y = kReminderTop + kReminderRow * float(idx) - scroll;
+        float cx = kPad + 9, cy = y + kReminderRow / 2;
         if (it.done) {
             c.Circle(cx, cy, 8, p.orange);
             c.Circle(cx, cy, 3.2f, Rgba(0xFFFFFF, 0.98f));
         } else {
             c.Arc(cx, cy, 7.4f, -90, 270, p.sub, 1.5f);
         }
-        hits.push_back({D2D1::RectF(kPad - 4, y, kPad + 22, y + rowH), L"toggle:" + std::to_wstring(idx)});
-        D2D1_RECT_F text = D2D1::RectF(kPad + 26, y, W - kPad, y + rowH);
+        hit(D2D1::RectF(kPad - 4, y, kPad + 22, y + kReminderRow), L"toggle:" + std::to_wstring(idx));
+        D2D1_RECT_F text = D2D1::RectF(kPad + 26, y, W - kPad, y + kReminderRow);
         bool editing = r.editing && r.item == idx;
         c.Text(it.text.empty() && !editing ? L"新提醒" : it.text, text, 13.5f, it.done ? p.sub : it.text.empty() ? p.faint : p.text);
+        if (it.done && !it.text.empty())
+            c.Line(text.left, cy, std::min(text.right, text.left + c.TextWidth(it.text, 13.5f)), cy, p.sub);
         if (editing) {
             // One line: the caret after the text up to it.
             float x = text.left + c.TextWidth(it.text.substr(0, std::min(r.caret, it.text.size())), 13.5f);
             D2D1_RECT_F caret = D2D1::RectF(std::min(x, text.right - 2), cy - 9, std::min(x, text.right - 2) + 1.5f, cy + 9);
             if (r.caretOn)
                 c.Fill(caret, 0.75f, p.orange);
-            hits.push_back({caret, L"caret"});
+            hit(caret, L"caret");
         }
-        hits.push_back({text, L"item:" + std::to_wstring(idx)});
-        ++shown;
+        hit(text, L"item:" + std::to_wstring(idx));
     }
-    if (shown < slots && !r.editing) {
-        float y = top + rowH * float(shown);
-        c.Text(L"+", D2D1::RectF(kPad - 1, y, kPad + 19, y + rowH), 17, p.faint, DWRITE_FONT_WEIGHT_NORMAL, 1);
-        c.Text(r.items.empty() ? L"点按以添加提醒" : L"新提醒", D2D1::RectF(kPad + 26, y, W - kPad, y + rowH), 13.5f, p.faint);
-        hits.push_back({D2D1::RectF(0, y, W, y + rowH), L"add"});
+    if (!r.editing) {
+        float y = kReminderTop + kReminderRow * float(r.items.size()) - scroll;
+        if (y < bottom) {
+            c.Text(L"+", D2D1::RectF(kPad - 1, y, kPad + 19, y + kReminderRow), 17, p.faint, DWRITE_FONT_WEIGHT_NORMAL, 1);
+            c.Text(r.items.empty() ? L"点按以添加提醒" : L"新提醒", D2D1::RectF(kPad + 26, y, W - kPad, y + kReminderRow), 13.5f, p.faint);
+            hit(D2D1::RectF(kPad - 4, y, W - kPad, y + kReminderRow), L"add");
+        }
+    }
+    c.Unclip();
+    if (limit > 0) {
+        float thumb = std::max(18.f, view * view / (view + limit));
+        float y = kReminderTop + (view - thumb) * scroll / limit;
+        c.Fill(D2D1::RectF(W - 7, y, W - 5, y + thumb), 1, p.faint);
     }
 }
 
@@ -416,6 +419,11 @@ void PaintPhotos(Canvas& c, const WidgetContent& ph, const Pal& p, float W, floa
 }
 
 } // namespace
+
+float ReminderScrollMax(const WidgetContent& content, WidgetSize size)
+{
+    return std::max(0.f, float(content.items.size() + 1) * kReminderRow - (WidgetHeight(size) - kReminderTop - kReminderBottom));
+}
 
 bool WidgetSupports(WidgetKind kind, WidgetSize size)
 {

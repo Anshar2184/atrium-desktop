@@ -18,13 +18,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\atrium.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>Atrium Desktop</Product>
     <Copyright>MIT License</Copyright>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="..\..\tools\Update.ps1" Link="Update.ps1" CopyToOutputDirectory="PreserveNewest" />
     <!-- WinUI component only: the metapackage would also ship AI/ML/Search/Widgets
          (onnxruntime, DirectML, ...) in a self-contained build. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.4" />
