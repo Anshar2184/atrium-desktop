@@ -4,7 +4,20 @@ using System.Text.Json.Nodes;
 namespace Atrium.Settings;
 
 // One pinned app of the bar. Either Path (.lnk / .exe) or Aumid identifies it.
-internal sealed record PinnedApp(string Name, string Path, string Args, string Aumid);
+internal sealed record PinnedApp(string Name, string Path, string Args, string Aumid, bool? MultipleWindows = null)
+{
+    public bool AllowsMultipleWindows
+    {
+        get
+        {
+            if (MultipleWindows is bool multiple) return multiple;
+            string path = ShellIcons.ExecutablePath(Path);
+            string exe = System.IO.Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+            return exe is "explorer" or "chrome" or "msedge" or "firefox" or "brave" or "opera" or "vivaldi" or "chromium" ||
+                   Aumid.Equals("Microsoft.Windows.Explorer", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+}
 
 // Mirrors native/core/settings.h (same keys, ranges and presets). Lengths in DIP.
 internal sealed class BarSettings
@@ -116,7 +129,11 @@ internal sealed class BarSettings
         {
             var a = new JsonArray();
             foreach (var p in Pins)
-                a.Add(new JsonObject { ["name"] = p.Name, ["path"] = p.Path, ["args"] = p.Args, ["aumid"] = p.Aumid });
+            {
+                var pin = new JsonObject { ["name"] = p.Name, ["path"] = p.Path, ["args"] = p.Args, ["aumid"] = p.Aumid };
+                if (p.MultipleWindows is bool multiple) pin["multipleWindows"] = multiple;
+                a.Add(pin);
+            }
             o["pins"] = a;
         }
         return o;
@@ -179,7 +196,8 @@ internal sealed class BarSettings
             {
                 if (node is not JsonObject e) continue;
                 string Str(string k) => e[k] is JsonValue v && v.TryGetValue(out string? x) && x != null ? x : "";
-                var pin = new PinnedApp(Str("name"), Str("path"), Str("args"), Str("aumid"));
+                bool? multiple = e["multipleWindows"] is JsonValue flag && flag.TryGetValue(out bool value) ? value : null;
+                var pin = new PinnedApp(Str("name"), Str("path"), Str("args"), Str("aumid"), multiple);
                 if (pin.Path.Length > 0 || pin.Aumid.Length > 0) pins.Add(pin);
             }
             if (pins.Count > 64) pins.RemoveRange(64, pins.Count - 64);

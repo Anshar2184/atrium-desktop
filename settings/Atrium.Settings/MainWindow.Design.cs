@@ -654,17 +654,11 @@ public sealed partial class MainWindow
         text.Children.Add(new TextBlock { Text = "产品评审", FontSize = 14, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(240, 0x1D, 0x1D, 0x1F)) });
         text.Children.Add(new TextBlock { Text = "点我，再弹出一次。", FontSize = 13, Foreground = new SolidColorBrush(Color.FromArgb(190, 0x1D, 0x1D, 0x1F)) });
         card.Child = text;
-        stage.Children.Add(card);
-        card.SizeChanged += (_, e) => card.CenterPoint = new Vector3((float)(e.NewSize.Width / 2), (float)e.NewSize.Height, 0);
-        // kPop: scale 0.92 -> 1 on the spring, opacity eased in over 160 ms (PopVisual in glass_renderer.cpp).
-        var pop = Curves[0];
-        Action<double> show = t =>
-        {
-            float sc = (float)(0.92 + 0.08 * pop.At(t));
-            card.Scale = new Vector3(sc, sc, 1);
-            card.Opacity = Motion.EaseOut(t / 0.16);
-        };
-        stage.PointerPressed += (_, _) => Play(pop, show);
+        var popup = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        popup.Children.Add(card);
+        stage.Children.Add(popup);
+        stage.PointerPressed += (_, _) => ReplayNotification(popup,
+            new Vector2((float)(popup.ActualWidth - _current.Height / 2 - 4), (float)popup.ActualHeight), card);
         AutomationProperties.SetName(stage, "通知弹出示例");
 
         var s = new StackPanel { Spacing = 10 };

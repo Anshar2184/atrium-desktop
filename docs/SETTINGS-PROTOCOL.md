@@ -1,6 +1,6 @@
 # SETTINGS-PROTOCOL · 设置协议
 
-`Atrium.Settings.exe`（C# / WinUI 3，按需启动）通过命名管道调整 `Atrium.Core.exe` 的外观（D18）。两边共享同一份设置模型：`native/core/settings.h` 与 `settings/Atrium.Settings/BarSettings.cs`，键名、范围、预设必须同步修改。
+`Atrium.Settings.exe`（C# / WinUI 3，按需启动）通过命名管道调整 `Atrium.exe` 的外观（D18）。两边共享同一份设置模型：`native/core/settings.h` 与 `settings/Atrium.Settings/BarSettings.cs`，键名、范围、预设必须同步修改。
 
 ## 设置文件
 
@@ -44,14 +44,14 @@
 | `startOnLogin` | bool | | true | 当前用户开机自启；与本次启动或关闭任务栏独立，保存时同步 Windows 开机项 |
 | `pins` | array | | 见下 | 固定的应用，按顺序显示 |
 
-`pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空"}`。识别同一应用时 `aumid` 优先，其次是 `path` 指向的程序。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。
+`pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空", "multipleWindows": false}`。`multipleWindows` 可省略，浏览器与 Windows 文件管理器默认允许新窗口，聊天、音乐及其他应用默认打开已有页面；中键与“打开新窗口”遵循此设置。浏览器仅按常用程序文件名识别（Chrome、Edge、Firefox、Brave、Opera、Vivaldi、Chromium），不扫描协议注册或按显示名推断。主窗口关闭到后台时，通过应用自己的托盘入口恢复，不强制显示隐藏窗口。识别同一应用时 `aumid` 优先，其次匹配启动器与实际程序；多个固定项共用的程序路径不作模糊归组。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。
 
 预设只改材质键（transparency、blur、refraction、edge、dispersion、highlight、shadow、tint），不改布局与内容键。预设由 `BarSettings.cs` 的 `Liquid()` / `Frosted()` 定义，液态默认值与 `native/core/settings.h` 保持一致。
 
 ## 管道
 
 - 名称：`\\.\pipe\Atrium.Core.<会话 ID>`；消息模式；拒绝远程客户端；Core 以 `FILE_FLAG_FIRST_PIPE_INSTANCE` 创建，其他进程无法预先占用名称。
-- Settings 连接后用 `GetNamedPipeServerProcessId` 核对对端进程是 `Atrium.Core`。
+- Settings 连接后用 `GetNamedPipeServerProcessId` 核对对端进程是 `Atrium`。管道名称沿用内部标识 `Atrium.Core`，不受可执行文件改名影响。
 - 同一时间只服务一个客户端。每条请求是一个 UTF-8 JSON 消息，对应一条回复。
 
 | 请求 | 回复 | 行为 |

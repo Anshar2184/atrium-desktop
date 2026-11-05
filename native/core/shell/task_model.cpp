@@ -512,6 +512,8 @@ struct Pin {
     std::wstring key;    // lowercase
     std::wstring target; // exe the pin starts (lowercase), used for loose matching; may be empty
     std::wstring exe;    // same, original case
+    std::wstring aumid;  // also resolved from the shortcut
+    bool multipleWindows = false;
 };
 
 Pin ResolvePin(const PinnedApp& app)
@@ -529,11 +531,15 @@ Pin ResolvePin(const PinnedApp& app)
             target = app.path;
         }
     }
-    p.exe = target;
+    p.exe = AppExecutable(target);
+    p.aumid = aumid;
+    PinnedApp resolved = app;
+    resolved.path = p.exe;
+    resolved.aumid = aumid;
+    p.multipleWindows = resolved.AllowsMultipleWindows();
     p.target = Lower(target);
     if (!aumid.empty()) {
         p.key = Lower(aumid);
-        p.target.clear(); // an explicit identity is matched exactly
     } else if (!target.empty()) {
         p.key = p.target;
     } else {
@@ -596,6 +602,7 @@ struct ScanRec {
 struct TaskModel::Impl {
     HWND ui;
     std::function<void()> onChanged;
+    std::function<bool(const std::wstring&)> openExisting;
     ComScope com;
     UINT shellHookMsg = 0;
     UINT readyMsg = 0;
@@ -632,7 +639,8 @@ struct TaskModel::Impl {
 
     static Impl* self;
 
-    Impl(HWND window, std::function<void()> changed) : ui(window), onChanged(std::move(changed))
+    Impl(HWND window, std::function<void()> changed, std::function<bool(const std::wstring&)> opener)
+        : ui(window), onChanged(std::move(changed)), openExisting(std::move(opener))
     {
         self = this;
         shellHookMsg = RegisterWindowMessageW(L"SHELLHOOK");
@@ -859,11 +867,11 @@ struct TaskModel::Impl {
         auto it = pinByKey.find(info.key);
         if (it != pinByKey.end())
             return int(it->second);
-        // A pin without explicit identity also owns windows of its exe even when
-        // they carry their own AUMID (e.g. Explorer windows, "Microsoft.Windows.Explorer").
+        // Desktop launchers can give the actual window a different identity or executable.
+        // Exact AUMIDs still win; an executable shared by several pins is ambiguous.
         if (!info.exePath.empty()) {
             auto jt = pinByTarget.find(Lower(info.exePath));
-            if (jt != pinByTarget.end())
+            if (jt != pinByTarget.end() && jt->second < pins.size())
                 return int(jt->second);
         }
         return -1;
@@ -885,10 +893,11 @@ struct TaskModel::Impl {
             t.name = p.app.name;
             t.pinned = true;
             t.pinIndex = int(i);
+            t.multipleWindows = p.multipleWindows;
             at[p.key] = out.size();
             out.push_back(std::move(t));
             Meta& m = newMeta[p.key];
-            m.aumid = p.app.aumid;
+            m.aumid = p.aumid;
             m.pinPath = p.app.path;
             m.exePath = p.exe;
         }
@@ -957,6 +966,8 @@ struct TaskModel::Impl {
 
         for (TaskItem& t : result) {
             const Meta& m = newMeta[t.key];
+            if (!t.pinned)
+                t.multipleWindows = PinnedApp{t.name, m.exePath, {}, m.aumid}.AllowsMultipleWindows();
             if (t.name.empty()) {
                 auto n = names.find(t.key);
                 if (n != names.end()) {
@@ -1025,8 +1036,17 @@ struct TaskModel::Impl {
                 p.key += L"#" + std::to_wstring(pins.size()); // duplicate pin: shown, never matched
             else
                 pinByKey[p.key] = pins.size();
-            if (!p.target.empty() && !pinByTarget.contains(p.target))
-                pinByTarget[p.target] = pins.size();
+            auto addTarget = [&](const std::wstring& target) {
+                if (target.empty()) return;
+                auto [it, added] = pinByTarget.emplace(target, pins.size());
+                if (!added && it->second != pins.size()) it->second = size_t(-1);
+            };
+            // Browser profile shortcuts keep their explicit identity.
+            std::wstring id = Lower(p.aumid);
+            if (!(id.starts_with(L"chrome.") || id.starts_with(L"msedge."))) {
+                addTarget(p.target);
+                addTarget(Lower(p.exe));
+            }
             pins.push_back(std::move(p));
         }
         if (Rebuild()) {
@@ -1150,7 +1170,7 @@ struct TaskModel::Impl {
         QueryPerformanceCounter(&t0);
         ok = LoadAtriumIcon(job.exePath, job.size, img);
         for (size_t i = 0; !ok && i < sources.size(); ++i)
-            ok = ShellImage(sources[i], job.size, img);
+            ok = LoadShellImage(sources[i], job.size, img);
         for (size_t i = 0; !ok && i < job.hwnds.size(); ++i) {
             IconImage raw;
             if (WindowIcon(job.hwnds[i], job.size, raw)) {
@@ -1201,6 +1221,17 @@ struct TaskModel::Impl {
 
     void Launch(const std::wstring& key)
     {
+        const TaskItem* task = Find(key);
+        if (task && !task->multipleWindows) {
+            for (HWND window : task->windows)
+                if (IsWindowVisible(window)) {
+                    BringToFront(window);
+                    return;
+                }
+            auto m = meta.find(key);
+            if (m != meta.end() && openExisting && openExisting(m->second.exePath))
+                return;
+        }
         auto pit = pinByKey.find(key);
         size_t pinIndex = pit != pinByKey.end() ? pit->second : pins.size();
         if (pinIndex == pins.size()) // duplicate pins carry a suffixed key
@@ -1248,6 +1279,8 @@ struct TaskModel::Impl {
 
     static void BringToFront(HWND h)
     {
+        // A closed-to-tray window must be restored by its app, not by the task switcher.
+        if (!IsWindowVisible(h)) return;
         if (IsIconic(h))
             SysCommand(h, SC_RESTORE);
         HWND target = GetLastActivePopup(h);
@@ -1268,20 +1301,23 @@ struct TaskModel::Impl {
             Log(L"tasks: SetForegroundWindow refused, switching with SwitchToThisWindow (logged once)");
             logged = true;
         }
-        SwitchToThisWindow(target, TRUE);
+        if (IsWindowVisible(target))
+            SwitchToThisWindow(target, TRUE);
     }
 
     void Activate(const std::wstring& key)
     {
         const TaskItem* t = Find(key);
-        if (!t || t->windows.empty()) {
+        auto windows = t ? t->windows : std::vector<HWND>{};
+        std::erase_if(windows, [](HWND h) { return !IsWindowVisible(h); });
+        if (windows.empty()) {
             Launch(key);
             return;
         }
         HWND fg = ForegroundRoot();
-        bool inGroup = fg && std::find(t->windows.begin(), t->windows.end(), fg) != t->windows.end();
-        if (t->windows.size() == 1) {
-            HWND w = t->windows[0];
+        bool inGroup = fg && std::find(windows.begin(), windows.end(), fg) != windows.end();
+        if (windows.size() == 1) {
+            HWND w = windows[0];
             if (inGroup && !IsIconic(w))
                 SysCommand(w, SC_MINIMIZE);
             else
@@ -1289,7 +1325,7 @@ struct TaskModel::Impl {
             return;
         }
         // Windows are most-recently-active first: the last one is the next in turn.
-        BringToFront(inGroup ? t->windows.back() : t->windows.front());
+        BringToFront(inGroup ? windows.back() : windows.front());
     }
 
     void CloseAll(const std::wstring& key)
@@ -1390,11 +1426,37 @@ struct TaskModel::Impl {
 
 TaskModel::Impl* TaskModel::Impl::self = nullptr;
 
+bool PinnedApp::AllowsMultipleWindows() const
+{
+    if (multipleWindows) return *multipleWindows;
+    std::wstring exe = Lower(FileStem(path));
+    return exe == L"explorer" || Lower(aumid) == L"microsoft.windows.explorer" ||
+           exe == L"chrome" || exe == L"msedge" || exe == L"firefox" || exe == L"brave" ||
+           exe == L"opera" || exe == L"vivaldi" || exe == L"chromium";
+}
+
+std::wstring AppExecutable(const std::wstring& path)
+{
+    std::wstring target = path;
+    if (IsLink(path)) {
+        std::wstring aumid;
+        if (!ReadLink(path, target, aumid)) return {};
+    }
+    size_t slash = target.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) {
+        std::wstring app = target.substr(0, slash + 1) + L"app\\" + target.substr(slash + 1);
+        DWORD attr = GetFileAttributesW(app.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+            return app;
+    }
+    return target;
+}
+
 bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out)
 {
     const size_t slash = exePath.find_last_of(L"\\/");
     const wchar_t* name = exePath.c_str() + (slash == std::wstring::npos ? 0 : slash + 1);
-    if (_wcsicmp(name, L"Atrium.Settings.exe") != 0 && _wcsicmp(name, L"Atrium.Core.exe") != 0)
+    if (_wcsicmp(name, L"Atrium.Settings.exe") != 0 && _wcsicmp(name, L"Atrium.exe") != 0)
         return false;
     HICON icon = nullptr;
     if (SHDefExtractIconW(exePath.c_str(), 0, 0, &icon, nullptr, MAKELONG(sizePx, 0)) != S_OK || !icon)
@@ -1410,6 +1472,27 @@ bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out)
 bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out, bool thumbnail)
 {
     try {
+        if (!thumbnail) {
+            std::wstring source = AppExecutable(parsingName);
+            int index = 0;
+            if (IsLink(parsingName)) {
+                winrt::com_ptr<IShellLinkW> link;
+                if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(link.put())))) {
+                    auto file = link.as<IPersistFile>();
+                    wchar_t iconPath[MAX_PATH * 2]{};
+                    if (SUCCEEDED(file->Load(parsingName.c_str(), STGM_READ)) &&
+                        SUCCEEDED(link->GetIconLocation(iconPath, ARRAYSIZE(iconPath), &index)) && *iconPath)
+                        source = iconPath;
+                }
+            }
+            HICON icon = nullptr;
+            if (!source.empty() && SHDefExtractIconW(source.c_str(), index, 0, &icon, nullptr, MAKELONG(sizePx, 0)) == S_OK && icon) {
+                IconImage raw;
+                bool ok = IconToImage(icon, raw);
+                DestroyIcon(icon);
+                if (ok) { out = FitToSquare(raw, sizePx); return true; }
+            }
+        }
         return ShellImage(parsingName, sizePx, out, thumbnail);
     } catch (...) {
         return false;
@@ -1418,9 +1501,9 @@ bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out,
 
 // ---- TaskModel: every entry point is exception-safe -----------------------------
 
-TaskModel::TaskModel(HWND uiWindow, std::function<void()> onChanged)
+TaskModel::TaskModel(HWND uiWindow, std::function<void()> onChanged, std::function<bool(const std::wstring&)> openExisting)
 {
-    impl_ = std::make_unique<Impl>(uiWindow, std::move(onChanged));
+    impl_ = std::make_unique<Impl>(uiWindow, std::move(onChanged), std::move(openExisting));
 }
 
 TaskModel::~TaskModel() = default;

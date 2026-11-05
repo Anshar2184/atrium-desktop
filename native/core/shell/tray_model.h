@@ -3,7 +3,8 @@
 // overflow window's tray buttons are there even while hidden, named by their
 // tooltips. A click is forwarded the same way: Invoke is the icon's left click,
 // ShowContextMenu its right click (the app opens its own menu). Nothing is
-// injected into Explorer and its windows are never shown (D28). The picture of
+// injected into Explorer. Reading never opens its UI; an explicit icon action
+// may initialize its lazy overflow. The picture of
 // an icon comes from Windows' record of tray icons (NotifyIconSettings: the
 // program and a snapshot of its icon), matched to the button by name, or from
 // the program's file. UI Automation runs on a worker thread.
@@ -29,13 +30,14 @@ struct TrayIcon {
     std::shared_ptr<const IconImage> image; // null when unknown
     bool promoted = false; // on the system taskbar rather than in its overflow
     int index = 0;         // position among the icons of the same place
+    std::wstring recordId; // stable Windows identity, also before the overflow UI exists
 };
 
 class TrayModel {
 public:
     // Posts `msg` to `notify` when the list has been read (wParam 0) and when a
     // click has been forwarded (wParam 1).
-    TrayModel(HWND notify, UINT msg);
+    TrayModel(HWND notify, UINT msg, std::function<std::vector<PinnedApp>()> appNames = {});
     ~TrayModel();
     TrayModel(const TrayModel&) = delete;
     TrayModel& operator=(const TrayModel&) = delete;
@@ -46,6 +48,8 @@ public:
     bool Available() const; // the shell's tray was found in the last read
     // A left click (Invoke) or a right click (the context menu) on `icon`.
     void Click(const TrayIcon& icon, bool right);
+    // Opens an existing background session; false when the app is not in the tray/running.
+    bool OpenExisting(const std::wstring& exe);
 
     // First line of a tooltip, for display.
     static std::wstring Title(const std::wstring& tip);
@@ -59,6 +63,7 @@ private:
     void Worker();
     HWND notify_;
     UINT msg_;
+    std::function<std::vector<PinnedApp>()> appNames_;
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<Job> jobs_;

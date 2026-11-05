@@ -2,8 +2,10 @@ using System.Numerics;
 using System.Text.Json.Nodes;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
@@ -54,6 +56,10 @@ public sealed partial class MainWindow
 
     private const double CardW = 384, CardH = 112, CardPeek = 10, CardInset = 12;
     private bool _notifyDark;
+    private Border? _notifyBack, _notifyFront;
+    private Image? _notifyBackImage, _notifyFrontImage;
+    private Grid? _notifyFrontContent;
+    private bool _notifyEntrancePending;
 
     private void ShowNotifyPreview(bool animate)
     {
@@ -65,30 +71,57 @@ public sealed partial class MainWindow
         var front = new GlassTile(W - 24 - CardW, H - 28 - CardH, CardW, CardH, radius);
         var back = new GlassTile(front.X + CardInset, front.Y - CardPeek, CardW - 2 * CardInset, CardH, radius);
 
-        NotifyCards.Children.Clear();
         NotifyCards.Width = W;
         NotifyCards.Height = H;
-        var backCard = new Border { Width = back.W, Height = back.H, CornerRadius = new CornerRadius(radius) };
-        var frontCard = new Border { Width = front.W, Height = front.H, CornerRadius = new CornerRadius(radius), Child = CardText(s, _notifyDark) };
-        Canvas.SetLeft(backCard, back.X); Canvas.SetTop(backCard, back.Y);
-        Canvas.SetLeft(frontCard, front.X); Canvas.SetTop(frontCard, front.Y);
-        NotifyCards.Children.Add(backCard);
-        NotifyCards.Children.Add(frontCard);
-        if (animate) { Rise(backCard, 0); Rise(frontCard, 70); }
+        if (_notifyFront == null)
+        {
+            ElementCompositionPreview.GetElementVisual(NotifyCards).Opacity = 0;
+            _notifyBackImage = new Image { Stretch = Stretch.Fill };
+            _notifyFrontImage = new Image { Stretch = Stretch.Fill };
+            _notifyFrontContent = new Grid();
+            _notifyFrontContent.Children.Add(_notifyFrontImage);
+            _notifyBack = new Border { Child = _notifyBackImage };
+            _notifyFront = new Border { Child = _notifyFrontContent };
+            NotifyCards.Children.Add(_notifyBack);
+            NotifyCards.Children.Add(_notifyFront);
+        }
+        var backCard = _notifyBack!;
+        var frontCard = _notifyFront;
+        const double pad = GlassSpec.InsetDip;
+        backCard.Width = back.W + 2 * pad; backCard.Height = back.H + 2 * pad;
+        frontCard.Width = front.W + 2 * pad; frontCard.Height = front.H + 2 * pad;
+        UpdateNotifyText(s);
+        Canvas.SetLeft(backCard, back.X - pad); Canvas.SetTop(backCard, back.Y - pad);
+        Canvas.SetLeft(frontCard, front.X - pad); Canvas.SetTop(frontCard, front.Y - pad);
+        _notifyEntrancePending |= animate;
         NotifyCaption.Text = $"{s.NotifyTimeout:0} 秒后收起" + (s.NotifyHideBody ? " · 正文已隐藏" : "");
 
         // Their glass: rendered over the picture where they rest; each card carries its own piece.
         PostTiles(NotifyCards, W, H, 1, new[] { back, front }, null, f =>
         {
-            backCard.Background = new ImageBrush { ImageSource = f.Crop(back), Stretch = Stretch.Fill };
-            frontCard.Background = new ImageBrush { ImageSource = f.Crop(front), Stretch = Stretch.Fill };
+            _notifyBackImage!.Source = f.Overlay(0);
+            _notifyFrontImage!.Source = f.Overlay(1);
             bool dark = _notifyDark ? f.Lumas[1] >= 0.42f : f.Lumas[1] > 0.50f;
             if (dark != _notifyDark)
             {
                 _notifyDark = dark;
-                frontCard.Child = CardText(s, dark);
+                UpdateNotifyText(s);
             }
-        });
+            if (_notifyEntrancePending)
+            {
+                _notifyEntrancePending = false;
+                ReplayNotify();
+            }
+            else ElementCompositionPreview.GetElementVisual(NotifyCards).Opacity = 1;
+        }, overlays: true);
+    }
+
+    private void UpdateNotifyText(BarSettings settings)
+    {
+        if (_notifyFrontContent!.Children.Count > 1) _notifyFrontContent.Children.RemoveAt(1);
+        var text = CardText(settings, _notifyDark);
+        text.Margin = new Thickness(GlassSpec.InsetDip);
+        _notifyFrontContent.Children.Add(text);
     }
 
     // PaintCard: the app (12 semibold, secondary ink) after the unread dot, when (12, faint) on the right,
@@ -132,24 +165,108 @@ public sealed partial class MainWindow
         if (_page == 3 && Math.Abs(e.NewSize.Width - e.PreviousSize.Width) + Math.Abs(e.NewSize.Height - e.PreviousSize.Height) > 0.5) ShowNotifyPreview(false);
     }
 
-    private void OnReplayNotify(object sender, RoutedEventArgs e) => ShowNotifyPreview(true);
+    private void OnReplayNotify(object sender, RoutedEventArgs e) => ReplayNotify();
 
-    // Up from a little below, fading in (the cards' own motion is a spring the core plays; an eased rise stands in).
-    private void Rise(UIElement e, int delayMs)
+    private void ReplayNotify()
     {
-        e.Opacity = 0;
-        e.Translation = new Vector3(0, 18, 0);
-        var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(30 + delayMs);
-        timer.IsRepeating = false;
-        timer.Tick += (_, _) =>
+        if (_notifyBack == null || _notifyFront == null) return;
+        if (_notifyFrontImage?.Source == null)
         {
-            e.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) };
-            e.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(360) };
-            e.Opacity = 1;
-            e.Translation = Vector3.Zero;
-        };
-        timer.Start();
+            _notifyEntrancePending = true;
+            return;
+        }
+        // bar.cpp: the bell's centre is Height / 2 + 4 DIP from the bar's right edge.
+        var anchor = new Vector2((float)(Canvas.GetLeft(_notifyFront) + _notifyFront.Width - GlassSpec.InsetDip - _current.Height / 2 - 4),
+                                 (float)(Canvas.GetTop(_notifyFront) + _notifyFront.Height - GlassSpec.InsetDip));
+        ReplayNotification(NotifyCards, anchor, _notifyBack, _notifyFront);
+    }
+
+    // PopVisual (glass_renderer.cpp) plus each new card's Glide (notifications.cpp).
+    // The live notification code remains the authority; these previews use its equations.
+    private static void ReplayNotification(FrameworkElement surface, Vector2 anchor, params FrameworkElement[] cards)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(surface);
+        var compositor = visual.Compositor;
+        visual.CenterPoint = new Vector3(anchor, 0);
+        // Every replay is a new entrance, including clicks during the previous one.
+        // Keep the existing card/glass buffers; replace only their animations.
+        visual.StopAnimation("Scale");
+        visual.StopAnimation("Opacity");
+        visual.Scale = new Vector3(0.92f, 0.92f, 1);
+        visual.Opacity = 0;
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.Duration = TimeSpan.FromSeconds(0.6);
+        scale.InsertKeyFrame(0, new Vector3(0.92f, 0.92f, 1));
+        NotificationFrames(compositor, 0.6, PopSample, (time, value, ease) =>
+            scale.InsertKeyFrame(time, new Vector3((float)(0.92 + 0.08 * value), (float)(0.92 + 0.08 * value), 1), ease));
+        scale.InsertKeyFrame(1, Vector3.One);
+        visual.StartAnimation("Scale", scale);
+
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.Duration = TimeSpan.FromSeconds(0.16);
+        fade.InsertKeyFrame(0, 0);
+        fade.InsertKeyFrame(1, 1, compositor.CreateCubicBezierEasingFunction(new Vector2(1f / 3, 1), new Vector2(2f / 3, 1)));
+        visual.StartAnimation("Opacity", fade);
+
+        foreach (var card in cards)
+        {
+            ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+            var content = ElementCompositionPreview.GetElementVisual(card);
+            content.StopAnimation("Translation");
+            content.StopAnimation("Opacity");
+            content.Properties.InsertVector3("Translation", new Vector3(0, 18, 0));
+            content.Opacity = 0;
+            var move = compositor.CreateVector3KeyFrameAnimation();
+            double moveTime = Math.Log(18 / 0.2) / 16; // Glide(y, target, dt, 16, 0.2)
+            move.Duration = TimeSpan.FromSeconds(moveTime);
+            move.InsertKeyFrame(0, new Vector3(0, 18, 0));
+            NotificationFrames(compositor, moveTime, t => ApproachSample(t, 16), (time, value, ease) =>
+                move.InsertKeyFrame(time, new Vector3(0, (float)(18 * (1 - value)), 0), ease));
+            move.InsertKeyFrame(1, Vector3.Zero);
+            content.StartAnimation("Translation", move);
+
+            var opacity = compositor.CreateScalarKeyFrameAnimation();
+            double fadeTime = Math.Log(1 / 0.01) / 12; // Glide(alpha, 1, dt, 12, 0.01)
+            opacity.Duration = TimeSpan.FromSeconds(fadeTime);
+            opacity.InsertKeyFrame(0, 0);
+            NotificationFrames(compositor, fadeTime, t => ApproachSample(t, 12), (time, value, ease) =>
+                opacity.InsertKeyFrame(time, (float)value, ease));
+            opacity.InsertKeyFrame(1, 1);
+            content.StartAnimation("Opacity", opacity);
+        }
+    }
+
+    private static (double Value, double Velocity) PopSample(double time)
+    {
+        const double response = 0.36, damping = 0.62; // motion::kPop
+        double w = 2 * Math.PI / response, wd = w * Math.Sqrt(1 - damping * damping);
+        return (Motion.Spring(time, response, damping), Math.Exp(-damping * w * time) * w * w / wd * Math.Sin(wd * time));
+    }
+
+    private static (double Value, double Velocity) ApproachSample(double time, double rate)
+        => (1 - Math.Exp(-rate * time), rate * Math.Exp(-rate * time));
+
+    // As SpringTo in glass_renderer.cpp: 12 Hermite segments, preserving both
+    // position and velocity. Bezier X is linear time; Y is the same cubic.
+    private static void NotificationFrames(Compositor compositor, double seconds,
+        Func<double, (double Value, double Velocity)> sample, Action<float, double, CompositionEasingFunction> insert)
+    {
+        var previous = sample(0);
+        double previousTime = 0;
+        for (int i = 1; i <= 12; i++)
+        {
+            // The native animations snap to their target at End / Glide's epsilon.
+            float progress = i == 12 ? 0.99999f : i / 12f;
+            double time = progress * seconds;
+            var next = sample(time);
+            double delta = next.Value - previous.Value, span = time - previousTime;
+            var ease = compositor.CreateCubicBezierEasingFunction(
+                new Vector2(1f / 3, (float)(span * previous.Velocity / (3 * delta))),
+                new Vector2(2f / 3, (float)(1 - span * next.Velocity / (3 * delta))));
+            insert(progress, next.Value, ease);
+            previous = next;
+            previousTime = time;
+        }
     }
 
     // ---- Widgets: the desktop, scaled down, with the widgets where the core puts them ----

@@ -69,7 +69,7 @@ internal sealed class Backdrop
 // GlassParams of glass.hlsl, in pixels of the target bitmap.
 internal readonly record struct GlassSpec(
     float Radius, float Edge, float Refract, float Dispersion, float BlurLod, float BlurMix,
-    float TintMix, Vector3 Tint, float Highlight, float Shadow, float Inset)
+    float TintMix, Vector3 Tint, float Highlight, float Shadow, float Inset, float Rim = 1)
 {
     public const double InsetDip = 14; // kInsetDip in bar.cpp: room for the drop shadow
 
@@ -94,9 +94,26 @@ internal readonly record struct GlassSpec(
 
 // One preview tile in stage DIP; the optional last tile is the bar below the widgets.
 internal readonly record struct GlassTile(double X, double Y, double W, double H, double Radius);
+internal sealed record GlassOverlay(int Width, int Height, byte[] Pixels, float Luma);
 
 internal static class GlassRenderer
 {
+    // Each moving card owns transparent glass and its shadow, without pixels from the card in front.
+    public static GlassOverlay[] CardOverlays(Backdrop bg, BarSettings material, double rs, IReadOnlyList<GlassTile> tiles)
+    {
+        var result = new GlassOverlay[tiles.Count];
+        for (int i = 0; i < tiles.Count; i++)
+        {
+            var t = tiles[i];
+            var spec = GlassSpec.For(material, rs) with { Radius = (float)(t.Radius * rs), Rim = 0.12f };
+            int inset = (int)spec.Inset, w = (int)Math.Round(t.W * rs), h = (int)Math.Round(t.H * rs);
+            int pw = w + 2 * inset, ph = h + 2 * inset;
+            var px = new byte[pw * ph * 4];
+            DrawOverlay(bg, px, (int)Math.Round(t.X * rs) - inset, (int)Math.Round(t.Y * rs) - inset, pw, ph, spec);
+            result[i] = new GlassOverlay(pw, ph, px, MeanLuma(px, pw, inset, inset, inset + w, inset + h));
+        }
+        return result;
+    }
     private static readonly Vector2 Light = new(-0.6f, -0.8f);
 
     public static float[] DrawTiles(Backdrop bg, byte[] pixels, BarSettings material, double scale, double rs,
@@ -233,7 +250,7 @@ internal static class GlassRenderer
             float back = Sat(-(nx * Light.X + ny * Light.Y));
             float rimLine = 1 - Smoothstep(0f, 1.6f, depth);
             float glow = Sat(1 - depth / (edge * 1.6f));
-            float add = p.Highlight * rimLine * (0.22f + 0.78f * lit + 0.35f * back)
+            float add = p.Highlight * p.Rim * rimLine * (0.22f + 0.78f * lit + 0.35f * back)
                       + p.Highlight * glow * glow * lit * 0.16f + sheen;
             col += new Vector3(add);
 

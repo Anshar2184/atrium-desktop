@@ -147,15 +147,23 @@ public sealed partial class MainWindow
     // photo is kept alive after the batch.
     private sealed record TileJob(object Target, int Id, double W, double H, double K, double Rs,
                                   IReadOnlyList<GlassTile> Tiles, GlassTile? Bar, BarSettings Material,
-                                  Lazy<Photo> Photo, Action<TileFrame> Done);
+                                  Lazy<Photo> Photo, Action<TileFrame> Done, bool Overlays);
     private readonly object _tileLock = new();
     private readonly Dictionary<object, TileJob> _pendingTiles = new();
     private bool _tilesBusy, _tilesStopped;
     private readonly Dictionary<object, int> _tileRequests = new();
 
     // A rendered stage: its pixels (BGRA), and each tile's brightness.
-    private sealed record TileFrame(byte[] Px, int PW, int PH, double Rs, float[] Lumas)
+    private sealed record TileFrame(byte[] Px, int PW, int PH, double Rs, float[] Lumas, GlassOverlay[]? Overlays = null)
     {
+        public WriteableBitmap Overlay(int index)
+        {
+            var image = Overlays![index];
+            var bmp = new WriteableBitmap(image.Width, image.Height);
+            using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(image.Pixels);
+            bmp.Invalidate();
+            return bmp;
+        }
         public void Apply(Border stage)
         {
             var brush = stage.Background as ImageBrush;
@@ -183,14 +191,14 @@ public sealed partial class MainWindow
     }
 
     private void PostTiles(object target, double w, double h, double k, IReadOnlyList<GlassTile> tiles, GlassTile? bar,
-                           Action<TileFrame> done)
+                           Action<TileFrame> done, bool overlays = false)
     {
         double rs = Math.Clamp(Content.XamlRoot?.RasterizationScale ?? 1, 1, 2);
         int mine = _tileRequests[target] = (_tileRequests.TryGetValue(target, out int n) ? n : 0) + 1;
         lock (_tileLock)
         {
             if (_tilesStopped) return;
-            _pendingTiles[target] = new TileJob(target, mine, w, h, k, rs, tiles, bar, _current.Clone(), Photo.Capture(), done);
+            _pendingTiles[target] = new TileJob(target, mine, w, h, k, rs, tiles, bar, _current.Clone(), Photo.Capture(), done, overlays);
             if (_tilesBusy) return;
             _tilesBusy = true;
         }
@@ -230,9 +238,18 @@ public sealed partial class MainWindow
                     {
                         lock (_tileLock)
                             if (_tilesStopped || _pendingTiles.ContainsKey(job.Target)) return;
-                        var px = new byte[bg.Base.Length];
-                        var lumas = GlassRenderer.DrawTiles(bg, px, job.Material, job.K, job.Rs, job.Tiles, job.Bar);
-                        var frame = new TileFrame(px, pw, ph, job.Rs, lumas);
+                        TileFrame frame;
+                        if (job.Overlays)
+                        {
+                            var cards = GlassRenderer.CardOverlays(bg, job.Material, job.Rs, job.Tiles);
+                            frame = new TileFrame(Array.Empty<byte>(), pw, ph, job.Rs, cards.Select(c => c.Luma).ToArray(), cards);
+                        }
+                        else
+                        {
+                            var px = new byte[bg.Base.Length];
+                            var lumas = GlassRenderer.DrawTiles(bg, px, job.Material, job.K, job.Rs, job.Tiles, job.Bar);
+                            frame = new TileFrame(px, pw, ph, job.Rs, lumas);
+                        }
                         DispatcherQueue.TryEnqueue(() =>
                         {
                             if (!_tilesStopped && _tileRequests[job.Target] == job.Id) job.Done(frame);

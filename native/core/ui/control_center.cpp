@@ -919,17 +919,7 @@ void ControlCenter::SetSliderAt(const std::wstring& id, float x)
         return;
     int v = int(std::lround(std::clamp((x - tr.left) / (tr.right - tr.left), 0.f, 1.f) * 100));
     if (id == L"bright") {
-        brightness_ = v;
-        brightPending_ = v;
-        if (!brightBusy_) {
-            // WMI is slow: one worker at a time sets the latest value.
-            brightBusy_ = true;
-            HWND h = surface_.Hwnd();
-            OnWorker([h, v] {
-                SetBrightness(v);
-                PostMessageW(h, WM_CC_BRIGHT, WPARAM(v), 0);
-            });
-        }
+        SetBrightnessAsync(v);
     } else {
         SetVolume(v);
         status_.volume = v;
@@ -937,6 +927,21 @@ void ControlCenter::SetSliderAt(const std::wstring& id, float x)
             status_.muted = false;
     }
     surface_.Invalidate();
+}
+
+void ControlCenter::SetBrightnessAsync(int percent)
+{
+    int v = std::clamp(percent, 0, 100);
+    brightness_ = brightPending_ = v;
+    if (!brightBusy_) {
+        // Dragging and the wheel share one worker, which follows the latest value.
+        brightBusy_ = true;
+        HWND h = surface_.Hwnd();
+        OnWorker([h, v] {
+            SetBrightness(v);
+            PostMessageW(h, WM_CC_BRIGHT, WPARAM(v), 0);
+        });
+    }
 }
 
 void ControlCenter::Activate(const std::wstring& id)
@@ -1190,8 +1195,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_CC_BRIGHT:
         brightBusy_ = false;
         if (brightPending_ >= 0 && brightPending_ != int(w)) {
-            int v = brightPending_;
-            SetSliderAt(L"bright", brightTrack_.left + (brightTrack_.right - brightTrack_.left) * float(v) / 100.f);
+            SetBrightnessAsync(brightPending_);
         } else {
             brightPending_ = -1;
         }
@@ -1292,7 +1296,16 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     }
     case WM_MOUSEWHEEL: {
         int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
-        if (notches && status_.audio && page_ == Page::Main) {
+        if (!notches || page_ != Page::Main)
+            return true;
+        std::wstring hit = HitAt(surface_.ScreenToContent(pt));
+        if (hit == L"bright" && brightness_ >= 0) {
+            int v = std::clamp(brightness_ + 2 * notches, 0, 100);
+            if (v != brightness_) {
+                SetBrightnessAsync(v);
+                surface_.Invalidate();
+            }
+        } else if (status_.audio && (hit == L"slider" || hit == L"mute" || hit == L"sound-page")) {
             status_.volume = AdjustVolume(2 * notches);
             if (notches > 0)
                 status_.muted = false;

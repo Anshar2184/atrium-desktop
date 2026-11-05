@@ -26,13 +26,26 @@ public sealed class PinVm : INotifyPropertyChanged
         UpName = "上移 " + Title;
         DownName = "下移 " + Title;
         RemoveName = "移除 " + Title;
+        LaunchName = "启动方式 " + Title;
     }
 
-    internal PinnedApp Pin { get; }
+    internal PinnedApp Pin { get; private set; }
     public string Title { get; }
     public string UpName { get; }
     public string DownName { get; }
     public string RemoveName { get; }
+    public string LaunchName { get; }
+    public int LaunchMode
+    {
+        get => Pin.AllowsMultipleWindows ? 1 : 0;
+        set
+        {
+            if (value < 0 || (value == 1) == Pin.AllowsMultipleWindows) return;
+            Pin = Pin with { MultipleWindows = value == 1 };
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LaunchMode)));
+            _owner.ChangePinLaunch();
+        }
+    }
 
     public string Number { get => _number; private set => Set(ref _number, value, nameof(Number)); }
     public bool CanUp { get => _canUp; private set => Set(ref _canUp, value, nameof(CanUp)); }
@@ -126,7 +139,7 @@ public sealed partial class MainWindow
                 bmp.Invalidate();
                 source = bmp;
             }
-            _iconCache[name] = source;
+            if (source != null) _iconCache[name] = source;
         }
         if (source != null) vm.Icon = source;
     }
@@ -138,6 +151,12 @@ public sealed partial class MainWindow
         _pinVms.Move(index, to);
         SyncPins();
         FocusPinButton(vm, delta < 0 ? "上移" : "下移");
+        Changed();
+    }
+
+    internal void ChangePinLaunch()
+    {
+        SyncPins();
         Changed();
     }
 

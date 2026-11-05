@@ -96,6 +96,8 @@ std::wstring Settings::ToJson() const
             e.SetNamedValue(L"path", json::JsonValue::CreateStringValue(p.path));
             e.SetNamedValue(L"args", json::JsonValue::CreateStringValue(p.args));
             e.SetNamedValue(L"aumid", json::JsonValue::CreateStringValue(p.aumid));
+            if (p.multipleWindows)
+                e.SetNamedValue(L"multipleWindows", json::JsonValue::CreateBooleanValue(*p.multipleWindows));
             a.Append(e);
         }
         o.SetNamedValue(L"pins", a);
@@ -172,6 +174,8 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
                                                                                                     : std::wstring();
             };
             PinnedApp p{str(L"name"), str(L"path"), str(L"args"), str(L"aumid")};
+            if (e.HasKey(L"multipleWindows") && e.GetNamedValue(L"multipleWindows").ValueType() == json::JsonValueType::Boolean)
+                p.multipleWindows = e.GetNamedBoolean(L"multipleWindows");
             if (!p.path.empty() || !p.aumid.empty())
                 pins.push_back(std::move(p));
         }

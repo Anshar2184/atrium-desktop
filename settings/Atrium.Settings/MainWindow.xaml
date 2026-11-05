@@ -258,6 +258,11 @@
                                                     </Grid>
                                                     <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{x:Bind Title}" Style="{StaticResource RowTitleStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                                     <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                                                        <ComboBox SelectedIndex="{x:Bind LaunchMode, Mode=TwoWay}" Width="146" Margin="0,0,8,0"
+                                                                  AutomationProperties.Name="{x:Bind LaunchName}">
+                                                            <ComboBoxItem Content="打开已有窗口" />
+                                                            <ComboBoxItem Content="允许多开" />
+                                                        </ComboBox>
                                                         <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveUp}" IsEnabled="{x:Bind CanUp, Mode=OneWay}"
                                                                 AutomationProperties.Name="{x:Bind UpName}" ToolTipService.ToolTip="上移">
                                                             <FontIcon Glyph="&#xE70E;" FontSize="13" />

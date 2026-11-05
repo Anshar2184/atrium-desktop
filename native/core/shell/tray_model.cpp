@@ -100,17 +100,22 @@ bool DecodePng(const std::vector<BYTE>& bytes, IconImage& out)
     out.width = int(w);
     out.height = int(h);
     out.bgra.resize(size_t(w) * h * 4);
-    return SUCCEEDED(conv->CopyPixels(nullptr, w * 4, UINT(out.bgra.size()), out.bgra.data()));
+    if (FAILED(conv->CopyPixels(nullptr, w * 4, UINT(out.bgra.size()), out.bgra.data()))) return false;
+    for (size_t i = 3; i < out.bgra.size(); i += 4)
+        if (out.bgra[i]) return true;
+    return false; // an empty startup snapshot must fall back to the executable's artwork
 }
 
 // Windows' record of the icons that have been in the tray.
 struct Record {
+    std::wstring id;      // Windows' record identity; separates multiple icons from one program
     std::wstring exe;     // full path, lower case
     std::wstring tip;     // tooltip when first seen; often empty
     std::vector<BYTE> png; // icon snapshot
     bool promoted = false; // shown on the taskbar
     bool hasUid = false;   // the icon's id within its program (NOTIFYICONDATA.uID)
     UINT uid = 0;
+    GUID guid{};
     size_t order = SIZE_MAX; // place in Windows' order of the icons (UIOrderList), if listed
 };
 
@@ -140,10 +145,11 @@ std::vector<Record> ReadRecords(bool& ordered)
         if (RegEnumKeyExW(root, i, name, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
             break;
         Record r;
+        r.id = name;
         wchar_t buf[1024];
         DWORD size = sizeof(buf);
         if (RegGetValueW(root, name, L"ExecutablePath", RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
-            r.exe = Lower(ResolveKnownFolder(buf));
+            r.exe = Lower(AppExecutable(ResolveKnownFolder(buf)));
         size = sizeof(buf);
         if (RegGetValueW(root, name, L"InitialTooltip", RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
             r.tip = buf;
@@ -156,6 +162,9 @@ std::vector<Record> ReadRecords(bool& ordered)
         size = sizeof(uid);
         if (RegGetValueW(root, name, L"UID", RRF_RT_REG_DWORD, nullptr, &uid, &size) == ERROR_SUCCESS)
             r.hasUid = true, r.uid = uid;
+        size = sizeof(buf);
+        if (RegGetValueW(root, name, L"IconGuid", RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
+            CLSIDFromString(buf, &r.guid);
         DWORD promoted = 0;
         size = sizeof(promoted);
         if (RegGetValueW(root, name, L"IsPromoted", RRF_RT_REG_DWORD, nullptr, &promoted, &size) == ERROR_SUCCESS)
@@ -182,6 +191,9 @@ std::map<std::wstring, Program> RunningPrograms()
     PROCESSENTRY32W pe{sizeof(pe)};
     if (snap != INVALID_HANDLE_VALUE) {
         for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+            // Elevated/service-owned icons still have a shell window and UID,
+            // even when Windows will not expose their full process path.
+            paths[pe.th32ProcessID] = L"|" + Lower(pe.szExeFile);
             if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID)) {
                 wchar_t buf[MAX_PATH * 2];
                 DWORD len = DWORD(std::size(buf));
@@ -224,18 +236,26 @@ std::map<std::wstring, Program> RunningPrograms()
 
 // Whether one of a program's windows has the tray icon `uid` now (the shell
 // knows the icon's place; it fails for icons that are not there).
-bool HasIcon(const std::vector<HWND>& windows, UINT uid)
+bool HasIcon(const std::vector<HWND>& windows, UINT uid, RECT* bounds = nullptr)
 {
-    size_t tried = 0;
     for (HWND h : windows) {
-        if (++tried > 400)
-            break;
         NOTIFYICONIDENTIFIER id{sizeof(id), h, uid, GUID_NULL};
         RECT r{};
-        if (SUCCEEDED(Shell_NotifyIconGetRect(&id, &r)))
+        if (SUCCEEDED(Shell_NotifyIconGetRect(&id, &r))) {
+            if (bounds) *bounds = r;
             return true;
+        }
     }
     return false;
+}
+
+bool LiveIcon(const Record& record, const Program& program, RECT& bounds)
+{
+    if (record.guid != GUID_NULL) {
+        NOTIFYICONIDENTIFIER id{sizeof(id), nullptr, 0, record.guid};
+        return SUCCEEDED(Shell_NotifyIconGetRect(&id, &bounds));
+    }
+    return record.hasUid && HasIcon(program.windows, record.uid, &bounds);
 }
 
 // How well a tooltip names a program: 0 none .. 100 exactly.
@@ -264,6 +284,8 @@ struct Found {
     std::wstring tip;
     bool promoted;
     int index;
+    RECT bounds{};
+    std::wstring recordId;
 };
 
 // The tray buttons in the taskbar and in the overflow window, in order.
@@ -274,7 +296,7 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
     auto collect = [&](HWND host, bool promoted) {
         HWND bridge = host ? FindWindowExW(host, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", nullptr) : nullptr;
         winrt::com_ptr<IUIAutomationElement> root;
-        if (!bridge || FAILED(uia->ElementFromHandle(bridge, root.put())) || !root)
+        if (!host || FAILED(uia->ElementFromHandle(bridge ? bridge : host, root.put())) || !root)
             return;
         available = true;
         winrt::com_ptr<IUIAutomationCondition> cond;
@@ -298,6 +320,8 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
             SysFreeString(name);
             f.promoted = promoted;
             f.index = int(std::count_if(out.begin(), out.end(), [&](const Found& o) { return o.promoted == promoted; }));
+            if (f.element)
+                f.element->get_CurrentBoundingRectangle(&f.bounds);
             out.push_back(std::move(f));
         }
     };
@@ -306,41 +330,59 @@ std::vector<Found> FindButtons(IUIAutomation* uia, bool& available)
     return out;
 }
 
-// Matches each button to the tray record of its program (an index into
-// `records`, or -1).
-std::vector<int> MatchButtons(const std::vector<Found>& buttons, std::vector<Record>& records, bool& ordered)
+// Only on an explicit icon action: let Explorer create its lazy overflow,
+// then collapse it again. Reading icons never opens or focuses the system tray.
+bool PrepareOverflow(IUIAutomation* uia)
 {
-    // Pictures: match each button to a running program Windows has a
-    // tray record of.
-    records = ReadRecords(ordered);
-    auto running = RunningPrograms();
-    struct Candidate {
+    HWND host = FindWindowW(L"Shell_TrayWnd", nullptr);
+    HWND overflow = FindWindowW(L"TopLevelWindowForOverflowXamlIsland", nullptr);
+    if (!host || (overflow && IsWindowVisible(overflow))) return false;
+    winrt::com_ptr<IUIAutomationElement> root, chevron;
+    winrt::com_ptr<IUIAutomationCondition> cond, automationId, button;
+    HWND bridge = FindWindowExW(host, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", nullptr);
+    if (FAILED(uia->ElementFromHandle(bridge ? bridge : host, root.put())) || !root) return false;
+    VARIANT value;
+    value.vt = VT_BSTR;
+    value.bstrVal = SysAllocString(L"SystemTray.NormalButton");
+    HRESULT hr = uia->CreatePropertyCondition(UIA_ClassNamePropertyId, value, button.put());
+    VariantClear(&value);
+    if (FAILED(hr)) return false;
+    value.vt = VT_BSTR;
+    value.bstrVal = SysAllocString(L"SystemTrayIcon");
+    hr = uia->CreatePropertyCondition(UIA_AutomationIdPropertyId, value, automationId.put());
+    VariantClear(&value);
+    if (FAILED(hr) || FAILED(uia->CreateAndCondition(button.get(), automationId.get(), cond.put()))) return false;
+    // The overflow chevron is the first normal SystemTrayIcon button;
+    // notification buttons use NotifyItemIcon, and the input indicator follows them.
+    if (FAILED(root->FindFirst(TreeScope_Descendants, cond.get(), chevron.put())) || !chevron) return false;
+    winrt::com_ptr<IUIAutomationInvokePattern> invoke;
+    if (FAILED(chevron->GetCurrentPatternAs(UIA_InvokePatternId, IID_PPV_ARGS(invoke.put()))) || !invoke || FAILED(invoke->Invoke()))
+        return false;
+    bool ready = false;
+    for (int i = 0; i < 10; ++i) {
+        overflow = FindWindowW(L"TopLevelWindowForOverflowXamlIsland", nullptr);
+        bool available = false;
+        auto buttons = FindButtons(uia, available);
+        ready = std::any_of(buttons.begin(), buttons.end(), [](const Found& f) { return !f.promoted && f.element; });
+        if (ready) break;
+        Sleep(20);
+    }
+    if (overflow && IsWindowVisible(overflow)) invoke->Invoke();
+    return ready;
+}
+
+struct Candidate {
         size_t record;
         std::vector<std::wstring> names; // tooltip, description, product, file name, others, then window titles
         size_t firstTitle;
-    };
-    std::vector<Candidate> candidates;
-    std::map<std::wstring, std::pair<std::wstring, std::wstring>> version; // exe -> description, product
-    for (size_t r = 0; r < records.size(); ++r) {
-        auto run = running.find(records[r].exe);
-        if (run == running.end())
-            continue;
-        if (records[r].hasUid && !HasIcon(run->second.windows, records[r].uid))
-            continue; // running, but without this icon now
-        auto& v = version[records[r].exe];
-        if (v.first.empty() && v.second.empty())
-            v = {VersionString(records[r].exe, L"FileDescription"), VersionString(records[r].exe, L"ProductName")};
-        std::wstring stem = PathFindFileNameW(records[r].exe.c_str());
-        PathRemoveExtensionW(stem.data());
-        stem.resize(wcslen(stem.c_str()));
-        Candidate c{r, {records[r].tip, v.first, v.second, stem}, 0};
-        // Windows' own icon whose description does not name it as its tooltip does.
-        if (Lower(stem) == L"securityhealthsystray")
-            c.names.insert(c.names.end(), {L"Windows 安全中心", L"Windows Security"});
-        c.firstTitle = c.names.size();
-        c.names.insert(c.names.end(), run->second.titles.begin(), run->second.titles.end());
-        candidates.push_back(std::move(c));
-    }
+        RECT bounds{};
+        bool live = false;
+};
+
+std::vector<int> MatchRecords(const std::vector<Found>& buttons, const std::vector<Record>& records,
+                              const std::vector<Candidate>& candidates, bool ordered)
+{
+    // Name and live geometry establish identity before the shell's potentially stale ordering.
     // How well button b's tooltip names candidate c: 0 .. 105.
     auto score = [&](size_t b, size_t c) {
         std::wstring key = Key(TrayModel::Title(buttons[b].tip));
@@ -356,6 +398,39 @@ std::vector<int> MatchButtons(const std::vector<Found>& buttons, std::vector<Rec
         return best;
     };
     std::vector<int> match(buttons.size(), -1);
+    std::set<int> used;
+    for (size_t b = 0; b < buttons.size(); ++b) {
+        const RECT& cell = buttons[b].bounds;
+        if (cell.right <= cell.left || cell.bottom <= cell.top) continue;
+        int record = -1;
+        for (const auto& c : candidates) {
+            const RECT& icon = c.bounds;
+            POINT center{(icon.left + icon.right) / 2, (icon.top + icon.bottom) / 2};
+            if (icon.right <= icon.left || icon.bottom <= icon.top || !PtInRect(&cell, center) || used.contains(int(c.record))) continue;
+            if (record >= 0) { record = -1; break; } // ambiguous geometry: keep the name/order path
+            record = int(c.record);
+        }
+        if (record >= 0) match[b] = record, used.insert(record);
+    }
+    // Exact program names must not be displaced by an obsolete saved ordering or promotion setting.
+    for (size_t b = 0; b < buttons.size(); ++b) {
+        if (match[b] >= 0) continue;
+        int best = 99, record = -1;
+        for (size_t c = 0; c < candidates.size(); ++c) {
+            int r = int(candidates[c].record), sc = score(b, c);
+            if (!used.contains(r) && sc > best) best = sc, record = r;
+        }
+        if (record >= 0) match[b] = record, used.insert(record);
+    }
+    // Only after live identities: a service-owned icon can use its cached artwork without a main process.
+    for (size_t b = 0; b < buttons.size(); ++b) {
+        auto key = Key(TrayModel::Title(buttons[b].tip));
+        if (match[b] >= 0 || key.empty()) continue;
+        for (size_t r = 0; r < records.size(); ++r)
+            if (!used.contains(int(r)) && Key(TrayModel::Title(records[r].tip)) == key) {
+                match[b] = int(r); used.insert(int(r)); break;
+            }
+    }
     if (ordered) {
         // Windows shows the icons in the order of its records: line the
         // buttons up with the running programs' records in that order,
@@ -364,10 +439,10 @@ std::vector<int> MatchButtons(const std::vector<Found>& buttons, std::vector<Rec
         for (bool promoted : {true, false}) {
             std::vector<size_t> bs, cs;
             for (size_t b = 0; b < buttons.size(); ++b)
-                if (buttons[b].promoted == promoted)
+                if (match[b] < 0 && buttons[b].promoted == promoted)
                     bs.push_back(b);
             for (size_t c = 0; c < candidates.size(); ++c)
-                if (records[candidates[c].record].promoted == promoted && records[candidates[c].record].order != SIZE_MAX)
+                if (!used.contains(int(candidates[c].record)) && records[candidates[c].record].promoted == promoted && records[candidates[c].record].order != SIZE_MAX)
                     cs.push_back(c);
             std::stable_sort(cs.begin(), cs.end(),
                              [&](size_t a, size_t b) { return records[candidates[a].record].order < records[candidates[b].record].order; });
@@ -410,12 +485,80 @@ std::vector<int> MatchButtons(const std::vector<Found>& buttons, std::vector<Rec
         std::set<std::wstring> usedExe;
         std::set<size_t> usedCandidate;
         for (const Pair& p : pairs)
-            if (match[p.button] < 0 && !usedCandidate.count(p.candidate) && !usedExe.count(records[candidates[p.candidate].record].exe)) {
+            if (match[p.button] < 0 && !used.contains(int(candidates[p.candidate].record)) && !usedCandidate.count(p.candidate) && !usedExe.count(records[candidates[p.candidate].record].exe)) {
                 match[p.button] = int(candidates[p.candidate].record);
                 usedCandidate.insert(p.candidate);
                 usedExe.insert(records[candidates[p.candidate].record].exe);
             }
     }
+    // Explorer's saved order can lag behind its live buttons. A clearly named,
+    // unmatched button still owns its live program's record (also while its main window is hidden).
+    for (int r : match) if (r >= 0) used.insert(r);
+    for (size_t b = 0; b < buttons.size(); ++b) {
+        if (match[b] >= 0 || TrayModel::Title(buttons[b].tip).empty()) continue;
+        int best = 79, record = -1;
+        for (size_t c = 0; c < candidates.size(); ++c) {
+            int r = int(candidates[c].record), sc = score(b, c);
+            if (!used.contains(r) && sc > best) best = sc, record = r;
+        }
+        if (record >= 0) match[b] = record, used.insert(record);
+    }
+    return match;
+}
+
+std::vector<int> MatchButtons(std::vector<Found>& buttons, std::vector<Record>& records, bool& ordered,
+                             const std::vector<PinnedApp>& apps = {})
+{
+    records = ReadRecords(ordered);
+    auto running = RunningPrograms();
+    std::map<std::wstring, std::vector<std::wstring>> labels;
+    for (const auto& app : apps)
+        if (!app.path.empty() && !app.name.empty()) labels[Lower(AppExecutable(app.path))].push_back(app.name);
+    std::vector<Candidate> candidates;
+    std::map<std::wstring, std::pair<std::wstring, std::wstring>> version;
+    for (size_t r = 0; r < records.size(); ++r) {
+        auto run = running.find(records[r].exe);
+        if (run == running.end()) run = running.find(L"|" + Lower(PathFindFileNameW(records[r].exe.c_str())));
+        if (run == running.end()) continue;
+        RECT bounds{};
+        bool live = LiveIcon(records[r], run->second, bounds);
+        if ((records[r].hasUid || records[r].guid != GUID_NULL) && !live) continue;
+        auto& v = version[records[r].exe];
+        if (v.first.empty() && v.second.empty())
+            v = {VersionString(records[r].exe, L"FileDescription"), VersionString(records[r].exe, L"ProductName")};
+        std::wstring stem = PathFindFileNameW(records[r].exe.c_str());
+        PathRemoveExtensionW(stem.data());
+        stem.resize(wcslen(stem.c_str()));
+        Candidate c{r, {records[r].tip, v.first, v.second, stem}, 0, bounds, live};
+        if (auto names = labels.find(records[r].exe); names != labels.end())
+            c.names.insert(c.names.end(), names->second.begin(), names->second.end());
+        c.firstTitle = c.names.size();
+        c.names.insert(c.names.end(), run->second.titles.begin(), run->second.titles.end());
+        candidates.push_back(std::move(c));
+    }
+    auto match = MatchRecords(buttons, records, candidates, ordered);
+    std::set<int> used(match.begin(), match.end());
+    std::stable_sort(candidates.begin(), candidates.end(), [&](const Candidate& a, const Candidate& b) {
+        return records[a.record].order < records[b.record].order;
+    });
+    // Explorer creates the overflow's UI Automation buttons only after its
+    // first opening. Live shell identities exist before then; persisted records
+    // alone must never resurrect icons from applications that have exited.
+    for (const auto& c : candidates) {
+        if (!c.live || used.contains(int(c.record))) continue;
+        const auto& r = records[c.record];
+        Found f;
+        f.tip = r.tip.empty() ? c.names[1] : r.tip;
+        if (f.tip.empty()) f.tip = c.names[3];
+        f.promoted = r.promoted;
+        f.index = int(std::count_if(buttons.begin(), buttons.end(), [&](const Found& b) { return b.promoted == f.promoted; }));
+        f.bounds = c.bounds;
+        f.recordId = r.id;
+        buttons.push_back(std::move(f));
+        match.push_back(int(c.record));
+    }
+    for (size_t b = 0; b < buttons.size(); ++b)
+        if (match[b] >= 0) buttons[b].recordId = records[size_t(match[b])].id;
     return match;
 }
 
@@ -433,7 +576,8 @@ std::wstring TrayModel::Title(const std::wstring& tip)
     return line;
 }
 
-TrayModel::TrayModel(HWND notify, UINT msg) : notify_(notify), msg_(msg)
+TrayModel::TrayModel(HWND notify, UINT msg, std::function<std::vector<PinnedApp>()> appNames)
+    : notify_(notify), msg_(msg), appNames_(std::move(appNames))
 {
     thread_ = std::thread([this] { Worker(); });
 }
@@ -463,6 +607,43 @@ void TrayModel::Click(const TrayIcon& icon, bool right)
     cv_.notify_all();
 }
 
+bool TrayModel::OpenExisting(const std::wstring& exe)
+{
+    if (exe.empty()) return false;
+    for (const TrayIcon& icon : Icons()) {
+        if (!icon.exe.empty() && _wcsicmp(AppExecutable(icon.exe).c_str(), exe.c_str()) == 0) {
+            AllowSetForegroundWindow(ASFW_ANY);
+            Click(icon, false);
+            return true;
+        }
+    }
+    // At startup the tray's first read may still be in progress. A resident messenger
+    // must not be launched again: enqueue its exact program identity for the worker's fresh lookup.
+    std::wstring name = Lower(PathFindFileNameW(exe.c_str()));
+    if (name != L"feishu.exe" && name != L"qq.exe" && name != L"weixin.exe" && name != L"wechat.exe")
+        return false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    bool running = false;
+    PROCESSENTRY32W pe{sizeof(pe)};
+    for (BOOL ok = Process32FirstW(snap, &pe); ok && !running; ok = Process32NextW(snap, &pe)) {
+        if (_wcsicmp(pe.szExeFile, name.c_str()) != 0) continue;
+        if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID)) {
+            wchar_t path[MAX_PATH * 2]; DWORD size = DWORD(std::size(path));
+            running = QueryFullProcessImageNameW(process, 0, path, &size) && _wcsicmp(path, exe.c_str()) == 0;
+            CloseHandle(process);
+        }
+    }
+    CloseHandle(snap);
+    if (running) {
+        TrayIcon icon;
+        icon.exe = Lower(exe);
+        AllowSetForegroundWindow(ASFW_ANY);
+        Click(icon, false);
+    }
+    return running;
+}
+
 std::vector<TrayIcon> TrayModel::Icons() const
 {
     std::lock_guard g(mutex_);
@@ -487,7 +668,12 @@ void TrayModel::Worker()
     winrt::com_ptr<IUIAutomation> uia;
     if (FAILED(CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(uia.put()))))
         Log(L"tray: UI Automation unavailable");
-    std::map<std::wstring, std::shared_ptr<const IconImage>> pictures; // exe or snapshot -> picture
+    struct Picture {
+        std::wstring exe;
+        std::vector<BYTE> snapshot;
+        std::shared_ptr<const IconImage> image;
+    };
+    std::map<std::wstring, Picture> pictures;
     for (;;) {
         Job job;
         {
@@ -503,38 +689,47 @@ void TrayModel::Worker()
         try {
             bool available = false;
             std::vector<Found> buttons = FindButtons(uia.get(), available);
+            auto appNames = appNames_ ? appNames_() : std::vector<PinnedApp>{};
             if (!job.refresh) {
-                // The same place and position with the same tooltip; else the
-                // same tooltip anywhere (the list may have changed meanwhile).
-                // The button of the icon's program as matched now (icons without
-                // a tooltip, Feishu's and Docker's, cannot be told apart by it);
-                // else the same place and position with the same tooltip; else
-                // the same, non-empty, tooltip anywhere.
-                auto it = buttons.end();
-                if (!job.icon.exe.empty()) {
-                    bool ordered = false;
-                    std::vector<Record> records;
-                    std::vector<int> match = MatchButtons(buttons, records, ordered);
-                    // Several icons of one program: the one in the same place, else the same tooltip, else the first.
-                    std::vector<size_t> same;
-                    for (size_t b = 0; b < buttons.size(); ++b)
-                        if (match[b] >= 0 && records[size_t(match[b])].exe == job.icon.exe)
-                            same.push_back(b);
-                    for (size_t b : same)
-                        if (it == buttons.end() && buttons[b].promoted == job.icon.promoted && buttons[b].index == job.icon.index)
-                            it = buttons.begin() + ptrdiff_t(b);
-                    for (size_t b : same)
-                        if (it == buttons.end() && buttons[b].tip == job.icon.tip)
-                            it = buttons.begin() + ptrdiff_t(b);
-                    if (it == buttons.end() && !same.empty())
-                        it = buttons.begin() + ptrdiff_t(same.front());
+                // Resolve stable identity first; names and positions can change
+                // while autostart applications are still adding their icons.
+                auto find = [&]() {
+                    if (!job.icon.exe.empty()) {
+                        bool ordered = false;
+                        std::vector<Record> records;
+                        auto match = MatchButtons(buttons, records, ordered, appNames);
+                        auto it = buttons.end(); // matching can append passive icons
+                        std::vector<size_t> same;
+                        for (size_t b = 0; b < buttons.size(); ++b)
+                            if (match[b] >= 0 && records[size_t(match[b])].exe == job.icon.exe)
+                                same.push_back(b);
+                        for (size_t b : same)
+                            if (it == buttons.end() && !job.icon.recordId.empty() && buttons[b].recordId == job.icon.recordId)
+                                it = buttons.begin() + ptrdiff_t(b);
+                        for (size_t b : same)
+                            if (it == buttons.end() && buttons[b].promoted == job.icon.promoted && buttons[b].index == job.icon.index)
+                                it = buttons.begin() + ptrdiff_t(b);
+                        for (size_t b : same)
+                            if (it == buttons.end() && buttons[b].tip == job.icon.tip)
+                                it = buttons.begin() + ptrdiff_t(b);
+                        if (it == buttons.end() && !same.empty())
+                            it = buttons.begin() + ptrdiff_t(same.front());
+                        if (it != buttons.end()) return it;
+                    }
+                    auto it = buttons.end();
+                    if (!job.icon.tip.empty())
+                        it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) {
+                            return f.promoted == job.icon.promoted && f.index == job.icon.index && f.tip == job.icon.tip;
+                        });
+                    if (it == buttons.end() && !job.icon.tip.empty())
+                        it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) { return f.tip == job.icon.tip; });
+                    return it;
+                };
+                auto it = find();
+                if ((it == buttons.end() || !it->element) && !job.icon.promoted && PrepareOverflow(uia.get())) {
+                    buttons = FindButtons(uia.get(), available);
+                    it = find();
                 }
-                if (it == buttons.end())
-                    it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) {
-                        return f.promoted == job.icon.promoted && f.index == job.icon.index && f.tip == job.icon.tip;
-                    });
-                if (it == buttons.end() && !job.icon.tip.empty())
-                    it = std::find_if(buttons.begin(), buttons.end(), [&](const Found& f) { return f.tip == job.icon.tip; });
                 HRESULT hr = E_FAIL;
                 if (it != buttons.end() && it->element) {
                     if (job.right) {
@@ -555,38 +750,43 @@ void TrayModel::Worker()
 
             bool ordered = false;
             std::vector<Record> records;
-            std::vector<int> match = MatchButtons(buttons, records, ordered);
+            std::vector<int> match = MatchButtons(buttons, records, ordered, appNames);
 
             std::vector<TrayIcon> icons;
+            std::set<std::wstring> livePictures;
             int recognised = 0;
             for (size_t b = 0; b < buttons.size(); ++b) {
                 TrayIcon t;
                 t.tip = buttons[b].tip;
                 t.promoted = buttons[b].promoted;
                 t.index = buttons[b].index;
+                t.recordId = buttons[b].recordId;
                 if (match[b] >= 0) {
                     const Record& r = records[size_t(match[b])];
                     t.exe = r.exe;
                     ++recognised;
-                    std::wstring key = r.png.empty() ? r.exe : r.exe + L"|" + std::to_wstring(r.png.size());
+                    const std::wstring& key = r.id;
+                    livePictures.insert(key);
                     auto& pic = pictures[key];
-                    if (!pic) {
+                    if (!pic.image || pic.exe != r.exe || pic.snapshot != r.png) {
                         IconImage img;
                         if (!LoadAtriumIcon(r.exe, kIconPx, img) && (r.png.empty() || !DecodePng(r.png, img)) && !LoadShellImage(r.exe, kIconPx, img))
                             img = {};
-                        if (!img.empty())
-                            pic = std::make_shared<const IconImage>(std::move(img));
+                        pic.exe = r.exe;
+                        pic.snapshot = r.png;
+                        pic.image = img.empty() ? nullptr : std::make_shared<const IconImage>(std::move(img));
                     }
-                    t.image = pic;
+                    t.image = pic.image;
                 }
                 icons.push_back(std::move(t));
             }
+            std::erase_if(pictures, [&](const auto& item) { return !livePictures.contains(item.first); });
             bool changed;
             {
                 std::lock_guard g(mutex_);
                 changed = !loaded_ || icons.size() != icons_.size() ||
                           !std::equal(icons.begin(), icons.end(), icons_.begin(), [](const TrayIcon& a, const TrayIcon& b) {
-                              return a.tip == b.tip && a.exe == b.exe && a.image == b.image && a.promoted == b.promoted;
+                              return a.tip == b.tip && a.exe == b.exe && a.image == b.image && a.promoted == b.promoted && a.recordId == b.recordId;
                           });
                 icons_ = std::move(icons);
                 loaded_ = true;

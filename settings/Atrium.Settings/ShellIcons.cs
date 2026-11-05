@@ -1,6 +1,4 @@
 using System.Runtime.InteropServices;
-using System.ComponentModel;
-using System.Diagnostics;
 
 namespace Atrium.Settings;
 
@@ -9,6 +7,43 @@ namespace Atrium.Settings;
 // only, so shortcuts get no arrow overlay. Returns premultiplied BGRA.
 internal static class ShellIcons
 {
+    [StructLayout(LayoutKind.Sequential)] private struct PropertyKey { public Guid Format; public uint Id; }
+    [StructLayout(LayoutKind.Explicit, Size = 24)] private struct PropVariant
+    {
+        [FieldOffset(0)] public ushort Type;
+        [FieldOffset(8)] public IntPtr Text;
+    }
+    [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPropertyStore
+    {
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int GetAt(uint index, out PropertyKey key);
+        [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant value);
+        [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant value);
+        [PreserveSig] int Commit();
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHGetPropertyStoreFromParsingName(string path, IntPtr context, uint flags, ref Guid iid, out IPropertyStore store);
+    [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PropVariant value);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> LinkTargets = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static string ExecutablePath(string path)
+    {
+        if (!path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) return ExecutableForIcon(path);
+        return LinkTargets.GetOrAdd(path, static link =>
+        {
+            var iid = typeof(IPropertyStore).GUID;
+            if (SHGetPropertyStoreFromParsingName(link, IntPtr.Zero, 0, ref iid, out var store) != 0) return link;
+            try
+            {
+                var key = new PropertyKey { Format = new Guid("b9b4b3fc-2b51-4a42-b5d8-324146afcf25"), Id = 2 };
+                if (store.GetValue(ref key, out var value) != 0) return link;
+                try { return value.Type == 31 ? ExecutableForIcon(Marshal.PtrToStringUni(value.Text) ?? link) : link; }
+                finally { PropVariantClear(ref value); }
+            }
+            finally { Marshal.ReleaseComObject(store); }
+        });
+    }
     [ComImport, Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IShellItemImageFactory
     {
@@ -135,28 +170,11 @@ internal static class ShellIcons
         return new Image(bm.Width, bm.Height, pixels);
     }
 
-    // Versioned clients keep a small launcher beside app\ or a version folder.
-    // Use that same installation's running binary for artwork, preserving the pin's launch target.
+    // Read the installed client's artwork without depending on a running process.
     private static string ExecutableForIcon(string path)
     {
         if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return path;
-        string directory = System.IO.Path.GetDirectoryName(path)! + System.IO.Path.DirectorySeparatorChar;
-        var processes = Process.GetProcessesByName(System.IO.Path.GetFileNameWithoutExtension(path));
-        try
-        {
-            foreach (var process in processes)
-            {
-                try
-                {
-                    string? actual = process.MainModule?.FileName;
-                    if (actual != null && !actual.Equals(path, StringComparison.OrdinalIgnoreCase) && actual.StartsWith(directory, StringComparison.OrdinalIgnoreCase))
-                        return actual;
-                }
-                catch (Win32Exception) { }
-                catch (InvalidOperationException) { } // the process exited while its icon was loading
-            }
-        }
-        finally { foreach (var process in processes) process.Dispose(); }
-        return path;
+        string actual = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, "app", System.IO.Path.GetFileName(path));
+        return System.IO.File.Exists(actual) ? actual : path;
     }
 }

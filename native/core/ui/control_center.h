@@ -69,6 +69,7 @@ private:
     void Place();
     void ShowPage(Page page);
     void SetSliderAt(const std::wstring& id, float x);
+    void SetBrightnessAsync(int percent);
     float Hover(Canvas& c, const std::wstring& id, bool on);
     float MainHeight() const;
     float PageHeight(Page page) const;

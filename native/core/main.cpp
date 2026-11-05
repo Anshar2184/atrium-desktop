@@ -462,7 +462,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     if (it == items.end())
         return;
     std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
-    entries.push_back({it->windows.empty() ? L"打开" : L"打开新窗口", kCmdNewWindow});
+    entries.push_back({it->windows.empty() || !it->multipleWindows ? L"打开" : L"打开新窗口", kCmdNewWindow});
     std::wstring location = g_app.tasks->FileLocation(key);
     if (!location.empty())
         entries.push_back({L"打开文件所在的位置", kCmdOpenLocation});
@@ -792,6 +792,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         g_app.bar->SetItems(g_app.tasks->Snapshot());
         if (g_app.start)
             g_app.start->Refresh();
+    }, [](const std::wstring& exe) {
+        return g_app.tray->OpenExisting(exe);
     });
     g_app.catalog = std::make_unique<AppCatalog>(g_app.host, WM_CATALOG);
     g_app.start = std::make_unique<StartMenu>(instance, *g_app.tasks, *g_app.catalog);
@@ -803,7 +805,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.start->onSystem = OpenSystem;
     g_app.start->menu = g_app.menu.get();
     g_app.notes = std::make_unique<Notifications>(instance);
-    g_app.tray = std::make_unique<TrayModel>(g_app.host, WM_TRAY_ICONS);
+    g_app.tray = std::make_unique<TrayModel>(g_app.host, WM_TRAY_ICONS, [] {
+        std::vector<PinnedApp> names;
+        for (const auto& app : g_app.catalog->Apps()) names.push_back(AppCatalog::PinFor(app));
+        return names;
+    });
     g_app.trayPanel = std::make_unique<TrayPanel>(instance, *g_app.tray);
     g_app.trayPanel->onSystemTray = OpenTray;
     g_app.control = std::make_unique<ControlCenter>(instance);

@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,8 @@ struct PinnedApp {
     std::wstring path;  // .lnk, .exe or other launchable file; may be empty for Store apps
     std::wstring args;  // extra arguments when `path` is an .exe
     std::wstring aumid; // AppUserModelID, empty when unknown
+    std::optional<bool> multipleWindows; // absent: browsers and Explorer allow new windows; others reuse
+    bool AllowsMultipleWindows() const;
     bool operator==(const PinnedApp&) const = default;
 };
 
@@ -40,6 +43,7 @@ struct TaskItem {
     bool active = false;       // one of `windows` is the foreground window
     bool attention = false;    // a window is flashing (FlashWindowEx / HSHELL_FLASH)
     uint64_t iconVersion = 0;  // changes when the icon should be fetched again
+    bool multipleWindows = false;
 };
 
 // Icon of a shell item (a path or "shell:AppsFolder\\<id>") through
@@ -47,16 +51,19 @@ struct TaskItem {
 // thread. COM must be initialised on the calling thread.
 // thumbnail: the picture itself (an image file) rather than its icon.
 bool LoadShellImage(const std::wstring& parsingName, int sizePx, IconImage& out, bool thumbnail = false);
-// Atrium's own programs (Atrium.Core.exe, Atrium.Settings.exe): their icon read from the file
+// Atrium's own programs (Atrium.exe, Atrium.Settings.exe): their icon read from the file
 // itself, not from the shell's icon cache or Explorer's tray snapshot, which keep the icon an
 // earlier build had at the same path. False for any other program.
 bool LoadAtriumIcon(const std::wstring& exePath, int sizePx, IconImage& out);
+// Resolves a shortcut and a versioned client's app/ launcher without starting it.
+std::wstring AppExecutable(const std::wstring& path);
 
 class TaskModel {
 public:
     // Calls `onChanged` on the UI thread (coalesced, at most every ~30 ms)
     // whenever Snapshot() would return something different.
-    TaskModel(HWND uiWindow, std::function<void()> onChanged);
+    TaskModel(HWND uiWindow, std::function<void()> onChanged,
+              std::function<bool(const std::wstring&)> openExisting = {});
     ~TaskModel();
     TaskModel(const TaskModel&) = delete;
     TaskModel& operator=(const TaskModel&) = delete;
