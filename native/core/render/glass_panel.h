@@ -41,20 +41,21 @@ struct GlassPanel {
     std::vector<GlassShape> shapes;
     bool visible = false;     // false removes the layer
     bool desktop = false;     // a widget: its backdrop is the desktop (DesktopBackdrop), not the screen
+    bool animating = false;   // content publishes this panel's geometry on each animation frame
     unsigned pop = 0;         // bumped to play a pop animation
     bool popOpen = true;
     float popX = 0, popY = 0; // fixed point of the pop, window px
     float rippleX = 0, rippleY = 0; // press ripple centre, window px
     double rippleMs = 0;      // ClockMs() of the press; 0 = none
-    unsigned gen = 0;         // bumped with every change: the popup waits for its glass (WaitGlass)
+    unsigned gen = 0;         // bumped with every change: aligns content with the presented glass
 };
 
 // A popup's content and its glass come from two threads. So that both show
-// in the same composition, the popup waits (briefly) after publishing a
-// change until the render thread has presented that panel's glass.
+// in the same composition, a ready message releases the matching content
+// buffer without blocking the UI thread.
 void GlassPresented(HWND hwnd, unsigned gen);              // render thread
 void ForgetGlass(HWND hwnd);                              // render thread; layer removed
-bool WaitGlass(HWND hwnd, unsigned gen, double timeoutMs); // UI thread; false on timeout
+bool IsGlassPresented(HWND hwnd, unsigned gen);            // UI thread; never waits for a frame
 
 class GlassHost {
 public:
@@ -68,6 +69,7 @@ constexpr UINT WM_GLASS_READY = WM_APP + 0x40;
 // dark ink (the glass shows something bright), 0 = light ink. The popups use
 // the bar's material unchanged, so, like the bar, they adapt the ink, not the glass.
 constexpr UINT WM_GLASS_INK = WM_APP + 0x41;
+constexpr UINT WM_GLASS_PRESENTED = WM_APP + 0x43; // wParam: the presented generation
 
 // The ink a popup's content needs, region by region: a coarse grid over the
 // window (window px), 1 = dark ink (the glass shows something bright there).

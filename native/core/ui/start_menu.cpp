@@ -133,7 +133,8 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     apps_ = catalog_.Apps();
     pins_ = catalog_.StartPins();
     catalog_.Refresh(); // new installs and pins since last time; the menu updates when ready
-    status_ = QuerySystemStatus();
+    if (onStatusRequest)
+        onStatusRequest();
     LoadAccount();
     RECT r = PopupRect(bar, D2D1::SizeF(kW, kMainH + kGap + barH_), PopupAlign::Left);
     Restage();
@@ -142,9 +143,7 @@ void StartMenu::Open(RECT bar, RECT logo, HWND previous)
     if (logo.right <= logo.left)
         anchor.x = r.left + (r.right - r.left) / 6;
     surface_.Show(r, true, anchor);
-    // Read the status again right away: Open may run inside a cross-process
-    // SendMessage (test commands), where the network list cannot be queried.
-    SetTimer(surface_.Hwnd(), kStatusTimer, 50, nullptr);
+    SetTimer(surface_.Hwnd(), kStatusTimer, 2000, nullptr);
     Log(L"start: opened (%zu apps, %zu start pins, %s)", apps_.size(), pins_.size(), catalog_.Loaded() ? L"catalog ready" : L"catalog loading");
 }
 
@@ -165,6 +164,14 @@ void StartMenu::Close(bool launched)
             SwitchToThisWindow(previous_, TRUE);
     }
     Log(L"start: closed%s%s%s", launched ? L" (launched)" : L"", cls[0] ? L", focus back to " : L"", cls);
+}
+
+void StartMenu::SetStatus(const SystemStatus& status)
+{
+    if (!(status_ == status)) {
+        status_ = status;
+        surface_.Invalidate();
+    }
 }
 
 void StartMenu::Refresh()
@@ -622,7 +629,7 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
     if (!menu)
         return;
     menuOpen_ = true;
-    menu->Open({{L"打开", 1}, {L"固定到程序坞", 2}}, screen, MenuPlace::Below,
+    menu->Open({{L"打开", 1}, {L"固定到任务栏", 2}}, screen, MenuPlace::Below,
                [this, app](int cmd) {
                    if (cmd == 1)
                        Launch(app);
@@ -707,9 +714,8 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return false;
     case WM_TIMER:
         if (w == kStatusTimer) {
-            status_ = QuerySystemStatus();
-            SetTimer(surface_.Hwnd(), kStatusTimer, 2000, nullptr);
-            surface_.Invalidate();
+            if (onStatusRequest)
+                onStatusRequest();
             return true;
         }
         return false;
@@ -763,8 +769,11 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         POINT client = surface_.ScreenToContent(pt);
         float notches = float(GET_WHEEL_DELTA_WPARAM(w)) / WHEEL_DELTA;
         if (m == WM_MOUSEWHEEL && HitAt(client) == L"volume") {
-            AdjustVolume(int(std::lround(2 * notches)));
-            status_ = QuerySystemStatus();
+            status_.volume = AdjustVolume(int(std::lround(2 * notches)));
+            if (notches > 0)
+                status_.muted = false;
+            if (onStatusRequest)
+                onStatusRequest();
         } else if (!query_.empty()) {
             if (m == WM_MOUSEWHEEL)
                 scrollTarget_ = std::clamp(scrollTarget_ - notches * 2 * kRowH, 0.f, std::max(0.f, contentH_ - (kListBottom - kListTop)));

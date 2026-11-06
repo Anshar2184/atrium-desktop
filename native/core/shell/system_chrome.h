@@ -11,6 +11,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <string>
 
 namespace atrium {
@@ -28,7 +29,8 @@ public:
     // Do Not Disturb is on because Atrium turned it on (Atrium's own cards
     // still pop up then).
     bool QuietIsOurs() const { return quietOurs_; }
-    // From a crash handler: shows the taskbars (no allocation, no COM).
+    // From a crash handler: stops hiding, restores our auto-hide change and
+    // shows the taskbars (no allocation, no COM).
     static void EmergencyRestore();
 
 private:
@@ -37,8 +39,8 @@ private:
     void Save() const;
     static void CALLBACK OnShow(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD);
 
-    bool taskbarHidden_ = false;
-    bool autoHideOurs_ = false; // Atrium switched the taskbar to auto-hide
+    std::atomic_bool taskbarHidden_ = false; // also cleared by a crashing worker
+    std::atomic_bool autoHideOurs_ = false; // Atrium switched the taskbar to auto-hide
     bool quietOurs_ = false;
     HWINEVENTHOOK hook_ = nullptr;
     DWORD hookedPid_ = 0;

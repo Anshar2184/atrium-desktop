@@ -67,7 +67,10 @@ void SetAutoHide(bool on)
 
 void ShowTaskbars()
 {
-    for (HWND w : Taskbars())
+    // Also used by the exception filter: enumerate without allocating.
+    if (HWND w = FindWindowW(L"Shell_TrayWnd", nullptr))
+        ShowWindow(w, SW_SHOWNA);
+    for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr;)
         ShowWindow(w, SW_SHOWNA);
 }
 
@@ -191,8 +194,14 @@ void SystemChrome::Enforce()
 
 void SystemChrome::EmergencyRestore()
 {
-    if (g_chrome && g_chrome->taskbarHidden_)
-        ShowTaskbars(); // auto-hide and Do Not Disturb: the next start (system.json)
+    if (!g_chrome || !g_chrome->taskbarHidden_.exchange(false))
+        return;
+    // Stop OnShow/Enforce hiding Explorer again before making it visible.
+    // The exception can be on a worker, so these flags are atomic. Do not
+    // log or save here; system.json still restores Do Not Disturb next start.
+    if (g_chrome->autoHideOurs_.exchange(false))
+        SetAutoHide(false);
+    ShowTaskbars();
 }
 
 void SystemChrome::HideTaskbars()

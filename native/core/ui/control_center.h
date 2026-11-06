@@ -36,6 +36,7 @@ public:
     void SetRadius(float dip) { radius_ = dip; surface_.SetRadius(dip); }
     void SetBarHeight(float dip) { barH_ = dip; }
     HWND Hwnd() const { return surface_.Hwnd(); }
+    void SetStatus(const SystemStatus& status);
     // Windows reported the built-in screen's brightness (keys, quick settings).
     void BrightnessChanged(int percent);
 

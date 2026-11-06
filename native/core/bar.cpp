@@ -1552,6 +1552,7 @@ bool Bar::RenderSession()
         std::unique_ptr<GlassRenderer> renderer;
         unsigned pop = 0;
         bool ready = false;   // presented once (the popup was told)
+        unsigned presentedGen = 0;
         int ink = -1;         // ink last posted: 1 dark, 0 light, -1 none yet
         RECT window{};        // where it was last drawn: a moved panel is drawn again at once
         unsigned desktopVersion = 0; // a widget: the desktop picture its backdrop came from
@@ -1729,9 +1730,16 @@ bool Bar::RenderSession()
             }
             if (!r.HasBackdrop())
                 continue; // waits for the first capture frame under it
+            // During a geometry animation the content supplies each frame.
+            // A background-only present just before that update would consume
+            // this composition's slot and push the matching geometry a frame
+            // late. Keep the latest backdrop and draw it with the new geometry.
+            if (p.animating && r.HasPresented() && p.gen == ps.presentedGen)
+                continue;
             const double t1 = ClockMs();
             bool same = gp.size() == ps.params.size() && memcmp(gp.data(), ps.params.data(), gp.size() * sizeof(GlassParams)) == 0;
             if (!changed && !ps.owed && r.HasPresented() && same) {
+                ps.presentedGen = p.gen;
                 GlassPresented(p.hwnd, p.gen);
                 continue;
             }
@@ -1747,6 +1755,7 @@ bool Bar::RenderSession()
                 lost = true;
                 return false;
             }
+            ps.presentedGen = p.gen;
             GlassPresented(p.hwnd, p.gen);
             // A panel that holds the render thread up: what took the time (rate-limited).
             if (double t2 = ClockMs(); t2 - t0 > 16 && t2 - slowLogged > 2000) {

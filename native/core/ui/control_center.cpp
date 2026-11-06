@@ -157,7 +157,8 @@ void ControlCenter::Open(RECT anchor, RECT bar)
         regionTop_ = -1;
     }
     brightRead_ = false; // changed meanwhile with the keyboard or in Settings
-    status_ = QuerySystemStatus();
+    if (onChanged)
+        onChanged();
     Place();
     ReadRadios(true);
     ReadAudio(true); // ready for the sound's page
@@ -177,6 +178,14 @@ void ControlCenter::Close()
     dragging_.clear();
     surface_.Hide();
     lastClosed_ = GetTickCount64();
+}
+
+void ControlCenter::SetStatus(const SystemStatus& status)
+{
+    if (dragging_.empty() && !(status_ == status)) {
+        status_ = status;
+        surface_.Invalidate();
+    }
 }
 
 void ControlCenter::ShowPage(Page page)
@@ -364,7 +373,7 @@ void ControlCenter::Paint(Canvas& c)
     PaintPage(c, t, page_);
     c.EndGroup();
     c.Unclip();
-    surface_.SetShapes(shapes);
+    surface_.SetShapes(shapes, he < 1 || e < 1);
 
     // At rest, the window ends at the glass's top: clicks above it reach what is under it.
     const int top = he >= 1 && e >= 1 ? int(std::lround(card.top * surface_.Scale())) : 0;
@@ -964,8 +973,8 @@ void ControlCenter::Activate(const std::wstring& id)
         Scan(true);
         surface_.Invalidate();
     } else if (id == L"mute") {
-        ToggleMute();
-        status_ = QuerySystemStatus();
+        if (ToggleMute())
+            status_.muted = !status_.muted;
         surface_.Invalidate();
         if (onChanged)
             onChanged();
@@ -1106,11 +1115,8 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         return false;
     case WM_TIMER:
         if (w == kStatusTimer) {
-            SystemStatus s = QuerySystemStatus();
-            if (dragging_.empty() && !(s == status_)) {
-                status_ = s;
-                surface_.Invalidate();
-            }
+            if (onChanged)
+                onChanged();
             ReadRadios(page_ == Page::Bluetooth);
             if (page_ == Page::Sound && dragging_.empty())
                 ReadAudio(false);
@@ -1157,7 +1163,6 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         audioRead_ = true;
         if (w == 1) {
             // A new default device: its volume is the sound slider's now.
-            status_ = QuerySystemStatus();
             if (onChanged)
                 onChanged();
         }
@@ -1217,7 +1222,6 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     }
     case WM_WIFI_AGAIN:
         if (surface_.Visible()) {
-            status_ = QuerySystemStatus();
             Scan(false);
             if (onChanged)
                 onChanged();

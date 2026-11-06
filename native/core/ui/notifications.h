@@ -101,7 +101,7 @@ private:
     };
 
     void Paint(Mode mode, Canvas& c);
-    void PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha);
+    void PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha, bool hideBody);
     float Ease(View& v, Canvas& c, const std::wstring& id, bool on, float dt);
     void PushStack(View& v, size_t n, int wheelDelta); // the wheel over a stack
     bool StepStack(View& v, size_t n, float dtMs);     // true while the stack moves

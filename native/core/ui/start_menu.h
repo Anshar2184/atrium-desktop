@@ -34,6 +34,7 @@ public:
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
     void Refresh(); // an icon or the catalog changed
+    void SetStatus(const SystemStatus& status);
     static int TileIconPx(float scale); // the pins' icon size (AppCatalog::PrefetchStartIcons)
     HWND Hwnd() const { return surface_.Hwnd(); }
     // Corner radius (DIP), the bar's; the panel uses it, the capsule is round like the bar.
@@ -43,6 +44,7 @@ public:
 
     std::function<void(const PinnedApp&)> onPin;            // pin to the bar (the dock)
     std::function<void(const std::wstring& what)> onSystem; // "network", "volume", "battery", "tray", "account"
+    std::function<void()> onStatusRequest;
     GlassMenu* menu = nullptr;                               // a tile's menu (main's)
 
 private:

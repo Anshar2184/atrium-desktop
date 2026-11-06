@@ -173,7 +173,7 @@ public:
     void SetRadius(float dip);
     // Separate pieces of glass (content DIP), back to front; empty: the whole
     // content with the radius. Published to the glass when they change.
-    void SetShapes(const std::vector<ShapeDip>& shapes);
+    void SetShapes(const std::vector<ShapeDip>& shapes, bool animating = false);
     // A press at (x, y) DIP in content coordinates: the glass ripples from there.
     void Ripple(float x, float y);
     POINT ScreenToContent(POINT screen) const;
@@ -185,6 +185,7 @@ private:
     friend class Canvas;
     static LRESULT CALLBACK Proc(HWND, UINT, WPARAM, LPARAM);
     void Paint();
+    void Present();
     bool EnsureDevice();
     void ResetDevice();
     void Place(RECT rect);   // window = content + margin
@@ -203,7 +204,10 @@ private:
     bool glassReady_ = false;
     bool frameWanted_ = false;
     unsigned glassGen_ = 0;  // of the panel last published
-    bool glassPending_ = false; // published since the last present: wait for that glass first
+    bool glassPending_ = false; // published since the last content frame
+    bool presentPending_ = false; // one content buffer awaiting its glass; input stays responsive
+    unsigned presentGen_ = 0;
+    double paintMs_ = 0;
     // An animation's frames, logged when it ends (smoothness checks).
     struct Burst {
         double start = 0, last = 0, maxGap = 0, maxPaint = 0;
@@ -215,6 +219,7 @@ private:
     float scale_ = 1;
     float radius_ = 20;
     std::vector<ShapeDip> shapes_;
+    bool shapesAnimating_ = false;
     bool darkInk_ = false;
     InkFade inkAll_;               // the theme's ink, fading
     InkGrid inkGrid_;              // the ink region by region, as published

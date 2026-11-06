@@ -50,6 +50,7 @@ constexpr UINT WM_CATALOG = WM_APP + 4;       // the app catalog has news
 constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listener thread
 constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
 constexpr UINT WM_VOLUME = WM_APP + 7;        // the default playback device's volume changed
+constexpr UINT WM_STATUS = WM_APP + 10;       // lParam: SystemStatus*, read off the UI thread
 constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
@@ -67,6 +68,7 @@ struct App {
     UINT taskbarCreated = 0;
     bool trayAdded = false;
     std::unique_ptr<Bar> bar;
+    std::unique_ptr<SystemStatusReader> status;
     std::unique_ptr<SettingsServer> server;
     std::unique_ptr<TaskModel> tasks;
     std::unique_ptr<AppCatalog> catalog;
@@ -240,17 +242,8 @@ void ToggleCalendar();
 void UpdateStatus();
 void UpdateStatus()
 {
-    SystemStatus st = QuerySystemStatus();
-    st.brightness = g_app.brightness;
-    // Volume notifications follow the default playback device.
-    static std::wstring watched;
-    static bool watching = false;
-    if (!watching || st.audioDevice != watched) {
-        WatchVolume(g_app.host, WM_VOLUME);
-        watched = st.audioDevice;
-        watching = true;
-    }
-    g_app.bar->SetStatus(st);
+    if (g_app.status)
+        g_app.status->Refresh();
 }
 
 // Atrium's tray panel and control centre open above their entries on the
@@ -615,6 +608,15 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_VOLUME:
         UpdateStatus();
         return 0;
+    case WM_STATUS: {
+        std::unique_ptr<SystemStatus> status(reinterpret_cast<SystemStatus*>(l));
+        status->brightness = g_app.brightness;
+        g_app.bar->SetStatus(*status);
+        g_app.control->SetStatus(*status);
+        g_app.start->SetStatus(*status);
+        g_app.widgets->SetStatus(*status);
+        return 0;
+    }
     case WM_POWERBROADCAST:
         if (w == PBT_POWERSETTINGCHANGE) {
             const auto* s = reinterpret_cast<const POWERBROADCAST_SETTING*>(l);
@@ -814,8 +816,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.trayPanel->onSystemTray = OpenTray;
     g_app.control = std::make_unique<ControlCenter>(instance);
     g_app.control->onChanged = UpdateStatus;
+    g_app.start->onStatusRequest = UpdateStatus;
     g_app.calendar = std::make_unique<CalendarPanel>(instance);
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
+    g_app.widgets->onStatusRequest = UpdateStatus;
+    g_app.status = std::make_unique<SystemStatusReader>(g_app.host, WM_STATUS, WM_VOLUME);
     g_app.widgets->menu = g_app.menu.get();
     g_app.widgets->onAddWidgets = [] { OpenSettings(L"widgets"); };
     g_app.widgets->onCalendar = [] {
@@ -891,6 +896,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // First the render thread, while every window it draws for is still there; a driver call stuck
     // in the desktop duplication (it holds the shared device) must not keep Atrium from exiting:
     // the system taskbar comes back and the process ends.
+    g_app.status.reset();
     g_app.preview->Close();
     if (!g_app.bar->StopRendering(3000)) {
         g_app.chrome.reset();

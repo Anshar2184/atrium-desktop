@@ -36,6 +36,7 @@ std::vector<AudioOutput> ListAudioOutputs();
 // Makes `id` the default playback device for every role, as Windows' panel does.
 bool SetDefaultOutput(const std::wstring& id);
 // The sessions on the default device, one entry per program; system sounds first.
+// iconPx == 0 reads volume/state only; the caller keeps its existing icons.
 std::vector<AudioApp> ListAudioApps(int iconPx);
 void SetAppVolume(const std::wstring& key, int percent);
 void SetAppMute(const std::wstring& key, bool mute);

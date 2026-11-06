@@ -561,7 +561,7 @@ void Notifications::ShiftStack(Mode mode, size_t index, int by)
 
 // A card's content over its own piece of glass. Cards behind the newest one
 // in the stack show only their glass's edge.
-void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha)
+void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int index, View& v, bool full, float alpha, bool hideBody)
 {
     if (!full)
         return;
@@ -596,8 +596,8 @@ void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int ind
         when = std::to_wstring(index + 1) + L"/" + std::to_wstring(v.count) + L"  ·  " + when;
     c.Text(when, D2D1::RectF(x + w - 170, ty, x + w - 50, ty + 16), 12, t.faint, DWRITE_FONT_WEIGHT_NORMAL, 2);
     c.Text(n.title, D2D1::RectF(tx, ty + 22, x + w - 20, ty + 42), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    std::wstring body = BodyHidden() ? L"内容已隐藏" : n.body;
-    c.Text(body, D2D1::RectF(tx, ty + 46, x + w - 20, ty + 46 + 36), 13, BodyHidden() ? t.faint : t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
+    std::wstring body = hideBody ? L"内容已隐藏" : n.body;
+    c.Text(body, D2D1::RectF(tx, ty + 46, x + w - 20, ty + 46 + 36), 13, hideBody ? t.faint : t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
     // Dismiss: a round button in the top-right corner, shown with the pointer on the card.
     D2D1_RECT_F close = D2D1::RectF(x + w - 44, y + 10, x + w - 16, y + 38);
     if (glow > 0.01f) {
@@ -617,6 +617,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
     const float dt = v.lastPaint > 0 ? float(std::clamp(c.now - v.lastPaint, 0.0, 100.0)) : 16.f;
     v.hits.clear();
     auto shown = Shown(mode);
+    const bool hideBody = !shown.empty() && BodyHidden(); // one system query per frame, shared by its cards
     std::vector<ShapeDip> shapes;
     const float listH = v.viewH; // the cards: [0, listH]; the list's capsule below
 
@@ -739,7 +740,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         if (g.bottom - g.top > 8)
             shapes.push_back({g, cardR, 1 - std::clamp(alphas[i], 0.f, 1.f)});
         size_t hitsBefore = v.hits.size();
-        PaintCard(c, *shown[i], r, int(i), v, full, alphas[i] * v.cards[shown[i]->id].content);
+        PaintCard(c, *shown[i], r, int(i), v, full, alphas[i] * v.cards[shown[i]->id].content, hideBody);
         if (!stack)
             v.hits.push_back({r, L"card:" + std::to_wstring(i)});
         // Only the visible part of a card is clickable (a card scrolled below
@@ -783,7 +784,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         if (expanded_ && shown.size() > 1)
             button(L"collapse", L"收起");
     }
-    v.surface->SetShapes(shapes);
+    v.surface->SetShapes(shapes, moving);
     v.lastPaint = c.now;
 
     // At rest the window starts at the top of what it shows (the shadow's

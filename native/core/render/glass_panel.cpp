@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <map>
-#include <chrono>
-#include <condition_variable>
 #include <mutex>
 
 namespace atrium {
@@ -20,7 +18,6 @@ bool SystemLight()
 }
 
 std::mutex g_genMutex;
-std::condition_variable g_genChanged;
 std::map<HWND, unsigned> g_gen;
 
 std::mutex g_inkMutex;
@@ -71,9 +68,12 @@ void GlassPresented(HWND hwnd, unsigned gen)
 {
     {
         std::lock_guard g(g_genMutex);
+        auto it = g_gen.find(hwnd);
+        if (it != g_gen.end() && it->second >= gen)
+            return;
         g_gen[hwnd] = gen;
     }
-    g_genChanged.notify_all();
+    PostMessageW(hwnd, WM_GLASS_PRESENTED, gen, 0);
 }
 
 void ForgetGlass(HWND hwnd)
@@ -83,14 +83,12 @@ void ForgetGlass(HWND hwnd)
     g_ink.erase(hwnd);
 }
 
-bool WaitGlass(HWND hwnd, unsigned gen, double timeoutMs)
+bool IsGlassPresented(HWND hwnd, unsigned gen)
 {
-    std::unique_lock g(g_genMutex);
+    std::lock_guard g(g_genMutex);
     // Generations only grow; a wrap-around is centuries away at 60 per second.
-    return g_genChanged.wait_for(g, std::chrono::microseconds(int64_t(timeoutMs * 1000)), [&] {
-        auto it = g_gen.find(hwnd);
-        return it != g_gen.end() && it->second >= gen;
-    });
+    auto it = g_gen.find(hwnd);
+    return it != g_gen.end() && it->second >= gen;
 }
 
 void PublishInk(HWND hwnd, const InkGrid& grid)

@@ -269,9 +269,11 @@ std::vector<AudioApp> ListAudioApps(int iconPx)
                 return a.active;
             return a.name < b.name;
         });
-        for (AudioApp& a : list)
-            if (!a.path.empty())
-                LoadShellImage(a.path, iconPx, a.icon);
+        // Periodic volume reads pass zero to reuse the icons already on screen.
+        if (iconPx > 0)
+            for (AudioApp& a : list)
+                if (!a.path.empty())
+                    LoadShellImage(a.path, iconPx, a.icon);
     } catch (...) {
         Log(L"audio: listing the apps failed");
     }

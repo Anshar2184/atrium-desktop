@@ -272,7 +272,8 @@ void DesktopWidgets::SetEnabled(bool on)
         return;
     enabled_ = on;
     if (on) {
-        world_.status = QuerySystemStatus();
+        if (onStatusRequest)
+            onStatusRequest();
         SampleSystem();
         Load();
         Build();
@@ -313,6 +314,17 @@ void DesktopWidgets::SetMonitor(HMONITOR monitor)
 }
 
 // ---- layout ------------------------------------------------------------------
+
+void DesktopWidgets::SetStatus(const SystemStatus& status)
+{
+    bool batteryChanged = world_.status.battery != status.battery || world_.status.batteryPercent != status.batteryPercent ||
+                          world_.status.charging != status.charging;
+    world_.status = status;
+    if (batteryChanged)
+        for (auto& widget : widgets_)
+            if (widget->kind == WidgetKind::Battery && widget->surface)
+                widget->surface->Invalidate();
+}
 
 void DesktopWidgets::SetOnRight(bool onRight)
 {
@@ -859,8 +871,8 @@ void DesktopWidgets::Tick()
     GetLocalTime(&t);
     bool minute = t.wMinute != lastMinute_;
     lastMinute_ = t.wMinute;
-    if (minute || t.wSecond % 30 == 0)
-        world_.status = QuerySystemStatus();
+    if ((minute || t.wSecond % 30 == 0) && onStatusRequest)
+        onStatusRequest();
     bool sample = t.wSecond % 2 == 0;
     if (sample)
         SampleSystem();

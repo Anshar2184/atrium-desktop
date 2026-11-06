@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 #pragma comment(lib, "powrprof.lib")
 
@@ -94,6 +95,49 @@ void WatchVolume(HWND hwnd, UINT msg)
         g_watched = nullptr;
 }
 
+SystemStatusReader::SystemStatusReader(HWND notify, UINT readyMessage, UINT volumeMessage)
+    : notify_(notify), readyMessage_(readyMessage), volumeMessage_(volumeMessage),
+      quit_(CreateEventW(nullptr, TRUE, FALSE, nullptr)), wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+      thread_([this] { Run(); })
+{
+}
+
+SystemStatusReader::~SystemStatusReader()
+{
+    SetEvent(quit_);
+    thread_.join();
+    CloseHandle(wake_);
+    CloseHandle(quit_);
+}
+
+void SystemStatusReader::Refresh() { SetEvent(wake_); }
+
+void SystemStatusReader::Run()
+{
+    SetThreadDescription(GetCurrentThread(), L"Atrium system status");
+    winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    HANDLE events[] = {quit_, wake_};
+    std::wstring watched;
+    bool watching = false;
+    while (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0 + 1) {
+        auto status = std::make_unique<SystemStatus>(QuerySystemStatus());
+        if (!watching || status->audioDevice != watched) {
+            WatchVolume(notify_, volumeMessage_);
+            watched = status->audioDevice;
+            watching = true;
+        }
+        if (WaitForSingleObject(quit_, 0) == WAIT_OBJECT_0)
+            break;
+        if (PostMessageW(notify_, readyMessage_, 0, reinterpret_cast<LPARAM>(status.get())))
+            status.release();
+    }
+    if (g_watched && g_callback)
+        g_watched->UnregisterControlChangeNotify(g_callback.get());
+    g_watched = nullptr;
+    g_callback = nullptr;
+    winrt::uninit_apartment();
+}
+
 SystemStatus QuerySystemStatus()
 {
     SystemStatus s;
@@ -106,15 +150,6 @@ SystemStatus QuerySystemStatus()
         s.batteryMinutes = s.battery && !s.charging && ps.BatteryLifeTime != DWORD(-1) ? int(ps.BatteryLifeTime / 60) : -1;
     }
     try {
-        if (auto v = DefaultVolume(&s.audioDevice)) {
-            float level = 0;
-            BOOL mute = FALSE;
-            v->GetMasterVolumeLevelScalar(&level);
-            v->GetMute(&mute);
-            s.audio = true;
-            s.volume = int(std::lround(level * 100));
-            s.muted = mute != FALSE;
-        }
         winrt::com_ptr<INetworkListManager> nlm;
         if (SUCCEEDED(CoCreateInstance(CLSID_NetworkListManager, nullptr, CLSCTX_ALL, IID_PPV_ARGS(nlm.put())))) {
             NLM_CONNECTIVITY c{};
@@ -157,6 +192,17 @@ SystemStatus QuerySystemStatus()
             s.signal = w.signal;
             if (!w.ssid.empty() && (s.network.empty() || !s.online))
                 s.network = w.ssid;
+        }
+        // Read interactive volume last: a slower network query must not
+        // deliver a volume value captured before the user's latest input.
+        if (auto v = DefaultVolume(&s.audioDevice)) {
+            float level = 0;
+            BOOL mute = FALSE;
+            v->GetMasterVolumeLevelScalar(&level);
+            v->GetMute(&mute);
+            s.audio = true;
+            s.volume = int(std::lround(level * 100));
+            s.muted = mute != FALSE;
         }
     } catch (...) {
         Log(L"status: query failed");

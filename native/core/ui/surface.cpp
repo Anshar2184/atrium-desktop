@@ -608,7 +608,7 @@ void Surface::SetRadius(float dip)
         PublishPanel();
 }
 
-void Surface::SetShapes(const std::vector<ShapeDip>& shapes)
+void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
 {
     auto same = [](const ShapeDip& a, const ShapeDip& b) {
         auto sameRect = [](const D2D1_RECT_F& x, const D2D1_RECT_F& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
@@ -616,9 +616,10 @@ void Surface::SetShapes(const std::vector<ShapeDip>& shapes)
         return a.radius == b.radius && a.fade == b.fade && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix &&
                a.parts.size() == b.parts.size() && std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
     };
-    if (shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
+    if (!animating && !shapesAnimating_ && shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
         return;
     shapes_ = shapes;
+    shapesAnimating_ = animating;
     if (visible_ || hiding_)
         PublishPanel();
 }
@@ -647,6 +648,7 @@ void Surface::PublishPanel()
     }
     p.visible = visible_ || hiding_;
     p.desktop = desktopLayer_;
+    p.animating = shapesAnimating_;
     p.pop = pop_;
     p.popOpen = popOpen_;
     p.popX = float(anchor_.x - window_.left);
@@ -688,6 +690,10 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_SURFACE_FRAME:
         if (self->visible_)
             self->Paint();
+        return 0;
+    case WM_GLASS_PRESENTED:
+        if (self->presentPending_ && unsigned(w) >= self->presentGen_)
+            self->Present();
         return 0;
     case WM_GLASS_READY:
         if (!self->glassReady_ && self->visible_) {
@@ -806,6 +812,9 @@ void Surface::Hide(bool animate)
     if (!visible_)
         return;
     visible_ = false;
+    presentPending_ = false;
+    shapesAnimating_ = false;
+    burst_ = Burst{}; // time spent hidden is not an animation gap
     if (!animate || !visual_ || !shared_) {
         FinishHide();
         return;
@@ -855,6 +864,7 @@ void Surface::Invalidate()
 
 void Surface::ResetDevice()
 {
+    presentPending_ = false;
     d2d_ = nullptr;
     if (target_)
         target_->SetRoot(nullptr);
@@ -904,6 +914,12 @@ bool Surface::EnsureDevice()
 
 void Surface::Paint()
 {
+    if (presentPending_) {
+        // Keep this buffer paired with its glass. Input and time continue to
+        // advance; the next frame uses their latest state once it is presented.
+        frameWanted_ = true;
+        return;
+    }
     if (!visible_ || !EnsureDevice())
         return;
     int w = std::max(1, int(window_.right - window_.left)), h = std::max(1, int(window_.bottom - window_.top));
@@ -967,13 +983,7 @@ void Surface::Paint()
     }
     HRESULT hr = d2d_->EndDraw();
     d2d_->SetTarget(nullptr);
-    QueryPerformanceCounter(&t1); // the paint, without the wait below
-    // The glass of this frame's shapes first, so both show together.
-    if (glassPending_ && glassReady_ && visible_)
-        WaitGlass(hwnd_, glassGen_, 12);
-    glassPending_ = false;
-    if (SUCCEEDED(hr))
-        hr = swap_->Present(0, 0);
+    QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
     double ms = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart);
     if (firstPaint_ || ms > 16) {
@@ -989,6 +999,29 @@ void Surface::Paint()
         ResetDevice();
         return;
     }
+    paintMs_ = ms;
+    presentGen_ = glassGen_;
+    presentPending_ = true;
+    bool waitForGlass = glassPending_ && glassReady_ && !IsGlassPresented(hwnd_, presentGen_);
+    glassPending_ = false;
+    if (!waitForGlass)
+        Present();
+}
+
+void Surface::Present()
+{
+    if (!visible_ || !presentPending_ || !swap_)
+        return;
+    presentPending_ = false;
+    HRESULT hr = swap_->Present(0, 0);
+    if (FAILED(hr)) {
+        Log(L"surface: present failed 0x%08X, recreating", unsigned(hr));
+        if (shared_)
+            shared_->lost = true;
+        ResetDevice();
+        return;
+    }
+    const double ms = paintMs_;
     // Frame statistics of an animation (a run of frames that asked for more).
     double end = ClockMs();
     if (frameWanted_) {

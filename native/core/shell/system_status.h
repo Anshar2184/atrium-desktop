@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <string>
+#include <thread>
 
 namespace atrium {
 
@@ -28,6 +29,23 @@ struct SystemStatus {
 };
 
 SystemStatus QuerySystemStatus();
+// One background reader shared by the bar and its panels. A refresh never
+// waits on Core Audio, Network List Manager or WLAN on the UI thread.
+class SystemStatusReader {
+public:
+    SystemStatusReader(HWND notify, UINT readyMessage, UINT volumeMessage);
+    ~SystemStatusReader();
+    SystemStatusReader(const SystemStatusReader&) = delete;
+    SystemStatusReader& operator=(const SystemStatusReader&) = delete;
+    void Refresh();
+
+private:
+    void Run();
+    HWND notify_;
+    UINT readyMessage_, volumeMessage_;
+    HANDLE quit_, wake_;
+    std::thread thread_;
+};
 // Changes the default playback volume by `delta` percent points; returns the new level.
 int AdjustVolume(int delta);
 void SetVolume(int percent); // 0..100; unmutes above 0

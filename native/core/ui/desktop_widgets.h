@@ -27,6 +27,7 @@ public:
     DesktopWidgets& operator=(const DesktopWidgets&) = delete;
 
     void SetEnabled(bool on);
+    void SetStatus(const SystemStatus& status);
     void SetOnRight(bool onRight);
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor);
@@ -37,6 +38,7 @@ public:
 
     std::function<void()> onCalendar;    // a calendar widget was clicked
     std::function<void()> onAddWidgets;  // "添加小组件…": the settings app's widget gallery
+    std::function<void()> onStatusRequest;
     GlassMenu* menu = nullptr;           // a widget's menu (main's)
 
 private:
