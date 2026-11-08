@@ -20,17 +20,39 @@ using namespace winrt;
 using namespace winrt::Windows::Devices::Enumeration;
 using winrt::Windows::UI::ViewManagement::ProjectionManager;
 
+namespace {
+struct DisplaySubscription {
+    DeviceWatcher watcher{nullptr};
+    event_token added{}, updated{}, removed{}, completed{}, stopped{};
+    ~DisplaySubscription()
+    {
+        if (!watcher) return;
+        // Revoke before Stop, outside State::lock: a callback may be finishing.
+        try { if (added.value) watcher.Added(added); } catch (...) {}
+        try { if (updated.value) watcher.Updated(updated); } catch (...) {}
+        try { if (removed.value) watcher.Removed(removed); } catch (...) {}
+        try { if (completed.value) watcher.EnumerationCompleted(completed); } catch (...) {}
+        try { if (stopped.value) watcher.Stopped(stopped); } catch (...) {}
+        try {
+            auto status = watcher.Status();
+            if (status == DeviceWatcherStatus::Started || status == DeviceWatcherStatus::EnumerationCompleted) watcher.Stop();
+        } catch (...) {}
+    }
+};
+}
+
 struct DisplayFinder::State {
     mutable std::mutex lock;
     std::map<std::wstring, std::wstring> found; // id -> name
-    DeviceWatcher watcher{nullptr};
+    std::shared_ptr<DisplaySubscription> subscription;
     HWND hwnd = nullptr;
     UINT msg = 0;
     bool searching = false;
     unsigned gen = 0;
-    void Notify()
+    void Notify(unsigned expected)
     {
-        if (hwnd)
+        std::lock_guard g(lock);
+        if (gen == expected && hwnd)
             PostMessageW(hwnd, msg, 0, 0);
     }
 };
@@ -55,7 +77,9 @@ void DisplayFinder::Start(HWND hwnd, UINT msg)
     std::thread([weak, gen] {
         init_apartment(apartment_type::multi_threaded);
         try {
-            DeviceWatcher w = DeviceInformation::CreateWatcher(ProjectionManager::GetDeviceSelector());
+            auto subscription = std::make_shared<DisplaySubscription>();
+            auto w = DeviceInformation::CreateWatcher(ProjectionManager::GetDeviceSelector());
+            subscription->watcher = w;
             auto changed = [weak, gen](auto&& apply) {
                 if (auto s = weak.lock()) {
                     {
@@ -64,38 +88,36 @@ void DisplayFinder::Start(HWND hwnd, UINT msg)
                             return;
                         apply(*s);
                     }
-                    s->Notify();
+                    s->Notify(gen);
                 }
             };
-            w.Added([changed](const DeviceWatcher&, const DeviceInformation& d) {
+            subscription->added = w.Added([changed](const DeviceWatcher&, const DeviceInformation& d) {
                 std::wstring id(d.Id()), name(d.Name());
                 changed([&](State& s) { s.found[id] = name; });
             });
-            w.Updated([](const DeviceWatcher&, const DeviceInformationUpdate&) {}); // needed for the enumeration to complete
-            w.Removed([changed](const DeviceWatcher&, const DeviceInformationUpdate& u) {
+            subscription->updated = w.Updated([](const DeviceWatcher&, const DeviceInformationUpdate&) {}); // needed for the enumeration to complete
+            subscription->removed = w.Removed([changed](const DeviceWatcher&, const DeviceInformationUpdate& u) {
                 std::wstring id(u.Id());
                 changed([&](State& s) { s.found.erase(id); });
             });
-            w.EnumerationCompleted([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
-            w.Stopped([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
-            bool keep = false;
+            subscription->completed = w.EnumerationCompleted([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
+            subscription->stopped = w.Stopped([changed](const DeviceWatcher&, const winrt::Windows::Foundation::IInspectable&) { changed([](State& s) { s.searching = false; }); });
+            // Start before publishing. If Stop invalidates this generation while
+            // Start is in progress, the unpublished subscription stops itself.
+            w.Start();
             if (auto s = weak.lock()) {
                 std::lock_guard g(s->lock);
-                if (s->gen == gen) {
-                    s->watcher = w;
-                    keep = true;
-                }
+                if (s->gen == gen) s->subscription = subscription;
             }
-            if (keep)
-                w.Start();
         } catch (...) {
             Log(L"cast: watching for wireless displays failed");
             if (auto s = weak.lock()) {
                 {
                     std::lock_guard g(s->lock);
+                    if (s->gen != gen) return;
                     s->searching = false;
                 }
-                s->Notify();
+                s->Notify(gen);
             }
         }
         // The apartment stays: the watcher lives on in the multithreaded one.
@@ -104,21 +126,13 @@ void DisplayFinder::Start(HWND hwnd, UINT msg)
 
 void DisplayFinder::Stop()
 {
-    DeviceWatcher w{nullptr};
+    std::shared_ptr<DisplaySubscription> subscription;
     {
         std::lock_guard g(state_->lock);
         ++state_->gen;
         state_->hwnd = nullptr;
         state_->searching = false;
-        w = state_->watcher;
-        state_->watcher = nullptr;
-    }
-    if (w) {
-        try {
-            if (w.Status() == DeviceWatcherStatus::Started || w.Status() == DeviceWatcherStatus::EnumerationCompleted)
-                w.Stop();
-        } catch (...) {
-        }
+        subscription = std::move(state_->subscription);
     }
 }
 

@@ -317,7 +317,7 @@ std::vector<CatalogApp> AppCatalog::StartPins() const
 void AppCatalog::PrefetchStartIcons(int px)
 {
     std::lock_guard g(mutex_);
-    prefetchPx_ = px;
+    prefetchPx_ = std::clamp(px, 8, 512);
     QueuePrefetch();
 }
 
@@ -327,26 +327,64 @@ void AppCatalog::QueuePrefetch()
         return;
     for (const CatalogApp& app : startPins_) {
         auto key = std::make_pair(app.id, prefetchPx_);
-        if (icons_.count(key) || requested_[key])
-            continue;
-        requested_[key] = true;
-        iconJobs_.push_front(key); // after the icons asked for on screen
+        if (!icons_.contains(key)) QueueIcon(key, true);
     }
     cv_.notify_all();
 }
 
 IconImage AppCatalog::Icon(const std::wstring& id, int px)
 {
+    px = std::clamp(px, 8, 512);
     std::lock_guard g(mutex_);
     auto key = std::make_pair(id, px);
-    if (auto it = icons_.find(key); it != icons_.end())
-        return it->second;
-    if (!requested_[key]) {
-        requested_[key] = true;
-        iconJobs_.push_back(key);
-        cv_.notify_all();
+    if (auto it = icons_.find(key); it != icons_.end()) {
+        it->second.used = ++iconUse_;
+        return it->second.image;
     }
+    if (QueueIcon(key, false)) cv_.notify_one();
     return {};
+}
+
+bool AppCatalog::QueueIcon(const std::pair<std::wstring, int>& key, bool prefetch)
+{
+    if (requested_.contains(key)) return false;
+    if (auto it = failed_.find(key); it != failed_.end() &&
+        (it->second.attempts >= 3 || GetTickCount64() - it->second.time < 2000)) return false;
+    requested_.insert(key);
+    if (prefetch) iconJobs_.push_front(key); else iconJobs_.push_back(key);
+    return true;
+}
+
+void AppCatalog::SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons)
+{
+    std::lock_guard g(mutex_);
+    visibleIcons_.clear();
+    visibleIcons_.insert(icons.begin(), icons.end());
+    PruneIcons();
+}
+
+void AppCatalog::PruneIcons()
+{
+    auto protectedIcon = [&](const auto& key) {
+        return visibleIcons_.contains(key) || requested_.contains(key) ||
+            (key.second == prefetchPx_ && std::any_of(startPins_.begin(), startPins_.end(), [&](const auto& app) { return app.id == key.first; }));
+    };
+    std::erase_if(icons_, [&](const auto& entry) { return loaded_ && !liveIds_.contains(entry.first.first) && !protectedIcon(entry.first); });
+    std::erase_if(failed_, [&](const auto& entry) { return loaded_ && !liveIds_.contains(entry.first.first) && !protectedIcon(entry.first); });
+    size_t bytes = 0;
+    for (const auto& [key, icon] : icons_) bytes += icon.image.bgra.size();
+    while (bytes > 16 * 1024 * 1024 || icons_.size() > 512) {
+        auto victim = icons_.end();
+        for (auto it = icons_.begin(); it != icons_.end(); ++it)
+            if (!protectedIcon(it->first) && (victim == icons_.end() || it->second.used < victim->second.used)) victim = it;
+        if (victim == icons_.end()) break;
+        bytes -= victim->second.image.bgra.size();
+        icons_.erase(victim);
+    }
+    while (failed_.size() > 512) {
+        auto victim = std::min_element(failed_.begin(), failed_.end(), [](const auto& a, const auto& b) { return a.second.time < b.second.time; });
+        failed_.erase(victim);
+    }
 }
 
 void AppCatalog::Worker()
@@ -406,7 +444,12 @@ void AppCatalog::Worker()
                 std::lock_guard g(mutex_);
                 apps_ = std::move(apps);
                 startPins_ = std::move(pins);
+                liveIds_.clear();
+                for (const auto& app : apps_) liveIds_.insert(app.id);
+                for (const auto& app : startPins_) liveIds_.insert(app.id);
+                failed_.clear(); // catalogue changes allow another bounded attempt
                 loaded_ = true;
+                PruneIcons();
                 QueuePrefetch();
             }
             PostMessageW(notify_, msg_, 0, 0);
@@ -416,7 +459,16 @@ void AppCatalog::Worker()
         LoadShellImage(IsPath(job.first) ? job.first : L"shell:AppsFolder\\" + job.first, job.second, img);
         {
             std::lock_guard g(mutex_);
-            icons_[job] = std::move(img);
+            requested_.erase(job);
+            if (!img.empty()) {
+                icons_[job] = {std::move(img), ++iconUse_};
+                failed_.erase(job);
+            } else {
+                auto& failure = failed_[job];
+                ++failure.attempts;
+                failure.time = GetTickCount64();
+            }
+            PruneIcons();
         }
         PostMessageW(notify_, msg_, 1, 0);
     }

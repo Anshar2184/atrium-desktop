@@ -88,7 +88,7 @@ void NotificationListener::Run()
             // background thread; the user grants it in Windows privacy settings.
             Log(L"listener: access %s, not mirroring Windows notifications", AccessName(access));
         }
-        // NotificationChanged fails for unpackaged processes (VERIFICATION 8.3):
+        // NotificationChanged fails for unpackaged processes:
         // poll instead. The first pass only records what is already there;
         // later a toast is posted when it appears and again when its text
         // changes (senders update a toast in place).

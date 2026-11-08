@@ -87,6 +87,7 @@ private:
     TaskModel& tasks_;
     AppCatalog& catalog_;
     std::vector<CatalogApp> apps_, pins_, results_;
+    std::vector<std::pair<std::wstring, int>> visibleIcons_;
     std::wstring query_;
     int page_ = 0;
     float pageShown_ = 0;               // displayed page, gliding to page_

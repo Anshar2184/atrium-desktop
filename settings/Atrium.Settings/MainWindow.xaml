@@ -198,7 +198,7 @@
                                                     <FontIcon Glyph="&#xE710;" FontSize="10" Foreground="{ThemeResource InkSecondaryBrush}" />
                                                 </Grid>
                                                 <Button.Flyout>
-                                                    <Flyout Placement="BottomEdgeAlignedRight">
+                                                    <Flyout Placement="BottomEdgeAlignedRight" FlyoutPresenterStyle="{StaticResource AtriumFlyoutStyle}">
                                                         <StackPanel Spacing="8">
                                                             <TextBlock x:Name="TintHex" Style="{StaticResource ValueStyle}" TextAlignment="Left" />
                                                             <ColorPicker x:Name="TintPicker" IsAlphaEnabled="False" IsMoreButtonVisible="True"
@@ -260,7 +260,7 @@
                                                     <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                                                         <ComboBox SelectedIndex="{x:Bind LaunchMode, Mode=TwoWay}" Width="146" Margin="0,0,8,0"
                                                                   AutomationProperties.Name="{x:Bind LaunchName}">
-                                                            <ComboBoxItem Content="打开已有窗口" />
+                                                            <ComboBoxItem Content="打开已有窗口" Margin="0,0,0,4" />
                                                             <ComboBoxItem Content="允许多开" />
                                                         </ComboBox>
                                                         <Button Style="{StaticResource IconButtonStyle}" Click="{x:Bind MoveUp}" IsEnabled="{x:Bind CanUp, Mode=OneWay}"
@@ -308,7 +308,9 @@
                         <StackPanel Spacing="10">
                             <Border x:Name="WidgetStage" Height="320" CornerRadius="28" Background="#FFCBD3DD" SizeChanged="OnWidgetStageSizeChanged">
                                 <Grid>
-                                    <Canvas x:Name="WidgetMap" />
+                                    <Viewbox Stretch="Fill">
+                                        <Canvas x:Name="WidgetMap" Width="1" Height="1" />
+                                    </Viewbox>
                                     <Border CornerRadius="28" BorderThickness="1" BorderBrush="#1F000000" IsHitTestVisible="False" />
                                 </Grid>
                             </Border>

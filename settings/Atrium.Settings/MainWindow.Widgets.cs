@@ -52,7 +52,7 @@ public sealed partial class MainWindow
     }
 
     // A gallery card: the widget on a piece of the bar's glass over the picture, rendered like the hero.
-    private sealed record GalleryPreview(WidgetChoice Choice, Border Stage, Viewbox Face)
+    private sealed record GalleryPreview(WidgetChoice Choice, Border Stage, Viewbox Face, Canvas Viewport)
     {
         public bool? DarkInk;
         public long Stamp;
@@ -66,17 +66,13 @@ public sealed partial class MainWindow
     {
         var stage = new Border { Height = 118, CornerRadius = new CornerRadius(14), Background = PhotoBrush() };
         var face = new Viewbox { Stretch = Stretch.Fill };
-        var holder = new Canvas { IsHitTestVisible = false, Children = { face } };
-        stage.Child = holder;
-        var preview = new GalleryPreview(c, stage, face);
+        // The bitmap and the face share the last completed viewport. While a
+        // resize render is pending, XAML stretches both by the same amount.
+        var holder = new Canvas { Width = 1, Height = 1, IsHitTestVisible = false, Children = { face } };
+        stage.Child = new Viewbox { Stretch = Stretch.Fill, Child = holder };
+        var preview = new GalleryPreview(c, stage, face, holder);
         _galleryStages.Add(preview);
-        double rendered = 0;
-        stage.SizeChanged += (_, e) =>
-        {
-            if (Math.Abs(e.NewSize.Width - rendered) < 16) return;
-            rendered = e.NewSize.Width;
-            RenderGalleryCard(preview);
-        };
+        stage.SizeChanged += (_, _) => RenderGalleryCard(preview);
         var name = new TextBlock
         {
             Text = c.Name + " · " + (c.Size switch { "small" => "小", "medium" => "中", _ => "大" }),
@@ -113,7 +109,7 @@ public sealed partial class MainWindow
 
     private void RenderGalleryCard(GalleryPreview preview)
     {
-        var (c, stage, face) = preview;
+        var (c, stage, face, viewport) = preview;
         double sw = stage.ActualWidth, sh = stage.ActualHeight;
         if (sw < 8 || sh < 8) return;
         _galleryMaterial = _current.Clone();
@@ -125,11 +121,14 @@ public sealed partial class MainWindow
         PostTiles(stage, sw, sh, k, new[] { tile }, null, frame =>
         {
             frame.Apply(stage);
+            viewport.Width = sw;
+            viewport.Height = sh;
             bool dark = frame.Lumas[0] > 0.5f;
             long stamp = WidgetFaces.Stamp(c.Kind);
             if (preview.DarkInk != dark || preview.Stamp != stamp)
             {
                 face.Child = WidgetFaces.Face(c.Kind, c.Size, dark, PhotoBrush());
+                ContinuousCorners.Install(face);
                 preview.DarkInk = dark;
                 preview.Stamp = stamp;
             }
@@ -166,7 +165,7 @@ public sealed partial class MainWindow
         }
         public void Apply(Border stage)
         {
-            var brush = stage.Background as ImageBrush;
+            var brush = ContinuousCorners.Original(stage) as ImageBrush;
             var bmp = brush?.ImageSource as WriteableBitmap;
             if (bmp == null || bmp.PixelWidth != PW || bmp.PixelHeight != PH)
             {

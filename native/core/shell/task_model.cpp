@@ -565,6 +565,7 @@ struct IconEntry {
     bool requested = false, loading = false, have = false;
     std::wstring sig;
     ULONGLONG failedAt = 0;
+    uint64_t used = 0;
     IconImage image;
 };
 
@@ -632,6 +633,9 @@ struct TaskModel::Impl {
     std::condition_variable cv;
     std::deque<Job> jobs;
     std::unordered_map<IconKey, IconEntry, IconKeyHash> icons;
+    std::unordered_set<std::wstring> liveIconKeys;
+    std::unordered_map<std::wstring, int> latestIconSize;
+    uint64_t iconUse = 0;
     std::vector<std::wstring> readyIcons;
     std::vector<std::pair<std::wstring, std::wstring>> readyNames;
     bool stop = false;
@@ -791,9 +795,9 @@ struct TaskModel::Impl {
             names_.swap(readyNames);
         }
         for (auto& key : icons_)
-            ++iconVersion[key];
+            if (meta.contains(key)) ++iconVersion[key];
         for (auto& [key, name] : names_)
-            names[key] = name;
+            if (meta.contains(key)) names[key] = name;
         if (Rebuild()) {
             notify = true;
             ArmTimer();
@@ -998,6 +1002,16 @@ struct TaskModel::Impl {
         for (size_t i = 0; !changed && i < result.size(); ++i)
             changed = !Same(result[i], items[i]);
         items = std::move(result);
+        std::erase_if(names, [&](const auto& entry) { return !meta.contains(entry.first); });
+        std::erase_if(namesRequested, [&](const auto& key) { return !meta.contains(key); });
+        std::erase_if(iconVersion, [&](const auto& entry) { return !meta.contains(entry.first); });
+        {
+            std::lock_guard g(mutex);
+            liveIconKeys.clear();
+            for (const auto& [key, value] : meta) liveIconKeys.insert(key);
+            std::erase_if(latestIconSize, [&](const auto& entry) { return !liveIconKeys.contains(entry.first); });
+            PruneIcons();
+        }
         return changed;
     }
 
@@ -1066,6 +1080,26 @@ struct TaskModel::Impl {
 
     // ---- icons --------------------------------------------------------------
 
+    // Under mutex. Keep the latest size of every live/pinned item and every
+    // in-flight lookup. Historical sizes share a byte/count budget.
+    void PruneIcons()
+    {
+        std::erase_if(icons, [&](const auto& entry) { return !entry.second.loading && !liveIconKeys.contains(entry.first.key); });
+        size_t bytes = 0;
+        for (const auto& [key, entry] : icons) bytes += entry.image.bgra.size();
+        while (bytes > 16 * 1024 * 1024 || icons.size() > 512) {
+            auto victim = icons.end();
+            for (auto it = icons.begin(); it != icons.end(); ++it) {
+                const auto current = latestIconSize.find(it->first.key);
+                if (it->second.loading || (current != latestIconSize.end() && current->second == it->first.size)) continue;
+                if (victim == icons.end() || it->second.used < victim->second.used) victim = it;
+            }
+            if (victim == icons.end()) break; // protected live working set only
+            bytes -= victim->second.image.bgra.size();
+            icons.erase(victim);
+        }
+    }
+
     void Enqueue(Job job)
     {
         {
@@ -1085,7 +1119,10 @@ struct TaskModel::Impl {
         std::wstring sig = m.Signature();
 
         std::unique_lock g(mutex);
+        latestIconSize[key] = px;
+        PruneIcons();
         IconEntry& e = icons[IconKey{key, px}];
+        e.used = ++iconUse;
         bool want = !e.requested;
         if (e.requested && !e.loading && e.sig != sig)
             want = true; // identity changed (pinned, relaunched from elsewhere): refresh, keep showing the old one
@@ -1120,6 +1157,10 @@ struct TaskModel::Impl {
                     return;
                 job = std::move(jobs.front());
                 jobs.pop_front();
+                if (!liveIconKeys.contains(job.key)) {
+                    if (!job.name) icons.erase(IconKey{job.key, job.size});
+                    continue;
+                }
             }
             try {
                 if (job.name)
@@ -1186,7 +1227,11 @@ struct TaskModel::Impl {
         bool changed = false;
         {
             std::lock_guard g(mutex);
-            IconEntry& e = icons[IconKey{job.key, job.size}];
+            auto found = icons.find(IconKey{job.key, job.size});
+            if (found == icons.end()) return;
+            if (!liveIconKeys.contains(job.key)) { icons.erase(found); return; }
+            IconEntry& e = found->second;
+            if (e.sig != job.sig) return;
             e.loading = false;
             if (ok) {
                 changed = !e.have || e.image.bgra != img.bgra;
@@ -1197,6 +1242,7 @@ struct TaskModel::Impl {
             }
             if (changed)
                 readyIcons.push_back(job.key);
+            PruneIcons();
         }
         if (changed)
             PostMessageW(ui, readyMsg, 0, 0);
@@ -1293,7 +1339,7 @@ struct TaskModel::Impl {
         if (SetForegroundWindow(target) && isFront())
             return;
         // Foreground lock refused: the bar never takes activation itself, so on
-        // Windows 11 this is the normal case (VERIFICATION 14). SwitchToThisWindow
+        // Windows 11 this is the normal case. SwitchToThisWindow
         // is what task switchers use; unlike a synthetic Alt press it sends no
         // input to the user's app.
         static bool logged = false;

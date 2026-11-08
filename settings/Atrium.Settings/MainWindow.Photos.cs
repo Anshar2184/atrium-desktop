@@ -15,9 +15,11 @@ public sealed partial class MainWindow
     private BitmapImage? _sharedSource;
     private string? _sharedPath = "\0";
     private readonly Dictionary<string, (FrameworkElement Target, Image Snapshot)> _frozen = new();
-    private readonly Dictionary<string, int> _waits = new(); // what each snapshot still waits for
+    private readonly Dictionary<string, (int Remaining, int Generation)> _waits = new();
     private bool _compareBuilt; // the design page's material comparison renders over the picture too
     private volatile int _heroPhotoGen = -1; // the photo generation of the newest hero background
+    private int _photoSelection;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _photoThawTimer;
 
     // Every preview that renders over the picture on the CPU re-renders when it changes.
     private event Action? PhotoChanged;
@@ -31,18 +33,19 @@ public sealed partial class MainWindow
     private void EnsureSharedPhoto()
     {
         var path = Photo.SelectedPath;
+        int generation = Photo.Generation;
         if (path == _sharedPath) return;
         _sharedPath = path;
         if (path == null)
         {
             _sharedSource = null;
             _sharedPhoto.ImageSource = null;
-            Ready("notify"); Ready("design");
+            Ready("notify", generation); Ready("design", generation);
             return;
         }
         var source = new BitmapImage { DecodePixelWidth = 1600 };
-        source.ImageOpened += (_, _) => { if (source == _sharedSource) { Ready("notify"); Ready("design"); } };
-        source.ImageFailed += (_, _) => { if (source == _sharedSource) { Ready("notify"); Ready("design"); } };
+        source.ImageOpened += (_, _) => { if (source == _sharedSource) { Ready("notify", generation); Ready("design", generation); } };
+        source.ImageFailed += (_, _) => { if (source == _sharedSource) { Ready("notify", generation); Ready("design", generation); } };
         source.UriSource = new Uri(path);
         _sharedSource = source;
         _sharedPhoto.ImageSource = source;
@@ -51,33 +54,42 @@ public sealed partial class MainWindow
     // The preview's photograph: a sample, or the user's own wallpaper (Photo.cs), everywhere at once.
     private async void OnHeroBackgroundChecked(object sender, RoutedEventArgs e)
     {
-        if (sender is not RadioButton { Tag: string tag } || tag == Photo.Selected) return;
-        await FreezeAsync("hero", HeroFrame, 1);
-        await FreezeAsync("notify", NotifyStage, 1);
-        await FreezeAsync("widgets", WidgetStage, 1);
-        await FreezeAsync("design", DesignStack, _compareBuilt ? 2 : 1);
-        if (!Photo.Select(tag)) return;
+        if (sender is not RadioButton { Tag: string tag }) return;
+        int selection = ++_photoSelection;
+        int expectedGeneration = Photo.Generation + 1;
+        _photoThawTimer?.Stop();
+        if (tag == Photo.Selected) { ThawAllBut(null); return; }
+        await FreezeAsync("hero", HeroFrame, 1, selection, expectedGeneration);
+        if (selection != _photoSelection) return;
+        await FreezeAsync("notify", NotifyStage, 1, selection, expectedGeneration);
+        if (selection != _photoSelection) return;
+        await FreezeAsync("widgets", WidgetStage, 1, selection, expectedGeneration);
+        if (selection != _photoSelection) return;
+        await FreezeAsync("design", DesignStack, _compareBuilt ? 2 : 1, selection, expectedGeneration);
+        if (selection != _photoSelection || _updatesClosed) return;
+        if (!Photo.Select(tag)) { ThawAllBut(null); return; }
         EnsureSharedPhoto();
         PhotoChanged?.Invoke();
         UpdateHero();
         // Never keep a snapshot up for long, whatever happens to the decode.
-        var timer = DispatcherQueue.CreateTimer();
+        var timer = _photoThawTimer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(8);
         timer.IsRepeating = false;
-        timer.Tick += (_, _) => ThawAllBut(null);
+        timer.Tick += (_, _) => { if (selection == _photoSelection) ThawAllBut(null); };
         timer.Start();
     }
 
     // A snapshot of `target` over its own content (target is a Border with a Panel inside, or a Panel).
-    private async Task FreezeAsync(string key, FrameworkElement target, int waits)
+    private async Task FreezeAsync(string key, FrameworkElement target, int waits, int selection, int generation)
     {
-        if (_frozen.ContainsKey(key) || target.Visibility != Visibility.Visible || target.ActualWidth < 2 || target.ActualHeight < 2) return;
+        if (_frozen.ContainsKey(key)) { _waits[key] = (waits, generation); return; }
+        if (target.Visibility != Visibility.Visible || target.ActualWidth < 2 || target.ActualHeight < 2) return;
         var host = target as Panel ?? (target as Border)?.Child as Panel;
         if (host == null) return;
         var rtb = new RenderTargetBitmap();
         try { await rtb.RenderAsync(target); }
         catch (Exception) { return; }
-        if (_frozen.ContainsKey(key)) return;
+        if (selection != _photoSelection || _updatesClosed || _frozen.ContainsKey(key)) return;
         var image = new Image
         {
             Source = rtb, Stretch = Stretch.Fill, IsHitTestVisible = false, Width = target.ActualWidth, Height = target.ActualHeight,
@@ -88,14 +100,14 @@ public sealed partial class MainWindow
         Grid.SetColumnSpan(image, 99);
         host.Children.Add(image);
         _frozen[key] = (target, image);
-        _waits[key] = waits;
+        _waits[key] = (waits, generation);
     }
 
     // One of the things a snapshot waits for is in; the last one lets it fade.
-    private void Ready(string key)
+    private void Ready(string key, int generation)
     {
-        if (!_waits.TryGetValue(key, out int n)) return;
-        if (n > 1) _waits[key] = n - 1;
+        if (!_waits.TryGetValue(key, out var wait) || wait.Generation != generation) return;
+        if (wait.Remaining > 1) _waits[key] = (wait.Remaining - 1, generation);
         else Thaw(key);
     }
 

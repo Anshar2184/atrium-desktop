@@ -163,6 +163,7 @@ internal static class GlassRenderer
         float W = winW, H = winH, inset = p.Inset;
         float bx = W * 0.5f - inset, by = H * 0.5f - inset;
         float r = MathF.Min(p.Radius, MathF.Min(bx, by));
+        var corner = CornerProfile.For(bx * 2, by * 2, r);
         float py = ly + 0.5f, cy = py - H * 0.5f;
         float shadowK = 1f / MathF.Max(inset * 0.35f, 1f);
         float edge = MathF.Max(p.Edge, 1f);
@@ -202,7 +203,8 @@ internal static class GlassRenderer
             if (gl > 1e-5f) { nx = gx / gl; ny = gy / gl; }
 
             float aa = MathF.Max(MathF.Abs(nx) + MathF.Abs(ny), 1e-3f); // fwidth(d)
-            float cov = Sat(0.5f - d / aa);
+            float edgeDistance = corner.Edge(MathF.Abs(cx) - bx + corner.Reach, MathF.Abs(cy) - by + corner.Reach);
+            float cov = Sat(0.5f - edgeDistance / aa);
             if (cov <= 0)
             {
                 if (overlay) { dst[di + 3] = To8(shadowA); continue; }
@@ -292,21 +294,19 @@ internal static class GlassRenderer
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float Sd(float x, float y, float bx, float by, float r)
     {
+        var corner = CornerProfile.For(bx * 2, by * 2, r);
+        r = corner.Reach;
         float qx = MathF.Abs(x) - bx + r, qy = MathF.Abs(y) - by + r;
-        if (r >= MathF.Min(bx, by))
-        {
-            float mx = MathF.Max(qx, 0), my = MathF.Max(qy, 0);
-            return MathF.Sqrt(mx * mx + my * my) + MathF.Min(MathF.Max(qx, qy), 0) - r;
-        }
         if (MathF.Min(qx, qy) <= 0) return MathF.Max(qx, qy) - r;
         if (r <= 0) return MathF.Sqrt(qx * qx + qy * qy);
         float n = MathF.Sqrt(qx * qx + qy * qy), vx = 0, vy = 0, fx = 0, fy = 0;
         for (int i = 0; i < 2; i++)
         {
             vx = qx / n; vy = qy / n;
-            float xx = vx * vx, yy = vy * vy, dx = 0.02f + 0.98f * xx, dy = 0.02f + 0.98f * yy;
-            fx = 2 * vx * xx * (0.04f + 0.98f * xx) / (dx * dx);
-            fy = 2 * vy * yy * (0.04f + 0.98f * yy) / (dy * dy);
+            float a = corner.A;
+            float xx = vx * vx, yy = vy * vy, dx = a + (1 - a) * xx, dy = a + (1 - a) * yy;
+            fx = 2 * vx * xx * (2 * a + (1 - a) * xx) / (dx * dx);
+            fy = 2 * vy * yy * (2 * a + (1 - a) * yy) / (dy * dy);
             n *= 1 + (xx * xx / dx + yy * yy / dy - 1) / (vx * fx + vy * fy);
         }
         return (n - r) * (vx * fx + vy * fy) / MathF.Sqrt(fx * fx + fy * fy);

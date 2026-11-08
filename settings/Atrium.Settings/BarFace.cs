@@ -27,7 +27,8 @@ internal sealed class BarFace
     public static readonly Color LightInk = Color.FromArgb(245, 255, 255, 255), DarkInk = Color.FromArgb(235, 18, 18, 23);
 
     private readonly Canvas _canvas;
-    private readonly Path _logo = new() { IsHitTestVisible = false };
+    private readonly Canvas _logo = new() { IsHitTestVisible = false };
+    private readonly Rectangle[] _logoPanes = new Rectangle[4];
     private readonly List<Image> _icons = new();
     private readonly List<Ellipse> _dots = new();
     private readonly Border _plate = new() { IsHitTestVisible = false };
@@ -46,7 +47,13 @@ internal sealed class BarFace
         _canvas = canvas;
         _badgeText.FontFamily = (FontFamily)Application.Current.Resources["TitleFont"];
         _badge.Child = _badgeText;
-        _logo.Fill = LogoBrush();
+        for (int i = 0; i < _logoPanes.Length; ++i)
+        {
+            var pane = new Rectangle { IsHitTestVisible = false, Fill = LogoBrush() };
+            ContinuousCorners.SetEnabled(pane, true);
+            _logoPanes[i] = pane;
+            _logo.Children.Add(pane);
+        }
         canvas.Children.Add(_plate);
         canvas.Children.Add(_logo);
         for (int i = 0; i < maxIcons; i++)
@@ -146,10 +153,19 @@ internal sealed class BarFace
         {
             var (x, y, size) = Item(L.StartX);
             double w = size * 0.80, gap = w * 0.08, pane = (w - gap) / 2, r = pane * 0.10;
-            var group = new GeometryGroup();
+            _logo.Width = _logo.Height = w;
             for (int i = 0; i < 4; i++)
-                group.Children.Add(PathExtensions.RoundedRect(new Rect((i % 2) * (pane + gap), (i / 2) * (pane + gap), pane, pane), r));
-            _logo.Data = group;
+            {
+                var part = _logoPanes[i];
+                double px = (i % 2) * (pane + gap), py = (i / 2) * (pane + gap);
+                part.Width = part.Height = pane;
+                part.RadiusX = part.RadiusY = r;
+                var gradient = (LinearGradientBrush)ContinuousCorners.Original(part)!;
+                gradient.StartPoint = new Point(-px / pane, -py / pane);
+                gradient.EndPoint = new Point((w - px) / pane, (w - py) / pane);
+                Canvas.SetLeft(part, px);
+                Canvas.SetTop(part, py);
+            }
             Canvas.SetLeft(_logo, x + (size - w) / 2);
             Canvas.SetTop(_logo, y + (size - w) / 2);
         }
@@ -246,25 +262,6 @@ internal sealed class BarFace
             Place(_time, L.TimePx, lineT, top, ink);
             Place(_date, L.DatePx, lineD, top + lineT * zoom, ink);
         }
-    }
-}
-
-internal static class PathExtensions
-{
-    public static PathGeometry RoundedRect(Rect b, double r)
-    {
-        r = Math.Min(r, Math.Min(b.Width, b.Height) / 2);
-        var f = new PathFigure { StartPoint = new Point(b.Left + r, b.Top), IsClosed = true, IsFilled = true };
-        void Arc(double x, double y) => f.Segments.Add(new ArcSegment { Point = new Point(x, y), Size = new Size(r, r), SweepDirection = SweepDirection.Clockwise });
-        f.Segments.Add(new LineSegment { Point = new Point(b.Right - r, b.Top) });
-        Arc(b.Right, b.Top + r);
-        f.Segments.Add(new LineSegment { Point = new Point(b.Right, b.Bottom - r) });
-        Arc(b.Right - r, b.Bottom);
-        f.Segments.Add(new LineSegment { Point = new Point(b.Left + r, b.Bottom) });
-        Arc(b.Left, b.Bottom - r);
-        f.Segments.Add(new LineSegment { Point = new Point(b.Left, b.Top + r) });
-        Arc(b.Left + r, b.Top);
-        return new PathGeometry { Figures = { f } };
     }
 }
 

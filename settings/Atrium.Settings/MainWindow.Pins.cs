@@ -232,6 +232,7 @@ public sealed partial class MainWindow
     {
         var dialog = new ContentDialog
         {
+            Style = (Style)Application.Current.Resources["AtriumDialogStyle"],
             XamlRoot = Content.XamlRoot,
             Title = "导入系统任务栏固定项？",
             Content = "当前的固定列表将被 Windows 任务栏上固定的应用替换。",

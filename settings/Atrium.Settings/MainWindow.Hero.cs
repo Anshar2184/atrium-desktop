@@ -61,6 +61,8 @@ public sealed partial class MainWindow
     private volatile FrameBuffers? _heroFrames, _loupeFrames;
     private LatestWorker<RenderJob>? _renderWorker;
     private LatestWorker<BarSettings>? _swatchWorker;
+    private sealed record SwatchPhoto(int Generation, Lazy<Photo> Photo);
+    private LatestWorker<SwatchPhoto>? _fixedSwatchWorker;
     private int _uiPending;
     private float _luma = 0.3f;
     private bool _darkInk; // the bar's ink over the preview, with the core's hysteresis
@@ -95,11 +97,16 @@ public sealed partial class MainWindow
         // The two presets are fixed swatches; the custom one follows the current material.
         var liquid = BarSettings.Liquid();
         var frosted = BarSettings.Frosted();
-        Task.Run(() => { RenderSwatch(liquid, SwatchLiquid); RenderSwatch(frosted, SwatchFrosted); });
+        _fixedSwatchWorker = new LatestWorker<SwatchPhoto>(photo =>
+        {
+            RenderSwatch(liquid, SwatchLiquid, photo);
+            RenderSwatch(frosted, SwatchFrosted, photo);
+        });
+        _fixedSwatchWorker.Post(new SwatchPhoto(Photo.Generation, Photo.Capture()));
         // A new picture: the swatches again, over it.
         PhotoChanged += () =>
         {
-            Task.Run(() => { RenderSwatch(liquid, SwatchLiquid); RenderSwatch(frosted, SwatchFrosted); });
+            _fixedSwatchWorker.Post(new SwatchPhoto(Photo.Generation, Photo.Capture()));
             _swatchSettings = _current.Clone();
             _swatchWorker?.Post(_swatchSettings);
         };
@@ -414,7 +421,7 @@ public sealed partial class MainWindow
             }
         }
         if (Loupe.Visibility == Visibility.Visible && _loupeFrames is { } lf) Upload(lf, ref _loupeBmp, _loupeBrush);
-        if (_heroPhotoGen == Photo.Generation && _heroFrames != null) Ready("hero");
+        if (_heroPhotoGen == Photo.Generation && _heroFrames != null) Ready("hero", _heroPhotoGen);
     }
 
     private static void Upload(FrameBuffers f, ref WriteableBitmap? bmp, ImageBrush brush)
@@ -444,13 +451,15 @@ public sealed partial class MainWindow
     }
 
     // Swatches are tiny; rendering them at 2x keeps them crisp up to 200 % scale.
-    private void RenderSwatch(BarSettings material, Border target)
+    private void RenderSwatch(BarSettings material, Border target, SwatchPhoto? snapshot = null)
     {
         const double rs = 2;
         int w = (int)Math.Round(SwatchW * rs), h = (int)Math.Round(SwatchH * rs);
         Backdrop bg;
-        int gen = Photo.Generation;
-        var photo = Photo.Capture();
+        snapshot ??= new SwatchPhoto(Photo.Generation, Photo.Capture());
+        int gen = snapshot.Generation;
+        var photo = snapshot.Photo;
+        if (gen != Photo.Generation) return;
         lock (s_swatchLock)
         {
             if (s_swatchBg?.Gen != gen) s_swatchBg = (gen, Backdrop.Create(w, h, SwatchW, SwatchH, 0, 0, rs, photo.Value));
@@ -469,6 +478,7 @@ public sealed partial class MainWindow
         GlassRenderer.Draw(bg, pixels, bx - inset, by - inset, bw + 2 * inset, bh + 2 * inset, spec);
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (gen != Photo.Generation || _updatesClosed) return;
             var bmp = new WriteableBitmap(w, h);
             using (var stream = bmp.PixelBuffer.AsStream()) stream.Write(pixels, 0, pixels.Length);
             bmp.Invalidate();

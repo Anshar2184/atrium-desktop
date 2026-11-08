@@ -89,6 +89,8 @@ public:
     void CloseAll(const std::wstring& key);
     // One window of a group (the window previews): restore and bring it to the front, or close it.
     static void ActivateWindow(HWND window);
+    // True means the native close command was queued; the application still
+    // owns confirmation, cancellation and close-to-tray behavior.
     static bool CloseWindow(HWND window);
     // A pin for a running unpinned item (to append to settings).
     PinnedApp PinFor(const std::wstring& key) const;

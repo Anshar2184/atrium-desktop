@@ -9,8 +9,6 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
-    <AtriumDevelopment Condition="'$(AtriumDevelopment)' == ''">true</AtriumDevelopment>
-    <DefineConstants Condition="'$(AtriumDevelopment)' == 'true'">$(DefineConstants);ATRIUM_DEVELOPMENT</DefineConstants>
     <!-- Unpackaged and self-contained: runs from a plain folder, no runtime install. -->
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -19,9 +17,11 @@
     <SelfContained>true</SelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AtriumDevelopment Condition="'$(AtriumDevelopment)' == ''">true</AtriumDevelopment>
+    <DefineConstants Condition="'$(AtriumDevelopment)' == 'true'">$(DefineConstants);ATRIUM_DEVELOPMENT</DefineConstants>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\atrium.ico</ApplicationIcon>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <Product>Atrium Desktop</Product>
     <Copyright>MIT License</Copyright>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
@@ -32,6 +32,8 @@
     <!-- WinUI component only: the metapackage would also ship AI/ML/Search/Widgets
          (onnxruntime, DirectML, ...) in a self-contained build. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.4" />
+    <!-- Device-independent paths clip the platform acrylic without replacing its material. -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
   </ItemGroup>
 
   <ItemGroup>

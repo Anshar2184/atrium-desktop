@@ -78,9 +78,10 @@ internal static class WidgetFaces
             {
                 double leftW = size == "small" ? w - 2 * Pad : 150;
                 Text(c, "本地", Pad + 2, Pad, Pad + leftW, Pad + 18, 12.5, p.Sub, 2, 0, p);
-                // Fitted to its column, centred: the same margin on both sides (widget_faces.cpp).
+                // Match the core's fixed daily size, with one DIP of glyph-rounding headroom.
                 double fit = TextWidth("00:00", 50, "TitleFont");
-                Text(c, now.ToString("H:mm"), Pad, Pad + 22, Pad + leftW, Pad + 84, fit > leftW ? 50 * leftW / fit : 50, p.Text, 2, 1, p);
+                double timeW = leftW - 1;
+                Text(c, now.ToString("H:mm"), Pad, Pad + 22, Pad + leftW, Pad + 84, fit > timeW ? 50 * timeW / fit : 50, p.Text, 2, 1, p);
                 Text(c, WeekLong[Weekday(now)], Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 13, Pal.Blue, 2, 0, p);
                 Text(c, $"{now.Month}月{now.Day}日", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 13, p.Text, 0, 0, p);
                 if (size == "small") break;

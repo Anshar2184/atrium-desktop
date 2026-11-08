@@ -119,7 +119,7 @@ public sealed partial class MainWindow
         ("面板内的模块", "min(面板圆角, 22)", "面板很圆时，模块不跟着变成胶囊"),
         ("托盘图标底板", "clamp(R − m − 2, 6, 12)", "同心：外层圆角减去边距"),
         ("桌面小组件", "22（格子 164）", "约为边长的 13%，与 macOS 小组件相同"),
-        ("胶囊控件", "高度 / 2", "两端为完整半圆"),
+        ("胶囊控件", "高度 / 2", "G3 连续端部；圆形旋钮保持正圆"),
         ("悬停与按下的底板", "8–12", "不超过所在容器圆角减去边距"),
     };
 
@@ -172,12 +172,12 @@ public sealed partial class MainWindow
         DesignStack.Children.Add(Principles());
         DesignStack.Children.Add(Section("材质", "同一个着色器、两组参数：液态玻璃只在边缘折射、中间几乎透明；磨砂玻璃把背景磨成色块、几乎不折射。左右拖动分界线对比。",
             MaterialCompare()));
-        DesignStack.Children.Add(Section("几何", "卡片采用大圆角，按钮保持胶囊形，内外边距与圆角保持协调。",
+        DesignStack.Children.Add(Section("几何", "统一 G3 连续圆角，保持大圆角与胶囊比例。",
             GeometryCard()));
         DesignStack.Children.Add(Section("排版", "MiSans 三个字重。一个界面最多三档字号；主次先用透明度区分，再用字号，最后才用字重；数字一律等宽。", TypeCard(false)));
         DesignStack.Children.Add(Section("间距与色彩", "间距只用一组刻度；颜色只有一个强调色，其余都是中性灰。玻璃上的字色由背后的亮度决定。", SpaceAndColour()));
         DesignStack.Children.Add(Section("交互", "把指针移到任务栏上：图标像波浪一样依次变大（倍数取当前设置）；点一个图标，看启动时的一次轻跳。点通知卡片，重新弹出。", InteractionCard()));
-        DesignStack.Children.Add(Section("动效", "所有动画都可以中途打断，从当前位置和速度继续；与帧率无关。点卡片播放。", CurveGrid()));
+        DesignStack.Children.Add(Section("动效", "动画可从当前位置改向，并按实际时间推进；弹簧保留速度，小组件缓出目前会重启。点卡片播放。", CurveGrid()));
 
         // ---- Second layer: the numbers ----
         var toggle = new Button { HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(16, 7, 14, 8) };
@@ -214,6 +214,7 @@ public sealed partial class MainWindow
         if (_designDetails == null || (!opening && _designDetails.Visibility != Visibility.Visible)) return;
         _designDetails.Children.Clear();
         BuildDesignDetails(_designDetails);
+        ContinuousCorners.Install(_designDetails);
     }
 
     private void BuildDesignDetails(StackPanel into)
@@ -239,7 +240,7 @@ public sealed partial class MainWindow
             })));
         into.Children.Add(Section("排版参数", "字重从不合成：样式选择字体文件。MiSans 的字重比名称细一档：Medium 380 当作常规，Demibold 450 当作中等，Semibold 520 当作半粗。",
             TypeCard(true)));
-        into.Children.Add(Section("圆角", "卡片圆角 24，按钮圆角取高度的一半。原生玻璃采用接近圆弧的连续轮廓，胶囊保留圆形端部。",
+        into.Children.Add(Section("圆角", "统一解析 G3 轮廓：直边接点的曲率、曲率变化率均为零。卡片 24，按钮按半高取值；正圆保留恒定曲率。",
             Table(new[] { "元素", "圆角", "规则" }, new[] { 1.1, 1.3, 2.2 }, Corners.Select(c => new[] { c.Element, c.Radius, c.Rule }))));
         into.Children.Add(RadiusCard());
         into.Children.Add(Section("间距", null,
@@ -294,7 +295,7 @@ public sealed partial class MainWindow
         (string N, string Title, string Body)[] items =
         {
             ("01", "让位于内容", "玻璃是承载内容的介质。字色跟随背后的亮度，装饰的强度以文字始终清晰为限。"),
-            ("02", "运动像真实物体", "可以中途打断，速度不突变，与帧率无关；不用夸张的弹跳。"),
+            ("02", "运动像真实物体", "可以中途改向，保持位置连续；弹簧保留速度，小组件缓出目前会重启。"),
             ("03", "同类事物，同一种处理", "同一类元素用同一条曲线、同一个圆角、同一档字号。"),
         };
         foreach (var (n, title, body) in items)
@@ -318,6 +319,10 @@ public sealed partial class MainWindow
         const double H = 240;
         var frosted = new Border { CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
         var liquid = new Border { CornerRadius = new CornerRadius(20), Background = PhotoBrush() };
+        // Keep the split's XAML rectangle clip on a separate, unrounded host.
+        // XAML otherwise replaces the same visual Clip used for the photo's
+        // continuous boundary, and attempts to treat it as its own inset clip.
+        var reveal = new Grid { Children = { liquid } };
         var split = new Rectangle { Width = 2, Fill = new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)), HorizontalAlignment = HorizontalAlignment.Left };
         var knob = new Border
         {
@@ -334,7 +339,7 @@ public sealed partial class MainWindow
         };
         var stage = new Grid { Height = H, Background = new SolidColorBrush(Colors.Transparent) };
         stage.Children.Add(frosted);
-        stage.Children.Add(liquid);
+        stage.Children.Add(reveal);
         stage.Children.Add(split);
         stage.Children.Add(knob);
         stage.Children.Add(Tag("液态玻璃", HorizontalAlignment.Left));
@@ -346,7 +351,7 @@ public sealed partial class MainWindow
         void Place()
         {
             double x = Math.Round(width * at);
-            liquid.Clip = new RectangleGeometry { Rect = new Rect(0, 0, Math.Max(0, x), H) };
+            reveal.Clip = new RectangleGeometry { Rect = new Rect(0, 0, Math.Max(0, x), H) };
             split.Translation = new Vector3((float)(x - 1), 0, 0);
             knob.Translation = new Vector3((float)(x - 15), 0, 8);
         }
@@ -365,6 +370,7 @@ public sealed partial class MainWindow
             rendered = width;
             double rs = Math.Clamp(stage.XamlRoot?.RasterizationScale ?? 1, 1, 2), w = width;
             int mine = ++request;
+            int photoGeneration = Photo.Generation;
             var photo = Photo.Capture();
             Task.Run(() =>
             {
@@ -372,10 +378,10 @@ public sealed partial class MainWindow
                 var b = RenderMaterial(BarSettings.Frosted(), w, H, rs, photo.Value);
                 DispatcherQueue.TryEnqueue(() =>
                 {
-                    if (mine != request) return;
+                    if (mine != request || photoGeneration != Photo.Generation) return;
                     liquid.Background = a.Brush();
                     frosted.Background = b.Brush();
-                    Ready("design");
+                    Ready("design", photoGeneration);
                 });
             });
         }
@@ -431,7 +437,7 @@ public sealed partial class MainWindow
         };
         var face = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
         face.Children.Add(outline);
-        var caption = Text("大圆角", "RowTitleStyle");
+        var caption = Text("G3 大圆角", "RowTitleStyle");
         caption.HorizontalAlignment = HorizontalAlignment.Center;
         caption.MinHeight = caption.LineHeight = 22;
         face.Children.Add(caption);
@@ -534,7 +540,7 @@ public sealed partial class MainWindow
         frame.Padding = new Thickness(16);
         // The border stroke is part of the inset too: the photo follows the same corner centre.
         double inset = frame.BorderThickness.Left + frame.Padding.Left;
-        stage.CornerRadius = new CornerRadius(frame.CornerRadius.TopLeft - inset);
+        stage.CornerRadius = new CornerRadius(ContinuousCorners.RadiusOf(frame) - inset);
         return frame;
     }
 
@@ -841,7 +847,7 @@ public sealed partial class MainWindow
         demo.Children.Add(label);
         var left = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
         left.Children.Add(demo);
-        var why = Text("两条弧共用一个圆心，四周边距处处相等。", "RowNoteStyle");
+        var why = Text("内圆角随边距缩小，直边间距一致。", "RowNoteStyle");
         why.HorizontalAlignment = HorizontalAlignment.Center;
         left.Children.Add(why);
 

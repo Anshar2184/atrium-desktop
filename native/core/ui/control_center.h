@@ -19,6 +19,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,8 @@ private:
     void ReadAudio(bool icons);
     void ReadMode();
     void SetRadioAsync(bool bluetooth, bool on);
+    void WriteRadios();
+    void WriteOutput();
     void Place();
     void ShowPage(Page page);
     void SetSliderAt(const std::wstring& id, float x);
@@ -94,6 +97,15 @@ private:
     std::vector<WifiNetwork> networks_;
     bool scanning_ = false, scanned_ = false;
     unsigned scanGen_ = 0, acceptedGen_ = 0;
+    bool scanBusy_ = false, scanPending_ = false, scanRescan_ = false;
+    bool radioBusy_ = false, radioPending_ = false, radioDevices_ = false;
+    bool radioWriteBusy_ = false, wifiWriteDone_ = false;
+    unsigned radioGen_ = 0;
+    std::optional<bool> wifiIntent_, bluetoothIntent_;
+    bool audioBusy_ = false, audioPending_ = false, audioIcons_ = false;
+    bool outputWriteBusy_ = false;
+    unsigned audioGen_ = 0;
+    std::wstring outputIntent_;
     Page page_ = Page::Main;
     double pageMs_ = 0;
     int pageDir_ = 0;

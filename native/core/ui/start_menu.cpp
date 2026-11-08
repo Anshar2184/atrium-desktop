@@ -152,6 +152,7 @@ void StartMenu::Close(bool launched)
     if (!surface_.Visible())
         return;
     KillTimer(surface_.Hwnd(), kStatusTimer);
+    catalog_.SetVisibleIcons({});
     powerOpen_ = false;
     surface_.Hide();
     lastClosed_ = GetTickCount64();
@@ -234,6 +235,7 @@ float StartMenu::Hover(Canvas& c, const std::wstring& id, bool on)
 
 void StartMenu::Paint(Canvas& c)
 {
+    visibleIcons_.clear();
     const Theme& t = c.theme;
     const double now = c.now;
     hits_.clear();
@@ -263,6 +265,7 @@ void StartMenu::Paint(Canvas& c)
     else
         PaintResults(c, t);
     PaintShelf(c, t);
+    catalog_.SetVisibleIcons(visibleIcons_);
     if (powerOpen_) {
         float e = float((now - powerMs_) / kPowerMs);
         D2D1_RECT_F card = PowerRect();
@@ -345,6 +348,7 @@ void StartMenu::PaintPins(Canvas& c, const Theme& t)
             c.Continue();
         }
         const CatalogApp& app = pins_[i];
+        visibleIcons_.emplace_back(app.id, tilePx);
         std::wstring cacheKey = L"c|" + app.id + L"|" + std::to_wstring(tilePx);
         bool cached = c.Cached(cacheKey);
         IconImage fetched;
@@ -437,6 +441,7 @@ void StartMenu::PaintResults(Canvas& c, const Theme& t)
             c.Continue();
         }
         const CatalogApp& app = results_[i];
+        visibleIcons_.emplace_back(app.id, rowPx);
         std::wstring cacheKey = L"c|" + app.id + L"|" + std::to_wstring(rowPx);
         bool cached = c.Cached(cacheKey);
         IconImage fetched;

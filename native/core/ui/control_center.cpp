@@ -14,6 +14,7 @@
 #include <cmath>
 #include <memory>
 #include <thread>
+#include <utility>
 
 namespace atrium {
 
@@ -31,8 +32,11 @@ constexpr UINT WM_CC_BRIGHT = WM_APP + 0x53;  // the brightness worker is done (
 constexpr UINT WM_CC_AUDIO = WM_APP + 0x54;   // lParam AudioRead*
 constexpr UINT WM_CC_DISPLAYS = WM_APP + 0x55; // the wireless displays in range changed
 constexpr UINT WM_CC_PROJECTED = WM_APP + 0x56; // wParam 1 projecting, 0 refused; lParam std::wstring* the display (null: stopped)
+constexpr UINT WM_CC_RADIO_SET = WM_APP + 0x57;
+constexpr UINT WM_CC_OUTPUT_SET = WM_APP + 0x58;
 
 struct RadioRead {
+    unsigned gen = 0;
     RadioState radios;
     bool devicesRead = false;
     std::vector<BluetoothDevice> devices;
@@ -40,6 +44,7 @@ struct RadioRead {
 };
 
 struct AudioRead {
+    unsigned gen = 0;
     std::vector<AudioOutput> outputs;
     std::vector<AudioApp> apps;
     bool icons = false;
@@ -141,6 +146,9 @@ void ControlCenter::Place()
 
 void ControlCenter::Open(RECT anchor, RECT bar)
 {
+    ++radioGen_;
+    ++audioGen_;
+    ++scanGen_;
     anchor_ = anchor;
     bar_ = bar;
     hover_.clear();
@@ -172,6 +180,11 @@ void ControlCenter::Close()
     if (!surface_.Visible())
         return;
     KillTimer(surface_.Hwnd(), kStatusTimer);
+    ++radioGen_;
+    ++audioGen_;
+    ++scanGen_;
+    radioPending_ = audioPending_ = scanPending_ = false;
+    radioDevices_ = audioIcons_ = scanRescan_ = false;
     finder_.Stop();
     if (!dragging_.empty())
         ReleaseCapture();
@@ -206,6 +219,14 @@ void ControlCenter::ShowPage(Page page)
 void ControlCenter::Scan(bool rescan)
 {
     scanning_ = true;
+    scanRescan_ |= rescan;
+    if (scanBusy_) {
+        scanPending_ = true;
+        return;
+    }
+    scanBusy_ = true;
+    scanPending_ = false;
+    rescan = std::exchange(scanRescan_, false);
     HWND h = surface_.Hwnd();
     unsigned gen = ++scanGen_;
     std::thread([h, rescan, gen] {
@@ -217,11 +238,20 @@ void ControlCenter::Scan(bool rescan)
 
 void ControlCenter::ReadRadios(bool devices)
 {
+    radioDevices_ |= devices;
+    if (radioBusy_ || radioWriteBusy_) {
+        radioPending_ = true;
+        return;
+    }
+    radioBusy_ = true;
+    radioPending_ = false;
+    devices = std::exchange(radioDevices_, false);
+    unsigned gen = radioGen_;
     HWND h = surface_.Hwnd();
     bool bright = !brightRead_;
-    brightRead_ = true;
-    OnWorker([h, devices, bright] {
+    OnWorker([h, devices, bright, gen] {
         auto* r = new RadioRead();
+        r->gen = gen;
         r->radios = QueryRadios();
         if (devices && r->radios.btOn) {
             r->devices = ListBluetooth();
@@ -239,34 +269,61 @@ void ControlCenter::SetRadioAsync(bool bluetooth, bool on)
     // Shown at once; the next reading confirms it (or puts it back).
     (bluetooth ? radios_.btOn : radios_.wifiOn) = on;
     surface_.Invalidate();
+    (bluetooth ? bluetoothIntent_ : wifiIntent_) = on;
+    ++radioGen_; // an older read cannot undo the optimistic switch
+    WriteRadios();
+}
+
+void ControlCenter::WriteRadios()
+{
+    if (radioWriteBusy_ || (!wifiIntent_ && !bluetoothIntent_)) return;
+    radioWriteBusy_ = true;
+    auto wifi = std::exchange(wifiIntent_, std::nullopt);
+    auto bluetooth = std::exchange(bluetoothIntent_, std::nullopt);
     HWND h = surface_.Hwnd();
-    OnWorker([h, bluetooth, on] {
-        SetRadio(bluetooth, on);
-        Sleep(bluetooth ? 900 : 1500);
-        auto* r = new RadioRead();
-        r->radios = QueryRadios();
-        if (r->radios.btOn) {
-            r->devices = ListBluetooth();
-            r->devicesRead = true;
-        }
-        if (!PostMessageW(h, WM_CC_RADIOS, 0, reinterpret_cast<LPARAM>(r)))
-            delete r;
-        if (!bluetooth)
-            PostMessageW(h, WM_WIFI_AGAIN, 0, 0);
+    // Reading WMI or enumerating devices may be slow. It never holds up the
+    // ordered writes; their latest intent has its own single bounded worker.
+    OnWorker([h, wifi, bluetooth] {
+        if (wifi) SetRadio(false, *wifi);
+        if (bluetooth) SetRadio(true, *bluetooth);
+        Sleep(wifi ? 1500 : 900);
+        PostMessageW(h, WM_CC_RADIO_SET, wifi.has_value() ? 1 : 0, 0);
     });
 }
 
 void ControlCenter::ReadAudio(bool icons)
 {
+    audioIcons_ |= icons;
+    if (audioBusy_ || outputWriteBusy_) {
+        audioPending_ = true;
+        return;
+    }
+    audioBusy_ = true;
+    audioPending_ = false;
+    icons = std::exchange(audioIcons_, false);
+    unsigned gen = audioGen_;
     HWND h = surface_.Hwnd();
     int px = int(std::lround(26 * surface_.Scale()));
-    OnWorker([h, px, icons] {
+    OnWorker([h, px, icons, gen] {
         auto* r = new AudioRead();
+        r->gen = gen;
         r->outputs = ListAudioOutputs();
         r->apps = ListAudioApps(icons ? px : 0);
         r->icons = icons;
         if (!PostMessageW(h, WM_CC_AUDIO, 0, reinterpret_cast<LPARAM>(r)))
             delete r;
+    });
+}
+
+void ControlCenter::WriteOutput()
+{
+    if (outputWriteBusy_ || outputIntent_.empty()) return;
+    outputWriteBusy_ = true;
+    auto output = std::exchange(outputIntent_, {});
+    HWND h = surface_.Hwnd();
+    OnWorker([h, output] {
+        SetDefaultOutput(output);
+        PostMessageW(h, WM_CC_OUTPUT_SET, 0, 0);
     });
 }
 
@@ -917,6 +974,7 @@ void ControlCenter::SetSliderAt(const std::wstring& id, float x)
         const D2D1_RECT_F& tr = appTracks_[i];
         int v = int(std::lround(std::clamp((x - tr.left) / (tr.right - tr.left), 0.f, 1.f) * 100));
         apps_[i].volume = v;
+        ++audioGen_;
         if (v > 0)
             apps_[i].muted = false;
         SetAppVolume(apps_[i].key, v);
@@ -1023,23 +1081,15 @@ void ControlCenter::Activate(const std::wstring& id)
             return;
         for (size_t k = 0; k < outputs_.size(); ++k)
             outputs_[k].isDefault = k == i; // at once; the next reading confirms it
-        std::wstring target = outputs_[i].id;
-        HWND h = surface_.Hwnd();
-        int px = int(std::lround(26 * surface_.Scale()));
-        OnWorker([h, target, px] {
-            SetDefaultOutput(target);
-            auto* r = new AudioRead();
-            r->outputs = ListAudioOutputs();
-            r->apps = ListAudioApps(px);
-            r->icons = true;
-            if (!PostMessageW(h, WM_CC_AUDIO, 1, reinterpret_cast<LPARAM>(r)))
-                delete r;
-        });
+        outputIntent_ = outputs_[i].id;
+        ++audioGen_;
+        WriteOutput();
         surface_.Invalidate();
     } else if (id.rfind(L"amute:", 0) == 0) {
         size_t i = size_t(std::stoul(id.substr(6)));
         if (i < apps_.size()) {
             apps_[i].muted = !apps_[i].muted;
+            ++audioGen_;
             SetAppMute(apps_[i].key, apps_[i].muted);
             surface_.Invalidate();
         }
@@ -1125,8 +1175,33 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         }
         return false;
+    case WM_CC_RADIO_SET:
+        radioWriteBusy_ = false;
+        wifiWriteDone_ |= w != 0;
+        if (wifiIntent_ || bluetoothIntent_) WriteRadios();
+        else {
+            if (surface_.Visible()) {
+                ReadRadios(true);
+                if (wifiWriteDone_) Scan(false);
+            }
+            wifiWriteDone_ = false;
+        }
+        return true;
+    case WM_CC_OUTPUT_SET:
+        outputWriteBusy_ = false;
+        if (!outputIntent_.empty()) WriteOutput();
+        else {
+            if (onChanged) onChanged();
+            if (surface_.Visible()) ReadAudio(true);
+        }
+        return true;
     case WM_CC_RADIOS: {
         std::unique_ptr<RadioRead> r(reinterpret_cast<RadioRead*>(l));
+        radioBusy_ = false;
+        if (r->gen != radioGen_ || radioWriteBusy_) {
+            if (radioPending_ && !radioWriteBusy_) ReadRadios(radioDevices_);
+            return true;
+        }
         float before = Size().height;
         radios_ = r->radios;
         radiosRead_ = true;
@@ -1134,15 +1209,21 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             devices_ = std::move(r->devices);
             devicesRead_ = true;
         }
-        if (r->brightness != -3 && dragging_ != L"bright" && !brightBusy_)
-            brightness_ = r->brightness;
+        if (r->brightness != -3) {
+            brightRead_ = true;
+            if (dragging_ != L"bright" && !brightBusy_) brightness_ = r->brightness;
+        }
         if (Size().height != before && surface_.Visible())
             Place();
         surface_.Invalidate();
+        if (radioPending_ && !radioWriteBusy_) ReadRadios(radioDevices_);
         return true;
     }
     case WM_CC_AUDIO: {
         std::unique_ptr<AudioRead> r(reinterpret_cast<AudioRead*>(l));
+        audioBusy_ = false;
+        if (audioPending_ && !outputWriteBusy_) ReadAudio(audioIcons_);
+        if (r->gen != audioGen_ || outputWriteBusy_ || !surface_.Visible()) return true;
         if (!dragging_.empty() && dragging_ != L"slider")
             return true; // an app's slider is held: keep what it shows
         float before = Size().height;
@@ -1161,11 +1242,6 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         outputs_ = std::move(r->outputs);
         apps_ = std::move(r->apps);
         audioRead_ = true;
-        if (w == 1) {
-            // A new default device: its volume is the sound slider's now.
-            if (onChanged)
-                onChanged();
-        }
         if (missing)
             ReadAudio(true);
         if (Size().height != before && surface_.Visible())
@@ -1208,12 +1284,15 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     case WM_WIFI_LIST: {
         std::unique_ptr<std::vector<WifiNetwork>> list(reinterpret_cast<std::vector<WifiNetwork>*>(l));
         unsigned gen = unsigned(w);
-        if (gen > acceptedGen_) {
+        scanBusy_ = false;
+        bool again = scanPending_;
+        if (again && surface_.Visible()) Scan(scanRescan_);
+        if (gen == scanGen_ && gen > acceptedGen_ && surface_.Visible()) {
             acceptedGen_ = gen;
             float before = Size().height;
             networks_ = std::move(*list);
             scanned_ = true;
-            scanning_ = gen < scanGen_;
+            scanning_ = again;
             if (Size().height != before && surface_.Visible())
                 Place();
             surface_.Invalidate();

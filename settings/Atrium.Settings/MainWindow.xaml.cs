@@ -86,6 +86,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        RootGrid.Loaded += (_, _) => ContinuousCorners.Install(RootGrid);
         ExtendsContentIntoTitleBar = true;
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         SetTitleBar(AppTitleBar);
@@ -120,6 +121,9 @@ public sealed partial class MainWindow : Window
             StopDesignAnimations();
             _renderWorker?.Stop();
             _swatchWorker?.Stop();
+            _fixedSwatchWorker?.Stop();
+            _photoThawTimer?.Stop();
+            ++_photoSelection;
             StopTiles();
         };
 
@@ -181,6 +185,7 @@ public sealed partial class MainWindow : Window
         }
         if (_mains[index] == MainNotify) ShowNotifyPreview(true);
         PageTitle.Text = PageTitles[index];
+        ContinuousCorners.Install(_mains[index]);
         HeroBlock.Visibility = index < 3 ? Visibility.Visible : Visibility.Collapsed;
         LoupeToggle.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
         Loupe.Visibility = index == 0 && LoupeSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
@@ -951,6 +956,7 @@ public sealed partial class MainWindow : Window
             {
                 var dialog = new ContentDialog
                 {
+                    Style = (Style)Application.Current.Resources["AtriumDialogStyle"],
                     XamlRoot = Content.XamlRoot,
                     Title = "保存修改？",
                     Content = "未保存的修改在关闭后会被撤销。",

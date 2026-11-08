@@ -41,7 +41,7 @@
 | `widgetBackdrop` | string | `desktop` / `wallpaper` | `desktop` | 小组件玻璃的背景：实时抓取桌面窗口，或直接读取壁纸图片（省电）；都不含上层窗口（D38） |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37） |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |
-| `startOnLogin` | bool | | true | 当前用户开机自启；与本次启动或关闭任务栏独立，保存时同步 Windows 开机项 |
+| `startOnLogin` | bool | | true | 当前用户开机自启；仅在正式安装归属变化或用户切换此值时写 Windows 开机项；开发构建不修改该项 |
 | `pins` | array | | 见下 | 固定的应用，按顺序显示 |
 
 `pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空", "multipleWindows": false}`。`multipleWindows` 可省略，浏览器与 Windows 文件管理器默认允许新窗口，聊天、音乐及其他应用默认打开已有页面；中键与“打开新窗口”遵循此设置。浏览器仅按常用程序文件名识别（Chrome、Edge、Firefox、Brave、Opera、Vivaldi、Chromium），不扫描协议注册或按显示名推断。主窗口关闭到后台时，通过应用自己的托盘入口恢复，不强制显示隐藏窗口。识别同一应用时 `aumid` 优先，其次匹配启动器与实际程序；多个固定项共用的程序路径不作模糊归组。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。
@@ -51,18 +51,22 @@
 ## 管道
 
 - 名称：`\\.\pipe\Atrium.Core.<会话 ID>`；消息模式；拒绝远程客户端；Core 以 `FILE_FLAG_FIRST_PIPE_INSTANCE` 创建，其他进程无法预先占用名称。
-- Settings 连接后用 `GetNamedPipeServerProcessId` 核对对端进程是 `Atrium`。管道名称沿用内部标识 `Atrium.Core`，不受可执行文件改名影响。
+- Settings 连接后用 `GetNamedPipeServerProcessId` 核对对端的完整可执行路径，必须对应本分发目录的 Atrium.exe。不同安装位置不共用设置连接；另一实例已运行时明确提示，仍不支持两套任务栏并行。管道名称沿用内部标识 Atrium.Core。
 - 同一时间只服务一个客户端。每条请求是一个 UTF-8 JSON 消息，对应一条回复。
 
 | 请求 | 回复 | 行为 |
 | --- | --- | --- |
 | `{"op":"get"}` | `{"op":"state","protocol":1,"saved":{…},"current":{…},"path":"…"}` | 已保存值与当前生效值（可能含未保存预览） |
 | `{"op":"preview","settings":{…}}` | `{"op":"ok"}` | 只改内存，立即重绘；可只发部分键 |
-| `{"op":"commit","settings":{…}}` | `{"op":"ok"}` 或 `{"op":"error","message":…}` | 写文件成功后才更新已保存值 |
+| `{"op":"commit","settings":{…}}` | `{"op":"ok","warning":…}`（warning 可省）或 `{"op":"error","message":…}` | 写文件成功才更新 saved/current；文件已保存但自启修改失败时仍返回 ok，另给 warning，界面接受保存快照并显示警告 |
 | `{"op":"cancel"}` | `{"op":"ok"}` | 恢复到已保存值 |
 | `{"op":"add-widget","kind":"clock","size":"small"}` | `{"op":"ok"}` 或 `{"op":"error","message":…}` | 添加小组件并保存布局；不改变设置预览租约 |
 
 客户端断开时若当前值与已保存值不同，Core 自动撤销预览（预览租约）。Settings 端拖动滑块时同一时间只有一个预览请求在途，返回后再发送最新状态，不积压。
+
+短请求自进入客户端起有 5 秒总期限，包含等待信号量、写入、刷新和读取。超时会取消本连接、释放排队请求；窗口关闭也取消在途操作。连接中断后的提交不会自动退回离线写入或当作成功；重新连接并读取 state 后核对保存结果。回复上限为 1 MiB。
+
+向 UI 发送 add-widget 内部消息前，把名称解析成 WidgetKind / WidgetSize 两个值类型；SendMessageTimeout 超时后不留下局部字符串指针。
 
 Core 未运行时，Settings 直接读写设置文件，Core 下次启动生效。
 
@@ -72,4 +76,6 @@ Core 未运行时，Settings 直接读写设置文件，Core 下次启动生效�
 | --- | --- |
 | （无） | 启动；若已在运行，则打开设置窗口 |
 | `--exit` | 请正在运行的实例退出，最多等 10 秒（安装、升级用） |
+| `--development` / development.txt | 显式开发身份：不注册正式卸载项、快捷方式或 Windows 自启。本地 CMake / dotnet 构建默认也是开发身份；tools/build.ps1 -Development 输出至 dist/Development/Atrium，正式打包显式关闭开发编译标记 |
+| `--ready-event <name>` | 更新启动握手；核心在 UI 消息循环和管道就绪后确认，设置中心在窗口加载后确认；更新保持核心运行时，设置中心还必须成功读取对应核心的 state |
 | `--debug-capturable` | 仅开发：不排除捕获并冻结背景，用于截取真实画面 |

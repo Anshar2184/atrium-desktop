@@ -43,7 +43,7 @@ public sealed partial class MainWindow
         _readout[0].Value.Text = $"{s.Height:0} px";
         _readout[0].Note.Text = $"图标 {s.IconSize:0} px";
         _readout[1].Value.Text = $"{r:0} px";
-        _readout[1].Note.Text = s.CornerRadius > r ? $"设为 {s.CornerRadius:0}，不超过高度的一半" : capsule ? "两端为半圆" : "连续曲率圆角（G3）";
+        _readout[1].Note.Text = s.CornerRadius > r ? $"设为 {s.CornerRadius:0}，不超过高度的一半" : capsule ? "G3 连续胶囊轮廓" : "G3 连续圆角";
         _readout[2].Value.Text = s.AutoWidth ? "自动" : $"{s.Width:0} px";
         _readout[2].Note.Text = s.AutoWidth ? $"最宽 {s.Width:0} px" : "固定宽度";
         _readout[3].Value.Text = capsule ? "胶囊形" : r < 1 ? "直角" : "圆角矩形";
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
 
     private void ShowNotifyPreview(bool animate)
     {
-        if (NotifyStage.Background is not ImageBrush) NotifyStage.Background = PhotoBrush();
+        if (ContinuousCorners.Original(NotifyStage) is not ImageBrush) NotifyStage.Background = PhotoBrush();
         var s = _current;
         double radius = Math.Min(Math.Clamp(s.CornerRadius, 8, Math.Max(8, s.Height / 2)), CardH / 2);
         double W = NotifyStage.ActualWidth, H = NotifyStage.ActualHeight;
@@ -310,7 +310,7 @@ public sealed partial class MainWindow
         double stageW = WidgetStage.ActualWidth > 0 ? WidgetStage.ActualWidth : 760;
         WidgetStage.Height = Math.Clamp(Math.Round(stageW * H / W), 220, 560);
         double k = stageW / W, kh = WidgetStage.Height / H;
-        if (WidgetStage.Background is not ImageBrush) WidgetStage.Background = PhotoBrush();
+        if (ContinuousCorners.Original(WidgetStage) is not ImageBrush) WidgetStage.Background = PhotoBrush();
 
         // The tiles where the core puts them, then the bar at the bottom for scale; all glass.
         var tiles = new List<GlassTile>();
@@ -331,9 +331,13 @@ public sealed partial class MainWindow
         var bar = new GlassTile((stageW - barW) / 2, WidgetStage.Height - barH - Math.Max(2, _current.Margin * kh), barW, barH, barH / 2);
         int shown = tiles.Count;
         double stageH = WidgetStage.Height;
+        int photoGeneration = Photo.Generation;
         PostTiles(WidgetMap, stageW, stageH, Math.Min(k, kh), tiles, bar, frame =>
         {
             frame.Apply(WidgetStage);
+            // Match the bitmap's completed viewport during subsequent resizes.
+            WidgetMap.Width = stageW;
+            WidgetMap.Height = stageH;
             WidgetMap.Clip = new RectangleGeometry { Rect = new Rect(0, 0, stageW, stageH) };
             while (_mapFaces.Count > tiles.Count)
             {
@@ -349,7 +353,10 @@ public sealed partial class MainWindow
                 bool added = i == _mapFaces.Count;
                 var face = added ? new Viewbox { Stretch = Stretch.Fill } : _mapFaces[i].View;
                 if (added || _mapFaces[i].Kind != kind || _mapFaces[i].Size != size || _mapFaces[i].Dark != dark || _mapFaces[i].Stamp != stamp)
+                {
                     face.Child = WidgetFaces.Face(kind, size, dark, PhotoBrush());
+                    ContinuousCorners.Install(face);
+                }
                 if (added) { WidgetMap.Children.Insert(i, face); _mapFaces.Add((kind, size, dark, stamp, face)); }
                 else _mapFaces[i] = (kind, size, dark, stamp, face);
                 face.Width = t.W;
@@ -357,7 +364,7 @@ public sealed partial class MainWindow
                 Canvas.SetLeft(face, t.X);
                 Canvas.SetTop(face, t.Y);
             }
-            Ready("widgets");
+            Ready("widgets", photoGeneration);
         });
 
         WidgetMapCaption.Text = !_current.Widgets ? "桌面小组件已关闭"
