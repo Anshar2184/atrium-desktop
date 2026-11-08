@@ -53,7 +53,8 @@ internal sealed class BarSettings
     public bool WidgetsOnRight { get; set; }
     public string WidgetBackdrop { get; set; } = "desktop"; // desktop (captured live) | wallpaper (the files, least work)
     public bool StageManager { get; set; }             // the app in front on the stage, the others in a strip at the side
-    public bool StageOnRight { get; set; }             // the strip's side; left by default
+    public bool StageOnRight { get; set; }             // the strip's side; left by default (the widgets take the other side)
+    public bool StageAutoHide { get; set; }            // the strip only comes out while the pointer rests on its edge
     public bool HideTaskbar { get; set; }              // the system taskbar is hidden while Atrium runs
     public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
     public bool StartOnLogin { get; set; } = true;
@@ -125,6 +126,7 @@ internal sealed class BarSettings
             ["widgetBackdrop"] = WidgetBackdrop,
             ["stageManager"] = StageManager,
             ["stageOnRight"] = StageOnRight,
+            ["stageAutoHide"] = StageAutoHide,
             ["hideTaskbar"] = HideTaskbar,
             ["hideBanners"] = HideBanners,
             ["startOnLogin"] = StartOnLogin,
@@ -188,6 +190,7 @@ internal sealed class BarSettings
             : f.WidgetBackdrop;
         s.StageManager = Flag("stageManager", f.StageManager);
         s.StageOnRight = Flag("stageOnRight", f.StageOnRight);
+        s.StageAutoHide = Flag("stageAutoHide", f.StageAutoHide);
         s.HideTaskbar = Flag("hideTaskbar", f.HideTaskbar);
         s.HideBanners = Flag("hideBanners", f.HideBanners);
         s.StartOnLogin = Flag("startOnLogin", f.StartOnLogin);
@@ -219,6 +222,7 @@ internal sealed class BarSettings
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
+        StageAutoHide == o.StageAutoHide &&
         HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners &&
         StartOnLogin == o.StartOnLogin &&
         (Pins == o.Pins || (Pins != null && o.Pins != null && Pins.SequenceEqual(o.Pins)));

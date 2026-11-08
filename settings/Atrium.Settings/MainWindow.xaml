@@ -517,12 +517,19 @@
                             <StackPanel>
                                 <TextBlock Text="窗口" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="StageSwitch" Title="台前调度" SwitchName="台前调度" Toggled="OnStageToggled" Flat="True"
-                                                  Note="前面的应用留在屏幕中间，其他应用的窗口收进屏幕一侧，显示为实时缩略图。" />
+                                                  Note="前面的应用留在屏幕中间，其他应用的窗口斜立在屏幕一侧，各带阴影和应用图标。" />
                                 <StackPanel Style="{StaticResource FlatRowStyle}">
                                     <TextBlock Text="最近使用的应用" Style="{StaticResource RowTitleStyle}" />
                                     <local:SegmentTrack>
                                             <RadioButton x:Name="StageLeft" GroupName="stageside" Content="左侧" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
                                             <RadioButton x:Name="StageRight" GroupName="stageside" Content="右侧" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
+                                        </local:SegmentTrack>
+                                </StackPanel>
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="显示方式" Style="{StaticResource RowTitleStyle}" />
+                                    <local:SegmentTrack>
+                                            <RadioButton x:Name="StageAlways" GroupName="stagemode" Content="常驻" Tag="always" Style="{StaticResource SegmentStyle}" Checked="OnStageModeChecked" />
+                                            <RadioButton x:Name="StageAutoHide" GroupName="stagemode" Content="悬停弹出" Tag="hover" Style="{StaticResource SegmentStyle}" Checked="OnStageModeChecked" />
                                         </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>
@@ -538,7 +545,7 @@
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
                                     <TextBlock Text="指针移到屏幕边缘" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="窗口挡住卡片时，卡片浮到窗口上面。" Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
+                                    <TextBlock Text="卡片从边缘滑出，浮在窗口上面；指针离开后收回。" Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}" Spacing="2">
                                     <TextBlock Text="关闭或退出" Style="{StaticResource RowTitleStyle}" />

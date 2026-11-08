@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -118,6 +119,7 @@ public sealed partial class MainWindow : Window
             _downloadTimer?.Stop();
             _coreProcess?.Dispose();
             _widgetWatcher?.Dispose();
+            _settingsWatcher?.Dispose();
             StopDesignAnimations();
             _renderWorker?.Stop();
             _swatchWorker?.Stop();
@@ -539,6 +541,7 @@ public sealed partial class MainWindow : Window
         _current = current;
         _coreChanging = false;
         WatchCore();
+        WatchSettingsFile();
         ShowStatus(_client.Connected);
         LoadIntoControls();
         UpdateButtons();
@@ -639,6 +642,49 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---- Changes made elsewhere ----
+
+    // The core writes settings.json for changes made at the bar (its menu, the control centre):
+    // what changed there comes into the controls, the edits made here meanwhile stay.
+    private FileSystemWatcher? _settingsWatcher;
+    private int _settingsReload;
+
+    private void WatchSettingsFile()
+    {
+        string? dir = Path.GetDirectoryName(CoreClient.SettingsPath);
+        if (_settingsWatcher != null || dir == null || !Directory.Exists(dir)) return;
+        _settingsWatcher = new FileSystemWatcher(dir, "settings.json")
+        {
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size, EnableRaisingEvents = true,
+        };
+        FileSystemEventHandler changed = (_, _) => DispatcherQueue.TryEnqueue(ReloadExternal);
+        _settingsWatcher.Changed += changed;
+        _settingsWatcher.Created += changed;
+        _settingsWatcher.Renamed += (_, _) => DispatcherQueue.TryEnqueue(ReloadExternal);
+    }
+
+    private async void ReloadExternal()
+    {
+        int id = ++_settingsReload;
+        await Task.Delay(120); // one reload for a burst of writes
+        if (id != _settingsReload || _updatesClosed || !_client.Connected) return;
+        var (saved, _) = await _client.GetAsync();
+        if (id != _settingsReload || _updatesClosed) return;
+        var before = _saved.ToJson();
+        var after = saved.ToJson();
+        var changed = after.Select(kv => kv.Key).Where(k => !JsonNode.DeepEquals(before[k], after[k])).ToList();
+        if (changed.Count == 0) return;
+        var current = _current.ToJson();
+        foreach (var k in changed) current[k] = after[k]?.DeepClone();
+        _saved = saved;
+        _current = BarSettings.FromJson(current, _current);
+        LoadIntoControls();
+        UpdateButtons();
+        if (_page == 4) ShowWidgetMap();
+        if (_page == 5) ShowStagePreview(true);
+        if (!_current.SameAs(_saved)) SchedulePreview(); // the edits made here, over the new state
+    }
+
     // ---- Controls <-> settings ----
 
     private void LoadIntoControls()
@@ -663,6 +709,7 @@ public sealed partial class MainWindow : Window
         HideTaskbarSwitch.IsOn = _current.HideTaskbar;
         StageSwitch.IsOn = _current.StageManager;
         (_current.StageOnRight ? StageRight : StageLeft).IsChecked = true;
+        (_current.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
         (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
         HideBannersSwitch.IsOn = _current.HideBanners;
         StartupSwitch.IsOn = _current.StartOnLogin;
@@ -737,8 +784,26 @@ public sealed partial class MainWindow : Window
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         _current.WidgetsOnRight = tag == "right";
+        // With Stage Manager on, it keeps to the widgets' other side.
+        if (_current.StageManager) SetStageSide(!_current.WidgetsOnRight);
         ShowWidgetMap();
         Changed();
+    }
+
+    private void SetStageSide(bool right)
+    {
+        _current.StageOnRight = right;
+        _loading = true;
+        (right ? StageRight : StageLeft).IsChecked = true;
+        _loading = false;
+    }
+
+    private void SetWidgetSide(bool right)
+    {
+        _current.WidgetsOnRight = right;
+        _loading = true;
+        (right ? WidgetsRight : WidgetsLeft).IsChecked = true;
+        _loading = false;
     }
 
     private void OnAutoWidthToggled(object sender, RoutedEventArgs e)
@@ -802,6 +867,8 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.StageManager = StageSwitch.IsOn;
+        // The widgets go to the other side.
+        if (_current.StageManager) SetWidgetSide(!_current.StageOnRight);
         Changed();
         if (_page == 5) ShowStagePreview(true);
     }
@@ -810,9 +877,19 @@ public sealed partial class MainWindow : Window
     {
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         _current.StageOnRight = tag == "right";
+        if (_current.StageManager) SetWidgetSide(!_current.StageOnRight);
         Changed();
         if (_page == 5) ShowStagePreview(true);
     }
+
+    private void OnStageModeChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || sender is not RadioButton { Tag: string tag }) return;
+        _current.StageAutoHide = tag == "hover";
+        Changed();
+        if (_page == 5) ShowStagePreview(true);
+    }
+
 
     private void OnStartupToggled(object sender, RoutedEventArgs e)
     {

@@ -39,8 +39,9 @@
 | `widgets` | bool | | true | 桌面小组件；布局由 Core 存于 `widgets.json`（D35） |
 | `widgetsOnRight` | bool | | false | 小组件逻辑网格从右侧排布；切换时镜像现有列，不改写 `widgets.json` |
 | `widgetBackdrop` | string | `desktop` / `wallpaper` | `desktop` | 小组件玻璃的背景：实时抓取桌面窗口，或直接读取壁纸图片（省电）；都不含上层窗口（D38） |
-| `stageManager` | bool | | false | 台前调度：前台应用留在屏幕中间，其他应用的窗口最小化（不激活）并在屏幕一侧显示为实时缩略图；关闭或 Core 退出时全部恢复。Core 把收起的窗口记在 `%LOCALAPPDATA%\Atrium\stage.json`（窗口句柄、应用键与分组），异常退出后再次启动时接回仍处于最小化的窗口 |
-| `stageOnRight` | bool | | false | 台前调度的缩略图放在屏幕右侧；默认左侧 |
+| `stageManager` | bool | | false | 台前调度：前台应用留在屏幕中间，其他应用的窗口先在后台拍下画面，再最小化（不激活），画面斜立在屏幕一侧；打开时桌面小组件排到台前调度的另一侧（Core 从栏上打开时同时写入 `widgetsOnRight`）；关闭或 Core 退出时全部恢复。Core 把收起的窗口记在 `%LOCALAPPDATA%\Atrium\stage.json`（窗口句柄、应用键与分组），异常退出后再次启动时接回仍处于最小化的窗口 |
+| `stageOnRight` | bool | | false | 台前调度的窗口放在屏幕右侧；默认左侧 |
+| `stageAutoHide` | bool | | false | 悬停弹出：台前调度平时隐藏，指针碰到那一侧的屏幕边缘时才滑出；默认常驻（窗口挡住时让开） |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37） |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |
 | `startOnLogin` | bool | | true | 当前用户开机自启；仅在正式安装归属变化或用户切换此值时写 Windows 开机项；开发构建不修改该项 |
@@ -69,6 +70,8 @@
 短请求自进入客户端起有 5 秒总期限，包含等待信号量、写入、刷新和读取。超时会取消本连接、释放排队请求；窗口关闭也取消在途操作。连接中断后的提交不会自动退回离线写入或当作成功；重新连接并读取 state 后核对保存结果。回复上限为 1 MiB。
 
 向 UI 发送 add-widget 内部消息前，把名称解析成 WidgetKind / WidgetSize 两个值类型；SendMessageTimeout 超时后不留下局部字符串指针。
+
+Core 自己也会改设置（栏的右键菜单、控制中心里的开关，例如台前调度），改后同样写入设置文件。Settings 监视这个文件，变化后用 `get` 重新读取：已保存值里变了的键同步到界面，用户在 Settings 里尚未保存的其他修改保留，并重新发送预览。
 
 Core 未运行时，Settings 直接读写设置文件，Core 下次启动生效。
 

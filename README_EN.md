@@ -154,13 +154,14 @@ One glyph carries four states, and the bar stays quiet. Click the ring for the c
 
 ## Stage Manager
 
-After macOS's Stage Manager: the app you are using stays in the middle of the screen, and the others wait at one side as a column of live pictures.
+After macOS's Stage Manager: the app you are using stays in the middle of the screen, and the others wait at one side, their windows standing in a column at an angle, in perspective and with shadows.
 
-- **The front app stays.** Turned on, the app in front stays where it is and every other app's windows go to the left side of the screen (or the right), one glass card per app with its windows' live pictures; several windows of one app stack on one card.
+- **The front app stays.** Turned on, the app in front stays where it is and every other app's windows go to the left side of the screen (or the right). Each app's windows stand turned towards the middle of the screen with a soft shadow and the app's icon at the outer lower corner, with nothing behind them; several windows of one app stack one behind the other. The nearer the top or bottom of the screen, the more they lean, down at the top and up at the bottom, as if seen from the middle of the screen. Under the pointer they turn to face you and grow a little.
+- **Flown in, flown back.** When the stage changes, a window's picture flies from where it was into the strip; click a card and the picture flies back, the window appearing as it lands, instead of Windows' minimize animation.
 - **Click to swap, Shift to combine.** Click a card and it comes forward while the app that was there goes to the side. Shift-click adds it to the current set instead, and from then on the set goes and comes back together. Switching apps from the bar, with Alt+Tab or from a notification changes the stage too.
-- **Out of the windows' way.** When a window covers the side, the cards step aside; rest the pointer on the screen's edge and they come out over the window, and go again when it leaves. Desktop widgets make room for the strip.
-- **Smooth under load.** Cards glide, appear and leave on springs and can be interrupted. Calls into DWM run on a thread of their own, so the interface does not stall while Windows is animating windows.
-- **Always reversible.** Waiting windows are only minimized, in Windows' own state. Turning Stage Manager off or quitting Atrium brings them all back, and an Atrium that ended unexpectedly picks them up again when it starts. Turn it on and off from the control centre, the bar's context menu or the settings' Stage Manager page, which has a demo you can click.
+- **Always shown or on hover.** Always shown, the strip stays out and steps aside when a window covers it; on hover, it stays hidden. Either way, push the pointer to the screen's edge and the windows slide out one after another over everything else, and go back once the pointer leaves. While Stage Manager is on, desktop widgets keep to the other side.
+- **Smooth under load.** Cards glide, appear and leave on springs and can be interrupted. Windows are pictured on a background thread just before they go, so the interface does not stall while Windows is animating windows.
+- **Always reversible.** Waiting windows are only minimized, in Windows' own state. Turning Stage Manager off or quitting Atrium brings them all back, and an Atrium that ended unexpectedly picks them up again when it starts. Turn it on and off from the control centre, the bar's context menu or the settings' Stage Manager page, which stay in step; the page also has a demo you can click.
 
 <br>
 

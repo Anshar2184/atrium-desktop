@@ -4,12 +4,14 @@
 #include "log.h"
 #include "settings.h"
 
+#include <dwmapi.h>
 #include <windowsx.h>
 
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <thread>
 
@@ -19,20 +21,39 @@ namespace atrium {
 
 namespace {
 
-// DIP. A card: the pictures, then the app's icon and name; cards one above the other, kEdge from
-// the screen's edge, in the middle of what the bar leaves of the screen's height.
-constexpr float kEdge = 16, kCardW = 168, kPad = 8, kImageH = 100, kTitleH = 26, kCardGap = 14, kCardR = 18;
-constexpr float kCardH = kPad + kImageH + kTitleH + 4;
-constexpr float kStackOff = 5;   // each window behind the front one shows this much at its top and right
-constexpr size_t kStack = 3;     // windows shown per app
-constexpr float kBarRoom = 90;   // the bar floats over the bottom of the work area
+// DIP. Each set of windows stands in a box kBoxW x kBoxH, kEdge from the screen's edge, the boxes one
+// above the other in the middle of what the bar leaves of the screen's height. The windows turn
+// kTilt degrees about their upright axis, the side towards the screen's middle away from the eye
+// (a viewer kDepth in front of the screen); a pointer over them turns them most of the way back.
+// The eye is level with a point kKeystone of the way from a box to the strip's middle: the boxes
+// above it lean down towards the middle of the screen, those below lean up, the more so the
+// further they are.
+constexpr float kEdge = 22, kBoxW = 172, kBoxH = 112, kSlotGap = 36, kVPad = 24, kStripW = kEdge + kBoxW + 44;
+constexpr float kSlot = kBoxH + kSlotGap;
+constexpr float kTilt = 22, kHoverTilt = 0.7f, kDepth = 340, kComeTilt = 34, kKeystone = 0.45f;
+constexpr size_t kStack = 3;                                 // windows shown per set
+constexpr float kStackDx = 9, kStackDy = 8, kStackZ = 26;  // each window behind the front one: inwards, up, away
+constexpr float kShadowDrop = 6, kShadowAlpha = 0.5f;
+constexpr float kIcon = 34;
+constexpr float kPictureScale = 1.25f; // pictures are taken this much larger than the box (the pointer enlarges them)
+constexpr float kPictureRadius = 8;
+constexpr float kBarRoom = 90;         // the bar floats over the bottom of the work area
 constexpr int kMaxEntries = 6;
-constexpr UINT_PTR kWatchTimer = 0x5C01, kFadeTimer = 0x5C02, kRaiseTimer = 0x5C03, kHideTimer = 0x5C04;
-constexpr UINT kWatchMs = 120, kFadeMs = 160, kRaiseMs = 220;
-constexpr UINT WM_STAGE_THUMB = WM_APP + 0x5C; // a picture's source size is known
-constexpr ULONGLONG kEdgeMs = 140, kPeekLeaveMs = 450, kPendingMs = 1200, kSettleMs = 2000;
-
-D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
+constexpr UINT_PTR kWatchTimer = 0x5C01, kDownTimer = 0x5C02, kRaiseTimer = 0x5C03, kHideTimer = 0x5C04, kFlightTimer = 0x5C05;
+constexpr UINT kWatchMs = 30, kRaiseMs = 220, kDownMs = 700;
+constexpr UINT WM_STAGE_PICTURE = WM_APP + 0x5C; // a window's picture was taken
+// The pointer at the screen's edge for kEdgeMs brings the strip out; away from it for kPeekLeaveMs
+// sends it back. Whether a window covers the strip's place is looked at every kCoverMs.
+constexpr ULONGLONG kEdgeMs = 40, kPeekLeaveMs = 350, kCoverMs = 150, kPendingMs = 1200, kSettleMs = 2000;
+constexpr double kRevealInMs = 380, kRevealOutMs = 210, kRevealStagger = 32;
+// A picture flies between a window's place and the strip in kFlightMs; flying back, the window comes
+// up once it has landed, under it: the picture stays kFlightHoldMs (the window draws itself), then
+// fades over kFlightFadeMs. The flight layer stays (letting clicks through) kFlightIdleMs after.
+constexpr double kFlightMs = 460, kFlightHoldMs = 140, kFlightFadeMs = 160, kFlightStepMs = 34;
+constexpr UINT kFlightIdleMs = 60000;
+// A window's picture taken this recently (the pointer went to the strip) is used as it is: the window
+// goes at once.
+constexpr ULONGLONG kFreshMs = 4000;
 
 std::wstring StatePath()
 {
@@ -48,25 +69,68 @@ bool OnMonitor(HWND h, HMONITOR m) { return MonitorFromWindow(h, MONITOR_DEFAULT
 
 bool Has(const std::vector<std::wstring>& set, const std::wstring& key) { return std::find(set.begin(), set.end(), key) != set.end(); }
 
+bool AppsDark()
+{
+    DWORD light = 1, size = sizeof(light);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD,
+                 nullptr, &light, &size);
+    return light == 0;
+}
+
+// Turns what is drawn about the upright axis through (cx, cy) by `angle` degrees, `z` towards the eye,
+// seen from `depth` in front of (ox, oy); px.
+D2D1::Matrix4x4F Tilt(float cx, float cy, float ox, float oy, float angle, float depth, float z)
+{
+    using M = D2D1::Matrix4x4F;
+    return M::Translation(-cx, -cy, 0) * M::RotationY(angle) * M::Translation(cx - ox, cy - oy, z) * M::PerspectiveProjection(depth) *
+           M::Translation(ox, oy, 0);
+}
+
+// A window's own minimize and restore animations: off while Stage Manager flies its picture.
+void Transitions(HWND h, bool on)
+{
+    BOOL off = on ? FALSE : TRUE;
+    DwmSetWindowAttribute(h, DWMWA_TRANSITIONS_FORCEDISABLED, &off, sizeof(off));
+}
+
+float EaseInOut(float t) { return t < 0.5f ? 4 * t * t * t : 1 - std::pow(-2 * t + 2, 3.f) / 2; }
+
+float Lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+D2D1_POINT_2F Project(const D2D1_MATRIX_4X4_F& m, float x, float y)
+{
+    const float X = x * m._11 + y * m._21 + m._41, Y = x * m._12 + y * m._22 + m._42, W = x * m._14 + y * m._24 + m._44;
+    return D2D1::Point2F(X / W, Y / W);
+}
+
+float EaseOut3(float t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
+
+constexpr motion::Spring kGlide{0.42f, 0.86f};
+constexpr motion::Spring kFadeSpring{0.30f, 1.f};
+
 } // namespace
 
 StageManager::StageManager(HINSTANCE instance, TaskModel& tasks)
-    : tasks_(tasks), surface_(instance, L"Atrium Stage Manager", false), thumbs_(surface_.Hwnd(), WM_STAGE_THUMB)
+    : tasks_(tasks), surface_(instance, L"Atrium Stage Manager", false), flight_(instance, L"Atrium Stage Flight", false, 0),
+      snapshots_(surface_.Hwnd(), WM_STAGE_PICTURE)
 {
+    surface_.SetGlassless(true);
+    flight_.SetGlassless(true);
+    flight_.paint = [this](Canvas& c) { PaintFlights(c); };
+    flight_.message = [this](UINT m, WPARAM w, LPARAM, LRESULT&) {
+        if (m != WM_TIMER || w != kFlightTimer)
+            return false;
+        KillTimer(flight_.Hwnd(), kFlightTimer);
+        if (flights_.empty())
+            flight_.Hide(false); // idle for a while: its buffers go
+        return true;
+    };
     surface_.paint = [this](Canvas& c) { Paint(c); };
     surface_.message = [this](UINT m, WPARAM w, LPARAM l, LRESULT& r) { return Message(m, w, l, r); };
-    surface_.onReady = [this] {
-        // The glass is out: the pictures fade in over it.
-        fadeStart_ = ClockMs();
-        SetTimer(surface_.Hwnd(), kFadeTimer, 15, nullptr);
-    };
-    surface_.SetRadius(kCardR);
     if (FAILED(CoCreateInstance(CLSID_VirtualDesktopManager, nullptr, CLSCTX_ALL, IID_PPV_ARGS(desktops_.put()))))
         desktops_ = nullptr;
     Load(); // windows a previous run put away (it may not have ended well)
 }
-
-StageManager::~StageManager() { DropThumbs(); }
 
 // ---- the stage ---------------------------------------------------------------------------------
 
@@ -80,7 +144,8 @@ void StageManager::SetEnabled(bool on)
         stage_.clear();
         pending_.clear();
         SetTimer(surface_.Hwnd(), kWatchTimer, kWatchMs, nullptr);
-        Log(L"stage: on (%s), %zu window(s) waiting from before", onRight_ ? L"right" : L"left", parked_.size());
+        Log(L"stage: on (%s, %s), %zu window(s) waiting from before", onRight_ ? L"right" : L"left", autoHide_ ? L"auto-hidden" : L"always shown",
+            parked_.size());
         Update(tasks_.Snapshot(true));
     } else {
         KillTimer(surface_.Hwnd(), kWatchTimer);
@@ -94,8 +159,6 @@ void StageManager::SetEnabled(bool on)
         }
         Log(L"stage: off, %zu window(s) back", n);
     }
-    if (onReserve)
-        onReserve();
 }
 
 void StageManager::SetOnRight(bool onRight)
@@ -103,11 +166,21 @@ void StageManager::SetOnRight(bool onRight)
     if (onRight == onRight_)
         return;
     onRight_ = onRight;
-    if (surface_.Visible())
-        Hide(); // it comes out again on the other side
+    // It comes out again on the other side.
+    shown_ = peek_ = false;
+    surface_.Hide(false);
     Rebuild();
-    if (onReserve)
-        onReserve();
+}
+
+void StageManager::SetAutoHide(bool autoHide)
+{
+    if (autoHide == autoHide_)
+        return;
+    autoHide_ = autoHide;
+    peek_ = false;
+    Log(L"stage: %s", autoHide ? L"auto-hidden" : L"always shown");
+    if (enabled_)
+        Watch();
 }
 
 void StageManager::SetMonitor(HMONITOR monitor)
@@ -118,11 +191,10 @@ void StageManager::SetMonitor(HMONITOR monitor)
     Rebuild();
 }
 
-float StageManager::Reserve() const { return enabled_ ? kEdge + kCardW + 8 : 0; }
-
 void StageManager::Update(const std::vector<TaskItem>& items)
 {
     items_ = items;
+    coveredAt_ = 0; // windows moved: look again
     if (!enabled_)
         return;
     Prune();
@@ -154,9 +226,9 @@ StageManager::Set StageManager::SetOf(const std::wstring& key) const
 // `keys` take the stage (or join it: add). Their windows that were put away come back, `front` in
 // front; then every other app's windows on this screen go to the strip: the apps that were on the
 // stage as one set, at the top.
-void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate)
+void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly)
 {
-    Unpark(keys, front, activate);
+    Unpark(keys, front, activate, fly);
     if (!add) {
         Set left; // the stage's apps that had windows up
         std::vector<Set> others;
@@ -166,7 +238,7 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate)
             bool any = false;
             // Least recent first: the most recent window gets the latest number and shows in front.
             for (auto h = t.windows.rbegin(); h != t.windows.rend(); ++h)
-                if (IsWindowVisible(*h) && !IsIconic(*h) && OnMonitor(*h, monitor_)) {
+                if (!parked_.contains(*h) && IsWindowVisible(*h) && !IsIconic(*h) && OnMonitor(*h, monitor_)) {
                     Park(*h, t.key);
                     any = true;
                 }
@@ -177,6 +249,20 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate)
             else
                 others.push_back(Set{t.key});
         }
+        // The most recently used first: the windows nearest the top of the screen's stack.
+        std::unordered_map<HWND, int> depth;
+        int n = 0;
+        for (HWND h = GetTopWindow(nullptr); h; h = GetWindow(h, GW_HWNDNEXT))
+            depth[h] = n++;
+        auto nearest = [&](const Set& set) {
+            int best = INT_MAX;
+            for (const auto& [h, p] : parked_)
+                if (Has(set, p.key))
+                    if (auto d = depth.find(h); d != depth.end())
+                        best = std::min(best, d->second);
+            return best;
+        };
+        std::stable_sort(others.begin(), others.end(), [&](const Set& a, const Set& b) { return nearest(a) < nearest(b); });
         if (!left.empty())
             others.insert(others.begin(), left);
         // An app is in one set only: the newest.
@@ -202,24 +288,115 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate)
     Save();
 }
 
+// The window's picture is taken first (a minimized window has none); it goes down once it has, or
+// after kDownMs whatever happened.
 void StageManager::Park(HWND window, const std::wstring& key)
 {
     Parked p;
     p.key = key;
     p.seq = ++seq_;
     p.since = GetTickCount64();
-    // The picture without the invisible resize borders: measured now, while the window is up.
-    RECT win{}, frame{};
-    if (GetWindowRect(window, &win) && SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) &&
-        frame.right > frame.left && frame.bottom > frame.top)
-        p.source = RECT{frame.left - win.left, frame.top - win.top, frame.right - win.left, frame.bottom - win.top};
+    p.down = false;
+    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &p.frame, sizeof(p.frame))))
+        GetWindowRect(window, &p.frame);
     parked_[window] = p;
+    Transitions(window, false); // it goes at once: its picture flies instead
+    if (auto fresh = pictures_.find(window);
+        fresh != pictures_.end() && fresh->second.picture && fresh->second.picture->ok && GetTickCount64() - fresh->second.taken < kFreshMs) {
+        PutDown(window, true);
+        return;
+    }
+    const float s = PopupScale(WorkArea());
+    snapshots_.Request(window, int(kBoxW * kPictureScale * s), int(kBoxH * kPictureScale * s), kPictureRadius * kPictureScale * s);
+    SetTimer(surface_.Hwnd(), kDownTimer, kDownMs, nullptr);
+}
+
+// The flight layer over the whole screen: kept up between flights (its first frame is slow), and
+// letting clicks through while nothing flies.
+void StageManager::Launch()
+{
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    KillTimer(flight_.Hwnd(), kFlightTimer);
+    SetWindowRgn(flight_.Hwnd(), nullptr, FALSE);
+    if (!flight_.Visible())
+        flight_.Show(mi.rcMonitor, false, POINT{mi.rcMonitor.left, mi.rcMonitor.top}, false);
+    else
+        flight_.Move(mi.rcMonitor);
+    flight_.Invalidate();
+}
+
+// The stage's windows are pictured while the pointer is on the strip: picked there, they go at once.
+void StageManager::Foresee()
+{
+    const ULONGLONG now = GetTickCount64();
+    const float s = PopupScale(WorkArea());
+    for (const TaskItem& t : items_) {
+        if (!Has(stage_, t.key))
+            continue;
+        for (HWND h : t.windows) {
+            if (parked_.contains(h) || !IsWindowVisible(h) || IsIconic(h) || !OnMonitor(h, monitor_))
+                continue;
+            if (auto p = pictures_.find(h); p != pictures_.end() && now - p->second.taken < kFreshMs / 2)
+                continue;
+            pictures_[h].taken = now; // asked for: not again meanwhile
+            snapshots_.Request(h, int(kBoxW * kPictureScale * s), int(kBoxH * kPictureScale * s), kPictureRadius * kPictureScale * s);
+        }
+    }
+}
+
+void StageManager::PutDown(HWND window, bool fly)
+{
+    auto it = parked_.find(window);
+    if (it == parked_.end() || it->second.down)
+        return;
+    it->second.down = true;
+    it->second.since = GetTickCount64();
+    std::wstring key;
+    auto picture = fly ? PictureOf(window, it->second.key, key) : nullptr;
+    if (!picture || !picture->ok || key.rfind(L"stage|w|", 0) != 0) {
+        Transitions(window, true); // no picture to fly: Windows' own animation
+        ShowWindowAsync(window, SW_SHOWMINNOACTIVE);
+        return;
+    }
     ShowWindowAsync(window, SW_SHOWMINNOACTIVE);
+    std::erase_if(flights_, [&](const Flight& f) { return f.window == window; });
+    Flight f;
+    f.window = window;
+    f.picture = picture;
+    f.key = key;
+    f.toStrip = true;
+    f.place = PlacePose(it->second.frame);
+    flights_.push_back(std::move(f));
+    Launch();
+    surface_.Invalidate();
+}
+
+void StageManager::PictureTaken()
+{
+    for (WindowSnapshots::Result& r : snapshots_.Take()) {
+        Log(L"stage: picture of %p %s", r.window, r.picture.ok ? (std::to_wstring(r.picture.width) + L"x" + std::to_wstring(r.picture.height)).c_str() : L"(none)");
+        if (r.picture.ok) {
+            Picture& p = pictures_[r.window];
+            if (p.gen) {
+                std::wstring old = L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(r.window)) + L"|" + std::to_wstring(p.gen);
+                surface_.ForgetImage(old);
+                surface_.ForgetImage(old + L"|s");
+            }
+            p.picture = std::make_shared<const WindowPicture>(std::move(r.picture));
+            p.gen = ++pictureGen_;
+            p.taken = GetTickCount64();
+            PutDown(r.window, true);
+        } else {
+            PutDown(r.window, false);
+        }
+    }
+    surface_.Invalidate();
 }
 
 // The windows of `keys` that were put away come back, least recent first; `front` (by default the
 // most recent of them) last, and in front, activated if asked (a pick in the strip).
-void StageManager::Unpark(const Set& keys, HWND front, bool activate)
+void StageManager::Unpark(const Set& keys, HWND front, bool activate, const std::unordered_map<HWND, Pose>* fly)
 {
     std::vector<std::pair<uint64_t, HWND>> mine;
     for (const auto& [h, p] : parked_)
@@ -228,15 +405,45 @@ void StageManager::Unpark(const Set& keys, HWND front, bool activate)
     std::sort(mine.begin(), mine.end());
     if (!front && !mine.empty())
         front = mine.back().second;
+    // Picked in the strip: the pictures fly back to the windows' places, the windows come up as they land.
+    bool flying = false;
+    for (const auto& [seq, h] : mine) {
+        const Pose* from = nullptr;
+        if (fly)
+            if (auto it = fly->find(h); it != fly->end())
+                from = &it->second;
+        std::wstring key;
+        auto picture = from ? PictureOf(h, parked_[h].key, key) : nullptr;
+        std::erase_if(flights_, [&](const Flight& f) { return f.window == h; });
+        if (!picture || !IsWindow(h) || key.rfind(L"stage|w|", 0) != 0)
+            continue;
+        Flight f;
+        f.window = h;
+        f.picture = picture;
+        f.key = key;
+        f.toStrip = false;
+        f.from = *from;
+        f.place = PlacePose(parked_[h].frame);
+        f.activate = activate && h == front;
+        flights_.push_back(std::move(f));
+        flying = true;
+    }
+    if (flying)
+        Launch();
     for (const auto& [seq, h] : mine) {
         parked_.erase(h);
+        if (Flying(h))
+            continue; // up when its picture lands
+        Transitions(h, true);
         if (h != front && IsWindow(h))
             ShowQuietly(h);
     }
     if (!front)
         return;
     parked_.erase(front);
-    if (activate) {
+    if (Flying(front)) {
+        // Up (and in front) when its picture lands.
+    } else if (activate) {
         // Restoring waits for the app to answer (and for its animation): not on the UI thread,
         // whose strip is gliding meanwhile. The click on the strip lets this process hand on the
         // foreground from any of its threads.
@@ -255,12 +462,33 @@ void StageManager::Pick(const Set& keys, bool add)
     pending_ = keys;
     pendingUntil_ = GetTickCount64() + kPendingMs;
     hover_ = pressed_ = -1;
-    Stage(keys, add, nullptr, true);
+    // Where the card's pictures are now: they fly from there.
+    std::unordered_map<HWND, Pose> from;
+    for (const Entry& e : entries_)
+        if (e.keys == keys)
+            for (HWND h : e.windows) {
+                Pose pose;
+                if (StripPose(h, pose))
+                    from[h] = pose;
+            }
+    pendingUntil_ += ULONGLONG(kFlightMs);
+    Stage(keys, add, nullptr, true, &from);
     Rebuild();
 }
 
 void StageManager::RestoreAll()
 {
+    // Pictures on their way back: their windows come up now.
+    for (Flight& f : flights_)
+        if (!f.toStrip && !f.restored && IsWindow(f.window)) {
+            Transitions(f.window, true);
+            ShowQuietly(f.window);
+        }
+    flights_.clear();
+    flight_.Hide(false);
+    for (const auto& [h, p] : parked_)
+        if (IsWindow(h))
+            Transitions(h, true);
     std::vector<std::pair<uint64_t, HWND>> all;
     for (const auto& [h, p] : parked_)
         all.emplace_back(p.seq, h);
@@ -272,6 +500,7 @@ void StageManager::RestoreAll()
     recent_.clear();
     stage_.clear();
     pending_.clear();
+    pictures_.clear();
     Save();
     Rebuild();
 }
@@ -284,14 +513,27 @@ void StageManager::Prune()
         HWND h = kv.first;
         if (!IsWindow(h) || !IsWindowVisible(h))
             return true;
-        // Minimizing is asynchronous: a window just put away may not be down yet.
-        return !IsIconic(h) && now - kv.second.since > kSettleMs;
+        // Minimizing is asynchronous (and waits for the picture): a window just put away may not be down yet.
+        if (kv.second.down && !IsIconic(h) && now - kv.second.since > kSettleMs) {
+            Transitions(h, true); // came back some other way
+            return true;
+        }
+        return false;
     });
     for (Set& set : recent_)
         std::erase_if(set, [&](const std::wstring& k) {
             return std::none_of(parked_.begin(), parked_.end(), [&](const auto& kv) { return kv.second.key == k; });
         });
     std::erase_if(recent_, [](const Set& set) { return set.empty(); });
+    // Pictures of windows no longer waiting are old by the time they wait again.
+    std::erase_if(pictures_, [&](const auto& kv) {
+        if (parked_.contains(kv.first) || (IsWindow(kv.first) && now - kv.second.taken < kFreshMs))
+            return false;
+        std::wstring key = L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(kv.first)) + L"|" + std::to_wstring(kv.second.gen);
+        surface_.ForgetImage(key);
+        surface_.ForgetImage(key + L"|s");
+        return true;
+    });
     Save();
 }
 
@@ -384,38 +626,8 @@ RECT StageManager::WorkArea() const
 int StageManager::Capacity() const
 {
     RECT wa = WorkArea();
-    float avail = float(wa.bottom - wa.top) / PopupScale(wa) - 2 * kEdge - kBarRoom;
-    return std::clamp(int((avail + kCardGap) / (kCardH + kCardGap)), 1, kMaxEntries);
-}
-
-void StageManager::DropThumbs(Entry& e)
-{
-    for (uint64_t id : e.thumbs)
-        thumbs_.Unregister(id);
-    e.thumbs.clear();
-    e.shown.clear();
-}
-
-RECT StageManager::SourceOf(HWND window, SIZE size) const
-{
-    // Without the invisible resize borders, as measured when the window went (if it still fits).
-    RECT full{0, 0, size.cx, size.cy};
-    auto p = parked_.find(window);
-    if (p == parked_.end())
-        return full;
-    const RECT& r = p->second.source;
-    if (r.right <= r.left || r.bottom <= r.top || r.right > size.cx + 1 || r.bottom > size.cy + 1)
-        return full;
-    return RECT{r.left, r.top, std::min(r.right, full.right), std::min(r.bottom, full.bottom)};
-}
-
-void StageManager::DropThumbs()
-{
-    for (Entry& e : entries_)
-        DropThumbs(e);
-    for (Entry& e : leaving_)
-        DropThumbs(e);
-    leaving_.clear();
+    float avail = float(wa.bottom - wa.top) / PopupScale(wa) - 2 * kVPad - kBarRoom;
+    return std::clamp(int((avail + kSlotGap) / kSlot), 1, kMaxEntries);
 }
 
 void StageManager::Rebuild()
@@ -440,14 +652,6 @@ void StageManager::Rebuild()
             std::sort(mine.rbegin(), mine.rend()); // most recent first
             Entry e;
             e.keys = set;
-            // The apps' names, the most recent first.
-            for (const auto& [seq, h] : mine) {
-                const std::wstring& key = parked_[h].key;
-                auto item = std::find_if(items_.begin(), items_.end(), [&](const TaskItem& t) { return t.key == key; });
-                if (item == items_.end() || item->name.empty() || e.name.find(item->name) != std::wstring::npos)
-                    continue;
-                e.name += (e.name.empty() ? L"" : L"、") + item->name;
-            }
             std::stable_sort(e.keys.begin(), e.keys.end(), [&](const std::wstring& a, const std::wstring& b) {
                 auto newest = [&](const std::wstring& k) {
                     uint64_t n = 0;
@@ -463,9 +667,8 @@ void StageManager::Rebuild()
             next.push_back(std::move(e));
         }
     }
-    const bool visible = surface_.Visible();
-    // A set keeps its card (where it is, its pictures if its windows are the same); DWM draws the
-    // pictures in the order they were registered, so changed ones register again, back first.
+    const bool visible = shown_ && surface_.Visible();
+    // A set keeps its card (where it is, how far it is hovered).
     for (Entry& e : next) {
         auto old = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& o) { return o.keys == e.keys; });
         if (old != entries_.end()) {
@@ -474,38 +677,21 @@ void StageManager::Rebuild()
             e.vy = old->vy;
             e.appear = old->appear;
             e.va = old->va;
-            if (old->windows == e.windows) {
-                e.thumbs = std::move(old->thumbs);
-                e.shown = std::move(old->shown);
-                old->thumbs.clear();
-            }
             old->keys.clear(); // taken
         } else {
-            e.appear = visible ? 0.f : 1.f; // a new card fades in; a strip coming out pops as a whole
-        }
-        if (e.thumbs.empty()) {
-            // Back first: DWM stacks the pictures in the order they were registered.
-            e.thumbs.assign(e.windows.size(), 0);
-            for (size_t j = e.windows.size(); j-- > 0;)
-                e.thumbs[j] = thumbs_.Register(surface_.Hwnd(), e.windows[j]);
+            e.appear = visible ? 0.f : 1.f; // a new card fades in; a strip coming out slides as a whole
         }
     }
-    // Cards that went fade out where they were (their pictures with them).
+    // Cards that went fade out where they were.
     for (Entry& old : entries_) {
-        if (old.keys.empty()) {
-            DropThumbs(old);
+        if (old.keys.empty() || !visible || old.appear < 0.02f)
             continue;
-        }
-        if (!visible || old.appear < 0.02f) {
-            DropThumbs(old);
-            continue;
-        }
         old.targetAppear = 0;
         old.hover = motion::Follow{};
         leaving_.push_back(std::move(old));
     }
     if (!visible)
-        DropThumbs(), leaving_.clear();
+        leaving_.clear();
     const bool changed = next.size() != entries_.size() ||
                          !std::equal(next.begin(), next.end(), entries_.begin(), [](const Entry& a, const Entry& b) { return a.keys == b.keys; }) ||
                          !leaving_.empty();
@@ -527,42 +713,48 @@ void StageManager::Rebuild()
         Watch();
 }
 
-// The strip's window has room for Capacity() cards, in the middle of what the bar leaves of the
-// screen's height; the cards stand in the middle of it, and glide when that changes.
+// The strip's window has room for Capacity() boxes, in the middle of what the bar leaves of the
+// screen's height, from the screen's edge; the boxes stand in the middle of it, and glide when
+// that changes.
 void StageManager::Layout()
 {
     RECT wa = WorkArea();
     const float s = PopupScale(wa);
     const int cap = Capacity();
-    size_ = D2D1::SizeF(kCardW, float(cap) * kCardH + float(cap - 1) * kCardGap);
+    size_ = D2D1::SizeF(kStripW, float(cap) * kSlot - kSlotGap + 2 * kVPad);
     const size_t n = entries_.size();
-    const float used = n ? float(n) * kCardH + float(n - 1) * kCardGap : 0;
+    const float used = n ? float(n) * kSlot - kSlotGap : 0;
     const float top = (size_.height - used) / 2;
     const bool snap = !surface_.Visible();
     for (size_t i = 0; i < n; ++i) {
         Entry& e = entries_[i];
-        e.targetY = top + float(i) * (kCardH + kCardGap);
+        e.targetY = top + float(i) * kSlot;
         if (snap || e.appear == 0) {
             e.y = e.targetY; // a new card fades in at its place
             e.vy = 0;
         }
     }
     const LONG w = LONG(std::lround(size_.width * s)), h = LONG(std::lround(size_.height * s));
-    const LONG edge = LONG(std::lround(kEdge * s)), room = LONG(std::lround(kBarRoom * s));
-    LONG x = onRight_ ? wa.right - edge - w : wa.left + edge;
-    LONG y = wa.top + std::max<LONG>(edge, (wa.bottom - wa.top - room - h) / 2);
+    const LONG room = LONG(std::lround(kBarRoom * s));
+    LONG x = onRight_ ? wa.right - w : wa.left;
+    LONG y = wa.top + std::max<LONG>(0, (wa.bottom - wa.top - room - h) / 2);
     rect_ = RECT{x, y, x + w, y + h};
 }
 
-namespace {
-constexpr motion::Spring kGlide{0.42f, 0.86f};
-constexpr motion::Spring kFadeSpring{0.30f, 1.f};
-
-D2D1_RECT_F ScaleRect(D2D1_RECT_F r, float k, float cx, float cy)
+D2D1_RECT_F StageManager::Box(const Entry& e) const
 {
-    return D2D1::RectF(cx + (r.left - cx) * k, cy + (r.top - cy) * k, cx + (r.right - cx) * k, cy + (r.bottom - cy) * k);
+    const float x = onRight_ ? size_.width - kEdge - kBoxW : kEdge;
+    return D2D1::RectF(x, e.y, x + kBoxW, e.y + kBoxH);
 }
-} // namespace
+
+float StageManager::Reveal(int index, double nowMs) const
+{
+    // Out: one card after the other, from the top. In: all together.
+    const double delay = shown_ && revealFrom_ < 0.01f ? kRevealStagger * index : 0;
+    const float t = float(std::clamp((nowMs - revealStart_ - delay) / (shown_ ? kRevealInMs : kRevealOutMs), 0.0, 1.0));
+    const float target = shown_ ? 1.f : 0.f;
+    return revealFrom_ + (target - revealFrom_) * (shown_ ? EaseOut3(t) : t * t);
+}
 
 bool StageManager::Animate(double nowMs)
 {
@@ -581,39 +773,38 @@ bool StageManager::Animate(double nowMs)
         else
             moving = true;
         e.appear = std::clamp(e.appear, 0.f, 1.f);
-        e.rect = D2D1::RectF(0, e.y, kCardW, e.y + kCardH);
-        e.image = D2D1::RectF(kPad, e.y + kPad, kCardW - kPad, e.y + kPad + kImageH);
     };
     for (Entry& e : entries_)
         step(e);
     for (Entry& e : leaving_)
         step(e);
-    for (Entry& e : leaving_)
-        if (e.appear <= 0.01f)
-            DropThumbs(e);
     std::erase_if(leaving_, [](const Entry& e) { return e.appear <= 0.01f; });
+    const double span = shown_ ? kRevealInMs + kRevealStagger * double(entries_.size()) : kRevealOutMs;
+    if (nowMs - revealStart_ < span)
+        moving = true;
     if (!moving)
         lastStep_ = 0;
     return moving;
 }
 
-// The cards' span and their shadows: the rest of the column lets clicks through. While cards move
-// the region only grows (where they go is in it already); it is fitted again when they rest.
+// The boxes' span, with room for their shadows and a hovered box's growth: the rest of the column
+// lets clicks through. While cards move the region only grows (where they go is in it already); it
+// is fitted again when they rest.
 void StageManager::UpdateRegion(bool moving)
 {
     float top = size_.height, bottom = 0;
     for (const auto* list : {&entries_, &leaving_})
         for (const Entry& e : *list) {
-            top = std::min({top, e.rect.top, e.targetY});
-            bottom = std::max({bottom, e.rect.bottom, e.targetY + kCardH});
+            top = std::min({top, e.y, e.targetY});
+            bottom = std::max({bottom, e.y + kBoxH, e.targetY + kBoxH});
         }
     RECT wr{};
     if (!GetWindowRect(surface_.Hwnd(), &wr))
         return;
     const float s = surface_.Scale();
-    POINT a = surface_.ContentToScreen(POINT{0, LONG(std::floor(top * s))}), b = surface_.ContentToScreen(POINT{0, LONG(std::ceil(bottom * s))});
-    const LONG inset = rect_.left - wr.left;
-    RECT r{0, std::max<LONG>(0, a.y - wr.top - inset), wr.right - wr.left, std::min<LONG>(wr.bottom - wr.top, b.y - wr.top + inset)};
+    const LONG inset = rect_.top - wr.top;
+    RECT r{0, std::max<LONG>(0, inset + LONG(std::floor((top - 24) * s))), wr.right - wr.left,
+           std::min<LONG>(wr.bottom - wr.top, inset + LONG(std::ceil((bottom + 34) * s)))};
     if (bottom <= top)
         r = RECT{0, 0, 0, 0};
     if (moving && !IsRectEmpty(&region_))
@@ -630,13 +821,16 @@ RECT StageManager::Zone() const
 {
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const LONG pad = LONG(std::lround(8 * PopupScale(rect_)));
-    return onRight_ ? RECT{rect_.left - pad, rect_.top - pad, mi.rcMonitor.right, rect_.bottom + pad}
-                    : RECT{mi.rcMonitor.left, rect_.top - pad, rect_.right + pad, rect_.bottom + pad};
+    return onRight_ ? RECT{rect_.left, rect_.top, mi.rcMonitor.right, rect_.bottom} : RECT{mi.rcMonitor.left, rect_.top, rect_.right, rect_.bottom};
 }
 
-bool StageManager::Covered() const
+bool StageManager::Covered()
 {
+    const ULONGLONG now = GetTickCount64();
+    if (coveredAt_ && now - coveredAt_ < kCoverMs)
+        return covered_;
+    coveredAt_ = now;
+    covered_ = false;
     const RECT zone = Zone();
     for (const TaskItem& t : items_)
         for (HWND h : t.windows) {
@@ -649,17 +843,19 @@ bool StageManager::Covered() const
             if (SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
                 continue; // on another virtual desktop
             if (IntersectRect(&hit, &r, &zone))
-                return true;
+                return covered_ = true;
         }
-    return false;
+    return covered_;
 }
 
-// Every kWatchMs while on: the strip shows unless a window covers its place; then it comes out
-// over the window while the pointer rests on that edge of the screen, and goes once it has left.
+// Every kWatchMs while on. Always shown, the strip is out unless a window covers its place; then,
+// as auto-hidden, it comes out over the windows while the pointer rests on that edge of the screen,
+// and goes once the pointer has left it.
 void StageManager::Watch()
 {
     if (!enabled_ || entries_.empty()) {
         peek_ = false;
+        edgeSince_ = 0;
         if (leaving_.empty())
             Hide();
         return;
@@ -669,21 +865,23 @@ void StageManager::Watch()
     GetCursorPos(&p);
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const RECT zone = Zone();
-    const bool atEdge = (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) && p.y >= zone.top && p.y < zone.bottom;
+    // Anywhere along the edge above the bar; not while dragging (a window to snap, a selection).
+    const bool dragging = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
+    const bool atEdge = !dragging && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) && p.y >= mi.rcMonitor.top &&
+                        p.y < mi.rcWork.bottom;
     edgeSince_ = atEdge ? (edgeSince_ ? edgeSince_ : now) : 0;
-    if (!Covered()) {
+    if (!autoHide_ && !Covered()) {
         peek_ = false;
         Show();
         return;
     }
-    const bool over = surface_.Visible() && PtInRect(&zone, p);
     if (!peek_ && edgeSince_ && now - edgeSince_ >= kEdgeMs) {
         peek_ = true;
         leftAt_ = 0;
     }
     if (peek_) {
-        if (over || atEdge || inside_)
+        const RECT zone = Zone();
+        if (atEdge || inside_ || PtInRect(&zone, p))
             leftAt_ = 0;
         else if (!leftAt_)
             leftAt_ = now;
@@ -698,146 +896,287 @@ void StageManager::Watch()
 
 void StageManager::Show()
 {
-    if (surface_.Visible()) {
-        surface_.Move(rect_);
+    if (shown_) {
+        if (surface_.Visible())
+            surface_.Move(rect_);
         return;
     }
-    thumbAlpha_ = 0;
-    hover_ = pressed_ = -1;
-    for (Entry& e : leaving_)
-        DropThumbs(e);
-    leaving_.clear();
-    for (Entry& e : entries_) {
-        e.y = e.targetY, e.vy = 0;
-        e.appear = e.targetAppear = 1, e.va = 0;
-        e.rect = D2D1::RectF(0, e.y, kCardW, e.y + kCardH);
-        e.image = D2D1::RectF(kPad, e.y + kPad, kCardW - kPad, e.y + kPad + kImageH);
+    const double now = ClockMs();
+    const bool visible = surface_.Visible();
+    revealFrom_ = visible ? Reveal(0, now) : 0.f; // turning back on its way in
+    revealStart_ = now;
+    shown_ = true;
+    if (!visible) {
+        hover_ = pressed_ = -1;
+        leaving_.clear();
+        for (Entry& e : entries_) {
+            e.y = e.targetY, e.vy = 0;
+            e.appear = e.targetAppear = 1, e.va = 0;
+            e.hover = motion::Follow{};
+        }
+        region_ = RECT{};
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+        POINT anchor{onRight_ ? mi.rcMonitor.right : mi.rcMonitor.left, (rect_.top + rect_.bottom) / 2};
+        surface_.Show(rect_, false, anchor, false); // the cards slide out themselves
+    } else {
+        surface_.Move(rect_);
+        surface_.Invalidate();
     }
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    // Out of the screen's edge.
-    POINT anchor{onRight_ ? mi.rcMonitor.right : mi.rcMonitor.left, (rect_.top + rect_.bottom) / 2};
-    surface_.Show(rect_, false, anchor);
-    UpdateRegion(false);
-    UpdateThumbs();
 }
 
 void StageManager::Hide()
 {
-    if (!surface_.Visible())
+    if (!shown_)
         return;
-    KillTimer(surface_.Hwnd(), kFadeTimer);
-    thumbAlpha_ = 0;
-    UpdateThumbs(); // the pictures go first: they cannot shrink with the glass
+    const double now = ClockMs();
+    revealFrom_ = Reveal(0, now);
+    revealStart_ = now;
+    shown_ = false;
     inside_ = false;
     hover_ = pressed_ = -1;
-    surface_.Hide();
+    surface_.Invalidate(); // the cards slide back into the edge; then the window goes
 }
 
-void StageManager::UpdateThumbs()
+std::shared_ptr<const WindowPicture> StageManager::PictureOf(HWND window, const std::wstring& app, std::wstring& cacheKey)
 {
-    const float s = surface_.Scale();
-    const bool shown = surface_.Visible() && thumbAlpha_ > 0.01f;
-    for (auto* list : {&entries_, &leaving_})
-        for (Entry& e : *list) {
-            const size_t n = e.windows.size();
-            const float off = kStackOff * float(n - 1);
-            const float k = 0.94f + 0.06f * e.appear, cx = (e.rect.left + e.rect.right) / 2, cy = (e.rect.top + e.rect.bottom) / 2;
-            // The front window's room; each one behind it a step up and to the right.
-            const D2D1_RECT_F front = D2D1::RectF(e.image.left, e.image.top + off, e.image.right - off, e.image.bottom);
-            for (size_t j = 0; j < n && j < e.thumbs.size(); ++j) {
-                const SIZE size = thumbs_.SourceSize(e.thumbs[j]);
-                if (size.cx <= 0 || size.cy <= 0)
-                    continue; // not there yet (or no picture)
-                const RECT src = SourceOf(e.windows[j], size);
-                float sw = float(std::max<LONG>(1, src.right - src.left)), sh = float(std::max<LONG>(1, src.bottom - src.top));
-                float bw = front.right - front.left, bh = front.bottom - front.top;
-                float f = std::min(bw / sw, bh / sh), dw = sw * f, dh = sh * f;
-                float l = front.left + (bw - dw) / 2 + kStackOff * float(j), t = front.top + (bh - dh) / 2 - kStackOff * float(j);
-                D2D1_RECT_F d = ScaleRect(D2D1::RectF(l, t, l + dw, t + dh), k, cx, cy);
-                POINT tl = surface_.ContentToScreen(POINT{LONG(std::lround(d.left * s)), LONG(std::lround(d.top * s))});
-                ScreenToClient(surface_.Hwnd(), &tl);
-                DWM_THUMBNAIL_PROPERTIES p{};
-                p.dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY;
-                p.rcDestination = RECT{tl.x, tl.y, tl.x + LONG(std::lround((d.right - d.left) * s)), tl.y + LONG(std::lround((d.bottom - d.top) * s))};
-                p.rcSource = src;
-                const float alpha = thumbAlpha_ * e.appear * (j == 0 ? 1.f : 0.72f);
-                p.fVisible = shown && alpha > 0.01f;
-                p.opacity = BYTE(std::lround(255 * std::clamp(alpha, 0.f, 1.f)));
-                p.fSourceClientAreaOnly = FALSE;
-                // A call into DWM is only made for a change: at rest a frame costs it nothing.
-                auto& last = e.shown;
-                if (last.size() != e.thumbs.size())
-                    last.assign(e.thumbs.size(), DWM_THUMBNAIL_PROPERTIES{});
-                if (memcmp(&last[j], &p, sizeof(p)) == 0)
-                    continue;
-                last[j] = p;
-                thumbs_.Update(e.thumbs[j], p);
-            }
+    auto it = pictures_.find(window);
+    if (it != pictures_.end() && it->second.picture && it->second.picture->ok) {
+        cacheKey = L"stage|w|" + std::to_wstring(reinterpret_cast<uintptr_t>(window)) + L"|" + std::to_wstring(it->second.gen);
+        return it->second.picture;
+    }
+    // No picture (put away before Atrium started, or one that cannot be printed): its app's icon.
+    cacheKey = L"stage|p|" + app;
+    auto& p = placeholders_[app];
+    if (!p) {
+        const float s = PopupScale(WorkArea());
+        const int w = int(std::lround(kBoxW * s)), h = int(std::lround(kBoxW * s / 1.6f));
+        p = std::make_shared<const WindowPicture>(PlaceholderPicture(tasks_.Icon(app, int(std::lround(52 * s))), w, h, AppsDark()));
+    }
+    return p;
+}
+
+StageManager::Pose StageManager::PoseOf(const Entry& e, size_t j, const WindowPicture& p, float angle) const
+{
+    const float dir = onRight_ ? -1.f : 1.f;
+    const D2D1_RECT_F box = Box(e);
+    Pose pose;
+    pose.cx = pose.ox = (box.left + box.right) / 2;
+    pose.cy = (box.top + box.bottom) / 2;
+    pose.oy = pose.cy + kKeystone * (size_.height / 2 - pose.cy);
+    pose.angle = angle;
+    pose.z = -kStackZ * float(j);
+    const float f = std::min(kBoxW / float(p.width), kBoxH / float(p.height)) * std::pow(0.93f, float(j)); // DIP per picture px
+    const float w = float(p.width) * f, h = float(p.height) * f;
+    const float x = pose.cx - w / 2 + dir * kStackDx * float(j), y = pose.cy - h / 2 - kStackDy * float(j);
+    pose.rect = D2D1::RectF(x, y, x + w, y + h);
+    return pose;
+}
+
+D2D1_POINT_2F StageManager::StripOffset() const
+{
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    const float s = PopupScale(WorkArea());
+    return D2D1::Point2F(float(rect_.left - mi.rcMonitor.left) / s, float(rect_.top - mi.rcMonitor.top) / s);
+}
+
+bool StageManager::StripPose(HWND window, Pose& pose)
+{
+    if (!shown_)
+        return false;
+    for (const Entry& e : entries_) {
+        auto at = std::find(e.windows.begin(), e.windows.end(), window);
+        if (at == e.windows.end())
+            continue;
+        auto parked = parked_.find(window);
+        std::wstring key;
+        auto p = PictureOf(window, parked != parked_.end() ? parked->second.key : e.keys.front(), key);
+        if (!p || !p->ok)
+            return false;
+        Entry rest = e;
+        rest.y = rest.targetY;
+        pose = PoseOf(rest, size_t(at - e.windows.begin()), *p, (onRight_ ? -1.f : 1.f) * kTilt);
+        const D2D1_POINT_2F o = StripOffset();
+        pose.rect = D2D1::RectF(pose.rect.left + o.x, pose.rect.top + o.y, pose.rect.right + o.x, pose.rect.bottom + o.y);
+        pose.cx += o.x, pose.ox += o.x, pose.cy += o.y, pose.oy += o.y;
+        return true;
+    }
+    return false;
+}
+
+StageManager::Pose StageManager::PlacePose(const RECT& frame) const
+{
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    const float s = PopupScale(WorkArea());
+    Pose pose;
+    pose.rect = D2D1::RectF(float(frame.left - mi.rcMonitor.left) / s, float(frame.top - mi.rcMonitor.top) / s, float(frame.right - mi.rcMonitor.left) / s,
+                            float(frame.bottom - mi.rcMonitor.top) / s);
+    pose.cx = pose.ox = (pose.rect.left + pose.rect.right) / 2;
+    pose.cy = pose.oy = (pose.rect.top + pose.rect.bottom) / 2;
+    return pose;
+}
+
+bool StageManager::Flying(HWND window) const
+{
+    return std::any_of(flights_.begin(), flights_.end(), [&](const Flight& f) { return f.window == window; });
+}
+
+void StageManager::DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity)
+{
+    if (!p.ok || p.width <= 0 || p.height <= 0 || opacity < 0.004f)
+        return;
+    const float s = c.scale;
+    const D2D1::Matrix4x4F m = Tilt(pose.cx * s, pose.cy * s, pose.ox * s, pose.oy * s, pose.angle, kDepth * s, pose.z * s);
+    const D2D1_RECT_F& r = pose.rect;
+    const float f = (r.right - r.left) / float(p.width), sp = float(kShadowPad) * f, pp = float(kPicturePad) * f;
+    c.ImagePerspective(key + L"|s", p.shadow, D2D1::RectF(r.left - sp, r.top - sp, r.right + sp, r.bottom + sp),
+                       m * D2D1::Matrix4x4F::Translation(0, kShadowDrop * s, 0), kShadowAlpha * opacity);
+    c.ImagePerspective(key, p.image, D2D1::RectF(r.left - pp, r.top - pp, r.right + pp, r.bottom + pp), m, opacity);
+}
+
+void StageManager::PaintEntry(Canvas& c, Entry& e, int index, bool live)
+{
+    const float s = c.scale, dir = onRight_ ? -1.f : 1.f;
+    const float hv = e.hover.Step(live && index == hover_, c.now);
+    if (e.hover.moving)
+        c.Continue();
+    const float rv = Reveal(std::max(index, 0), c.now);
+    const float opacity = e.appear * std::clamp(rv * 1.6f, 0.f, 1.f);
+    // A card whose pictures are all on their way in (or out) shows once they are there.
+    if (opacity < 0.004f || std::all_of(e.windows.begin(), e.windows.end(), [&](HWND h) { return Flying(h); }))
+        return;
+    const D2D1_RECT_F box = Box(e);
+    const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+    const float k = (0.9f + 0.1f * e.appear) * (1 + 0.06f * hv) * (live && index == pressed_ ? 0.96f : 1.f);
+    // Out of the screen's edge, turning to the eye as it comes.
+    const float slide = onRight_ ? (size_.width - box.left + 24) * (1 - rv) : -(box.right + 24) * (1 - rv);
+    const float angle = dir * (kTilt * (1 - kHoverTilt * hv) + kComeTilt * (1 - rv));
+    c.BeginGroup(opacity, k, cx, cy, slide, 0);
+    // Back to front: the windows behind the most recent one a step inwards, up and away.
+    Pose front{};
+    bool hasFront = false;
+    for (size_t j = e.windows.size(); j-- > 0;) {
+        HWND h = e.windows[j];
+        if (Flying(h))
+            continue;
+        auto parked = parked_.find(h);
+        std::wstring key;
+        auto p = PictureOf(h, parked != parked_.end() ? parked->second.key : e.keys.front(), key);
+        if (!p || !p->ok || p->width <= 0 || p->height <= 0)
+            continue;
+        const Pose pose = PoseOf(e, j, *p, angle);
+        DrawPicture(c, *p, key, pose, 1);
+        if (!hasFront || j == 0)
+            front = pose, hasFront = true;
+    }
+    // The apps' icons in a column along the boxes' outer edge, level with the front window's lower
+    // corner, overlapping it.
+    if (hasFront) {
+        const D2D1::Matrix4x4F m = Tilt(front.cx * s, front.cy * s, front.ox * s, front.oy * s, front.angle, kDepth * s, front.z * s);
+        const float outer = onRight_ ? front.rect.right : front.rect.left;
+        const float bottom = Project(m, outer * s, front.rect.bottom * s).y / s;
+        const int iconPx = int(std::lround(kIcon * s));
+        static const IconImage shadow = SoftShadow(96, 96);
+        for (size_t j = std::min<size_t>(e.keys.size(), 3); j-- > 0;) {
+            IconImage icon = tasks_.Icon(e.keys[j], iconPx);
+            if (icon.empty())
+                continue;
+            const float ix = (onRight_ ? box.right : box.left) + dir * (10 + 24 * float(j)), iy = bottom - 6;
+            const D2D1_RECT_F ir = D2D1::RectF(ix - kIcon / 2, iy - kIcon / 2, ix + kIcon / 2, iy + kIcon / 2);
+            const float sp = kIcon * float(kShadowPad) / 96;
+            c.Image(L"stage|shadow", shadow, D2D1::RectF(ir.left - sp, ir.top - sp + 2, ir.right + sp, ir.bottom + sp + 2), 0.45f);
+            c.Image(L"stage|" + e.keys[j] + L"|" + std::to_wstring(iconPx), icon, ir);
         }
+    }
+    c.EndGroup();
+}
+
+// The pictures in flight, over everything: into the strip (the card shows them once they land) or
+// back to their windows' places (the windows come up under them, then they fade).
+void StageManager::PaintFlights(Canvas& c)
+{
+    const float dir = onRight_ ? -1.f : 1.f;
+    for (auto it = flights_.begin(); it != flights_.end();) {
+        Flight& f = *it;
+        // Frame by frame, at most kFlightStepMs a frame: while windows go down or come up the screen
+        // may not be composed for a moment; the picture waits rather than jumps.
+        if (f.last > 0)
+            f.elapsed += std::clamp(c.now - f.last, 0.0, kFlightStepMs);
+        f.last = c.now;
+        const float t = float(std::clamp(f.elapsed / kFlightMs, 0.0, 1.0)), e = EaseInOut(t);
+        Pose a = f.toStrip ? f.place : f.from, b = f.toStrip ? Pose{} : f.place;
+        float opacity = 1;
+        if (f.toStrip && !StripPose(f.window, b)) {
+            // The strip is not out: into the screen's edge.
+            const D2D1_SIZE_F screen = D2D1::SizeF(float(flight_.Rect().right - flight_.Rect().left) / c.scale,
+                                                   float(flight_.Rect().bottom - flight_.Rect().top) / c.scale);
+            const float x = onRight_ ? screen.width + kBoxW / 2 : -kBoxW / 2, y = StripOffset().y + size_.height / 2;
+            b.rect = D2D1::RectF(x - kBoxW / 2, y - kBoxH / 2, x + kBoxW / 2, y + kBoxH / 2);
+            b.cx = b.ox = x;
+            b.cy = b.oy = y;
+            b.angle = dir * kTilt;
+            opacity = 1 - e * e;
+        }
+        if (!f.toStrip && t >= 1 && !f.restored) {
+            f.restored = true;
+            HWND h = f.window;
+            if (f.activate)
+                std::thread([h] { TaskModel::ActivateWindow(h); }).detach();
+            else
+                ShowQuietly(h);
+        }
+        const double over = f.elapsed - kFlightMs - kFlightHoldMs;
+        if (!f.toStrip && over > 0)
+            opacity = 1 - float(std::clamp(over / kFlightFadeMs, 0.0, 1.0));
+        Pose p;
+        p.rect = D2D1::RectF(Lerp(a.rect.left, b.rect.left, e), Lerp(a.rect.top, b.rect.top, e), Lerp(a.rect.right, b.rect.right, e),
+                             Lerp(a.rect.bottom, b.rect.bottom, e));
+        p.cx = Lerp(a.cx, b.cx, e), p.cy = Lerp(a.cy, b.cy, e), p.ox = Lerp(a.ox, b.ox, e), p.oy = Lerp(a.oy, b.oy, e);
+        p.angle = Lerp(a.angle, b.angle, e), p.z = Lerp(a.z, b.z, e);
+        DrawPicture(c, *f.picture, f.key, p, opacity);
+        const bool done = f.toStrip ? t >= 1 : over >= kFlightFadeMs;
+        if (done) {
+            if (!f.toStrip)
+                Transitions(f.window, true); // up again: its own animations back
+            it = flights_.erase(it);
+            surface_.Invalidate(); // the card shows its picture now
+        } else {
+            ++it;
+        }
+    }
+    if (!flights_.empty()) {
+        c.Continue();
+    } else {
+        // Clicks go through until the next flight; the layer goes if none comes for a while.
+        HRGN none = CreateRectRgn(0, 0, 0, 0);
+        if (!SetWindowRgn(flight_.Hwnd(), none, FALSE))
+            DeleteObject(none);
+        SetTimer(flight_.Hwnd(), kFlightTimer, kFlightIdleMs, nullptr);
+    }
 }
 
 void StageManager::Paint(Canvas& c)
 {
-    const Theme& t = c.theme;
-    const int iconPx = int(std::lround(20 * c.scale));
     const bool moving = Animate(c.now);
-    std::vector<ShapeDip> shapes;
-    auto card = [&](Entry& e, bool live, int i) {
-        const float k = 0.94f + 0.06f * e.appear, cx = (e.rect.left + e.rect.right) / 2, cy = (e.rect.top + e.rect.bottom) / 2;
-        ShapeDip shape{ScaleRect(e.rect, k, cx, cy), kCardR * k};
-        shape.fade = 1 - e.appear;
-        shapes.push_back(shape);
-        c.BeginGroup(e.appear, k, cx, cy);
-        if (c.panel)
-            c.Fill(e.rect, kCardR, t.panel);
-        float hv = e.hover.Step(live && i == hover_, c.now);
-        if (e.hover.moving)
-            c.Continue();
-        if (hv > 0.001f)
-            c.Fill(e.rect, kCardR, Alpha(t.hover, hv));
-        if (live && i == pressed_)
-            c.Fill(e.rect, kCardR, t.press);
-        IconImage icon = tasks_.Icon(e.keys.front(), iconPx);
-        // Under the pictures: the app's icon, for a window DWM has no picture of.
-        if (std::none_of(e.thumbs.begin(), e.thumbs.end(), [&](uint64_t id) { return thumbs_.SourceSize(id).cx > 0; })) {
-            c.Fill(e.image, kCardR - kPad, t.card);
-            float mx = (e.image.left + e.image.right) / 2, my = (e.image.top + e.image.bottom) / 2;
-            if (!icon.empty())
-                c.Image(L"stage|" + e.keys.front(), icon, D2D1::RectF(mx - 20, my - 20, mx + 20, my + 20), 0.9f);
-        }
-        // The title row: the apps' icons (three at most) and their names.
-        float ty = e.image.bottom + 4, ry = ty + kTitleH / 2 - 1, x = e.rect.left + kPad + 2;
-        for (size_t j = 0; j < e.keys.size() && j < 3; ++j) {
-            IconImage img = j == 0 ? icon : tasks_.Icon(e.keys[j], iconPx);
-            if (img.empty())
-                continue;
-            c.Image(L"stage|" + e.keys[j], img, D2D1::RectF(x, ry - 10, x + 20, ry + 10));
-            x += 23;
-        }
-        x += 3;
-        c.Text(e.name, D2D1::RectF(x, ty, e.rect.right - kPad - 2, ty + kTitleH - 2), 12.5f, t.text, DWRITE_FONT_WEIGHT_MEDIUM);
-        c.EndGroup();
-    };
     for (Entry& e : leaving_)
-        card(e, false, -1);
+        PaintEntry(c, e, -1, false);
     for (size_t i = 0; i < entries_.size(); ++i)
-        card(entries_[i], true, int(i));
-    surface_.SetShapes(shapes, moving);
+        PaintEntry(c, entries_[i], int(i), true);
     UpdateRegion(moving);
-    UpdateThumbs();
     if (moving)
         c.Continue();
-    else if (entries_.empty() && leaving_.empty())
-        SetTimer(surface_.Hwnd(), kHideTimer, 1, nullptr); // the last card has gone: not from inside a paint
+    else if (!shown_ || (entries_.empty() && leaving_.empty()))
+        SetTimer(surface_.Hwnd(), kHideTimer, 1, nullptr); // back in the edge, or the last card gone: not from inside a paint
 }
 
 int StageManager::EntryAt(POINT pt) const
 {
     float s = surface_.Scale(), x = float(pt.x) / s, y = float(pt.y) / s;
     for (size_t i = 0; i < entries_.size(); ++i) {
-        const D2D1_RECT_F& r = entries_[i].rect;
-        if (x >= r.left && x < r.right && y >= r.top && y < r.bottom)
+        const D2D1_RECT_F r = Box(entries_[i]);
+        if (x >= r.left - 14 && x < r.right + 10 && y >= r.top - 10 && y < r.bottom + 24)
             return int(i);
     }
     return -1;
@@ -848,26 +1187,32 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
     (void)result;
     POINT pt{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     switch (m) {
-    case WM_STAGE_THUMB:
-        surface_.Invalidate(); // a picture can be placed now
+    case WM_STAGE_PICTURE:
+        PictureTaken();
         return true;
     case WM_TIMER:
         if (w == kWatchTimer) {
             Watch();
             return true;
         }
-        if (w == kFadeTimer) {
-            float k = float(std::clamp((ClockMs() - fadeStart_) / kFadeMs, 0.0, 1.0));
-            thumbAlpha_ = motion::EaseOut(k);
-            UpdateThumbs();
-            if (k >= 1)
-                KillTimer(surface_.Hwnd(), kFadeTimer);
+        if (w == kDownTimer) {
+            KillTimer(surface_.Hwnd(), kDownTimer);
+            std::vector<HWND> late;
+            for (const auto& [h, p] : parked_)
+                if (!p.down && GetTickCount64() - p.since >= kDownMs - 20)
+                    late.push_back(h);
+            for (HWND h : late)
+                PutDown(h, false); // no picture in time: it waits without one
+            if (std::any_of(parked_.begin(), parked_.end(), [](const auto& kv) { return !kv.second.down; }))
+                SetTimer(surface_.Hwnd(), kDownTimer, kDownMs / 4, nullptr);
             return true;
         }
         if (w == kHideTimer) {
             KillTimer(surface_.Hwnd(), kHideTimer);
-            if (entries_.empty() && leaving_.empty())
-                Hide();
+            if (shown_ && entries_.empty() && leaving_.empty())
+                Hide(); // slides away, then comes back here
+            else if (!shown_)
+                surface_.Hide(false);
             return true;
         }
         if (w == kRaiseTimer) {
@@ -883,8 +1228,10 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, surface_.Hwnd(), 0};
             tracking_ = TrackMouseEvent(&tme) != FALSE;
         }
+        if (!inside_)
+            Foresee();
         inside_ = true;
-        int i = EntryAt(pt);
+        int i = shown_ ? EntryAt(pt) : -1;
         if (i != hover_) {
             hover_ = i;
             surface_.Invalidate();
@@ -898,14 +1245,13 @@ bool StageManager::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
         surface_.Invalidate();
         return true;
     case WM_LBUTTONDOWN:
-        pressed_ = EntryAt(pt);
-        if (pressed_ >= 0)
-            surface_.Ripple(float(pt.x) / surface_.Scale(), float(pt.y) / surface_.Scale());
+        Foresee();
+        pressed_ = shown_ ? EntryAt(pt) : -1;
         surface_.Invalidate();
         return true;
     case WM_LBUTTONUP: {
         int i = EntryAt(pt);
-        bool same = i >= 0 && i == pressed_;
+        bool same = shown_ && i >= 0 && i == pressed_;
         pressed_ = -1;
         surface_.Invalidate();
         if (same) {

@@ -414,18 +414,32 @@ float Canvas::TextWidth(const std::wstring& s, float size, DWRITE_FONT_WEIGHT w)
     return m.widthIncludingTrailingWhitespace / scale;
 }
 
-void Canvas::Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity)
+ID2D1Bitmap* Canvas::Bitmap(const std::wstring& key, const IconImage& image)
 {
     auto& b = s_.bitmaps_[key];
     if (!b) {
         if (image.empty())
-            return;
+            return nullptr;
         D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
         if (FAILED(d2d_->CreateBitmap(D2D1::SizeU(UINT32(image.width), UINT32(image.height)), image.bgra.data(), UINT32(image.width * 4), &bp,
                                       b.put())))
-            return;
+            return nullptr;
     }
-    d2d_->DrawBitmap(b.get(), Px(r), opacity * alpha_, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    return b.get();
+}
+
+void Canvas::Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity)
+{
+    if (ID2D1Bitmap* b = Bitmap(key, image))
+        d2d_->DrawBitmap(b, Px(r), opacity * alpha_, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+}
+
+void Canvas::ImagePerspective(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, const D2D1_MATRIX_4X4_F& perspective, float opacity)
+{
+    if (ID2D1Bitmap* b = Bitmap(key, image)) {
+        const D2D1_RECT_F px = Px(r);
+        d2d_->DrawBitmap(b, &px, opacity * alpha_, D2D1_INTERPOLATION_MODE_LINEAR, nullptr, &perspective);
+    }
 }
 
 bool Canvas::Cached(const std::wstring& key) const
@@ -694,7 +708,7 @@ void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
 
 void Surface::PublishPanel()
 {
-    if (!host_)
+    if (!host_ || glassless_)
         return;
     GlassPanel p;
     p.hwnd = hwnd_;
@@ -879,7 +893,7 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
         visible_ = true;
         firstPaint_ = !wasHiding;
         if (!wasHiding) {
-            glassReady_ = false;
+            glassReady_ = glassless_; // nothing to wait for
             shownMs_ = ClockMs();
             SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
         }

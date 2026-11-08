@@ -115,6 +115,9 @@ public:
     void Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity = 1);
     void ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r);
     void ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius);
+    // An image as Image draws it into `r`, then through `perspective`: a 4x4 transform in px of the
+    // content (what Px gives), before the group's transform.
+    void ImagePerspective(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, const D2D1_MATRIX_4X4_F& perspective, float opacity = 1);
     bool Cached(const std::wstring& key) const;
     // A press ripple: a soft disc growing from (x, y) inside the rounded
     // rectangle r, at progress t (0..1).
@@ -126,6 +129,7 @@ public:
     ID2D1DeviceContext* D2D() const { return d2d_; }
 
 private:
+    ID2D1Bitmap* Bitmap(const std::wstring& key, const IconImage& image); // cached under key
     IDWriteTextFormat* Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, int align, bool wrap);
     D2D1_COLOR_F InkAt(D2D1_RECT_F r, D2D1_COLOR_F c, D2D1_COLOR_F& haloInk) const; // c, and its halo, for what is under r
     ID2D1SolidColorBrush* Brush(D2D1_COLOR_F c);
@@ -180,6 +184,9 @@ public:
     RECT Rect() const { return rect_; } // the content, screen px
     // Corner radius of the glass shape (DIP), matching the bar's.
     void SetRadius(float dip);
+    // No glass at all: the content alone, transparent where nothing is drawn (Stage Manager's
+    // strip). Before the first Show.
+    void SetGlassless(bool on) { glassless_ = on; }
     // Separate pieces of glass (content DIP), back to front; empty: the whole
     // content with the radius. Published to the glass when they change.
     void SetShapes(const std::vector<ShapeDip>& shapes, bool animating = false);
@@ -208,6 +215,7 @@ private:
     HWND hwnd_ = nullptr;
     bool activatable_;
     bool desktopLayer_ = false;
+    bool glassless_ = false;
     float insetDip_;
     bool visible_ = false;
     bool hiding_ = false;    // closing animation running

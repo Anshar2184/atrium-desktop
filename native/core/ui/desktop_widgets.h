@@ -29,8 +29,6 @@ public:
     void SetEnabled(bool on);
     void SetStatus(const SystemStatus& status);
     void SetOnRight(bool onRight);
-    // Room kept clear at the screen's sides (DIP): Stage Manager's strip. The grid starts after it.
-    void SetReserve(float leftDip, float rightDip);
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor);
     // Adds a widget in the first free place; false when there is no room.
@@ -97,7 +95,6 @@ private:
     HWINEVENTHOOK hook_ = nullptr, showHook_ = nullptr, uncloakHook_ = nullptr;
     bool enabled_ = false;
     bool onRight_ = false;
-    float reserveLeft_ = 0, reserveRight_ = 0;
     HMONITOR monitor_ = nullptr;
     std::vector<std::unique_ptr<Widget>> widgets_;
     // Saved widgets this screen has no room for (JSON): kept in the layout

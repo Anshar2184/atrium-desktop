@@ -3,6 +3,7 @@
 // unless the user hides it (setting hideTaskbar, shell/system_chrome.h; D37).
 
 #include "bar.h"
+#include "clock.h"
 #include "log.h"
 #include "resource.h"
 #include "settings.h"
@@ -319,6 +320,16 @@ void ToggleStart(RECT)
     g_app.notes->PanelsChanged();
 }
 
+// Stage Manager from the bar (its menu, the control centre); the widgets go to the other side.
+void SetStageManager(bool on)
+{
+    g_app.server->Modify([on](Settings& s) {
+        s.stageManager = on;
+        if (on)
+            s.widgetsOnRight = !s.stageOnRight;
+    });
+}
+
 void ShowMenu(POINT pt)
 {
     std::vector<MenuEntry> entries = {{L"外观设置…", kCmdSettings}, {}, {L"显示桌面", kCmdDesktop}, {L"任务管理器", kCmdTaskManager}};
@@ -343,8 +354,7 @@ void ShowMenu(POINT pt)
             SendWinShortcut('D');
             break;
         case kCmdStage: {
-            bool on = !g_app.stage->Enabled();
-            g_app.server->Modify([on](Settings& s) { s.stageManager = on; });
+            SetStageManager(!g_app.stage->Enabled());
             break;
         }
         case kCmdTaskManager:
@@ -465,9 +475,11 @@ void ApplySettings(const Settings& s)
     // Widgets live on the bar's monitor, where its capture gives them glass.
     RECT bar = g_app.bar->BarRect();
     g_app.widgets->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
-    g_app.widgets->SetOnRight(s.widgetsOnRight);
+    // With Stage Manager on, the widgets keep to the other side of the screen.
+    g_app.widgets->SetOnRight(s.stageManager ? !s.stageOnRight : s.widgetsOnRight);
     g_app.stage->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
     g_app.stage->SetOnRight(s.stageOnRight);
+    g_app.stage->SetAutoHide(s.stageAutoHide);
     g_app.stage->SetEnabled(s.stageManager);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);
     g_app.widgets->SetEnabled(s.widgets);
@@ -851,14 +863,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     Surface::SetCapturable(capturable);
     g_app.menu = std::make_unique<GlassMenu>(instance);
     g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
+        const double t0 = ClockMs();
         if (g_app.stage)
             g_app.stage->Update(g_app.tasks->Snapshot(true));
+        const double t1 = ClockMs();
         auto items = g_app.tasks->Snapshot();
         if (g_app.preview)
             g_app.preview->Refresh(items);
+        const double t2 = ClockMs();
         g_app.bar->SetItems(std::move(items));
+        const double t3 = ClockMs();
         if (g_app.start)
             g_app.start->Refresh();
+        const double t4 = ClockMs();
+        if (t4 - t0 > 20)
+            Log(L"tasks: changes took %.0f ms (stage %.0f, preview %.0f, bar %.0f, start %.0f)", t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3);
     }, [](const std::wstring& exe) {
         return g_app.tray->OpenExisting(exe);
     });
@@ -884,13 +903,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.start->onStatusRequest = UpdateStatus;
     g_app.calendar = std::make_unique<CalendarPanel>(instance);
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
-    // Stage Manager: its strip keeps the widgets out of its way.
     g_app.stage = std::make_unique<StageManager>(instance, *g_app.tasks);
-    g_app.stage->onReserve = [] {
-        float room = g_app.stage->Reserve();
-        g_app.widgets->SetReserve(g_app.stage->OnRight() ? 0 : room, g_app.stage->OnRight() ? room : 0);
-    };
-    g_app.control->onStage = [](bool on) { g_app.server->Modify([on](Settings& s) { s.stageManager = on; }); };
+    g_app.control->onStage = SetStageManager;
     g_app.widgets->onStatusRequest = UpdateStatus;
     g_app.status = std::make_unique<SystemStatusReader>(g_app.host, WM_STATUS, WM_VOLUME);
     g_app.widgets->menu = g_app.menu.get();
