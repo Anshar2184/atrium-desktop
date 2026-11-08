@@ -64,7 +64,7 @@ public sealed partial class MainWindow : Window
 
     private static readonly string[] PageTitles =
     {
-        "材质", "形状", "任务栏", "通知", "小组件", "系统", "设计语言", "关于",
+        "材质", "形状", "任务栏", "通知", "小组件", "台前调度", "系统", "设计语言", "关于",
     };
     private readonly CoreClient _client = new();
     private readonly List<(SliderDef Def, SliderTile Tile)> _rows = new();
@@ -105,7 +105,7 @@ public sealed partial class MainWindow : Window
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _updateMessage = (handle, message, wparam, lparam, id, data) =>
         {
-            if (message == App.OpenAboutMessage) { Nav.SelectedIndex = 7; return IntPtr.Zero; }
+            if (message == App.OpenAboutMessage) { Nav.SelectedIndex = 8; return IntPtr.Zero; }
             return DefSubclassProc(handle, message, wparam, lparam);
         };
         SetWindowSubclass(hwnd, _updateMessage, (UIntPtr)1, UIntPtr.Zero);
@@ -127,8 +127,8 @@ public sealed partial class MainWindow : Window
             StopTiles();
         };
 
-        _mains = new FrameworkElement[] { MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainSystem, DesignStack, MainAbout };
-        _sides = new FrameworkElement?[] { SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, null, null, null };
+        _mains = new FrameworkElement[] { MainMaterial, MainShape, MainDock, MainNotify, MainWidgets, MainStage, MainSystem, DesignStack, MainAbout };
+        _sides = new FrameworkElement?[] { SideMaterial, SideShape, SideDock, SideNotify, SideWidgets, SideStage, null, null, null };
         LoupeSwitch.IsOn = true;
         BuildRows();
         BuildTintSwatches();
@@ -138,6 +138,7 @@ public sealed partial class MainWindow : Window
         {
             if (_page == 4) { ShowWidgetMap(); RefreshGallery(); }
             if (_page == 3) ShowNotifyPreview(false);
+            if (_page == 5) ShowStagePreview(false);
         };
         PathText.Text = CoreClient.SettingsPath;
         StartupSwitch.IsEnabled = !CoreClient.Development;
@@ -148,7 +149,7 @@ public sealed partial class MainWindow : Window
         // `--page widgets` (the widgets' menu): open on that page.
         var args = Environment.GetCommandLineArgs();
         int page = Array.IndexOf(args, "--page") is int i && i >= 0 && i + 1 < args.Length
-            ? args[i + 1] switch { "widgets" => 4, "about" => 7, _ => 0 } : 0;
+            ? args[i + 1] switch { "widgets" => 4, "stage" => 5, "about" => 8, _ => 0 } : 0;
         Nav.SelectedIndex = page;
         _ = ConnectAndLoadAsync();
         _ = CheckForUpdatesAsync(); // once per settings window; no resident polling
@@ -165,7 +166,7 @@ public sealed partial class MainWindow : Window
     // inspector part; pages without parameters of their own (system, design, about) take the full width.
     private void ShowPage(int index)
     {
-        if (_page == 6 && index != 6) StopDesignAnimations();
+        if (_page == 7 && index != 7) StopDesignAnimations();
         _page = index;
         for (int i = 0; i < _mains.Length; i++)
         {
@@ -184,6 +185,7 @@ public sealed partial class MainWindow : Window
             ShowWidgetMap();
         }
         if (_mains[index] == MainNotify) ShowNotifyPreview(true);
+        if (_mains[index] == MainStage) ShowStagePreview(true);
         PageTitle.Text = PageTitles[index];
         ContinuousCorners.Install(_mains[index]);
         HeroBlock.Visibility = index < 3 ? Visibility.Visible : Visibility.Collapsed;
@@ -451,7 +453,7 @@ public sealed partial class MainWindow : Window
         await QueueDownloadAsync(_latestRelease);
     }
 
-    private void OnOpenUpdate(object sender, RoutedEventArgs e) => Nav.SelectedIndex = 7;
+    private void OnOpenUpdate(object sender, RoutedEventArgs e) => Nav.SelectedIndex = 8;
 
     private async void OnCheckForUpdates(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync();
 
@@ -674,6 +676,7 @@ public sealed partial class MainWindow : Window
         UpdateCustomSwatch();
         if (_page == 3) ShowNotifyPreview(false);
         if (_page == 4) ShowWidgetMap();
+        if (_page == 5) ShowStagePreview(false);
     }
 
     private static Color TintColor(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
@@ -800,6 +803,7 @@ public sealed partial class MainWindow : Window
         if (_loading) return;
         _current.StageManager = StageSwitch.IsOn;
         Changed();
+        if (_page == 5) ShowStagePreview(true);
     }
 
     private void OnStageSideChecked(object sender, RoutedEventArgs e)
@@ -807,6 +811,7 @@ public sealed partial class MainWindow : Window
         if (_loading || sender is not RadioButton { Tag: string tag }) return;
         _current.StageOnRight = tag == "right";
         Changed();
+        if (_page == 5) ShowStagePreview(true);
     }
 
     private void OnStartupToggled(object sender, RoutedEventArgs e)
@@ -843,6 +848,7 @@ public sealed partial class MainWindow : Window
         UpdateHero();
         UpdateCustomSwatch();
         if (_page == 3) ShowNotifyPreview(false);
+        if (_page == 5) StageRenderGlass(StageCanvas.Width, StageCanvas.Height); // the material changed
         SchedulePreview();
     }
 

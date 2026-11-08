@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Atrium.Settings;
 
-// One picture behind every preview: the bar's, the notifications', the widget map's and gallery's,
+// One picture behind every preview: the bar's, the notifications', the widget map's and gallery's, Stage Manager's,
 // the design page's. Picking another crossfades each visible preview: a snapshot of how it looked
 // stays on top until the new picture is in (decoded, or the glass rendered over it), then fades out.
 public sealed partial class MainWindow
@@ -64,6 +64,8 @@ public sealed partial class MainWindow
         await FreezeAsync("notify", NotifyStage, 1, selection, expectedGeneration);
         if (selection != _photoSelection) return;
         await FreezeAsync("widgets", WidgetStage, 1, selection, expectedGeneration);
+        if (selection != _photoSelection) return;
+        await FreezeAsync("stage", StagePreview, 1, selection, expectedGeneration);
         if (selection != _photoSelection) return;
         await FreezeAsync("design", DesignStack, _compareBuilt ? 2 : 1, selection, expectedGeneration);
         if (selection != _photoSelection || _updatesClosed) return;

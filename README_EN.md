@@ -160,7 +160,7 @@ After macOS's Stage Manager: the app you are using stays in the middle of the sc
 - **Click to swap, Shift to combine.** Click a card and it comes forward while the app that was there goes to the side. Shift-click adds it to the current set instead, and from then on the set goes and comes back together. Switching apps from the bar, with Alt+Tab or from a notification changes the stage too.
 - **Out of the windows' way.** When a window covers the side, the cards step aside; rest the pointer on the screen's edge and they come out over the window, and go again when it leaves. Desktop widgets make room for the strip.
 - **Smooth under load.** Cards glide, appear and leave on springs and can be interrupted. Calls into DWM run on a thread of their own, so the interface does not stall while Windows is animating windows.
-- **Always reversible.** Waiting windows are only minimized, in Windows' own state. Turning Stage Manager off or quitting Atrium brings them all back, and an Atrium that ended unexpectedly picks them up again when it starts. Turn it on and off from the control centre, the bar's context menu or the System page of the settings.
+- **Always reversible.** Waiting windows are only minimized, in Windows' own state. Turning Stage Manager off or quitting Atrium brings them all back, and an Atrium that ended unexpectedly picks them up again when it starts. Turn it on and off from the control centre, the bar's context menu or the settings' Stage Manager page, which has a demo you can click.
 
 <br>
 
@@ -242,7 +242,7 @@ Requires Windows 10 19041 or later (Windows 11 recommended), the .NET 10 SDK, an
 
 ## Status
 
-Atrium is at v1.6: usable every day, still changing quickly. Everything above is covered by end-to-end tests with real mouse and keyboard input.
+Atrium is usable every day and still changing quickly. Everything above is covered by end-to-end tests with real mouse and keyboard input.
 
 | Status | What |
 | :--- | :--- |
