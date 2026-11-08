@@ -336,12 +336,27 @@ void DesktopWidgets::SetOnRight(bool onRight)
             Place(*w, true);
 }
 
+void DesktopWidgets::SetReserve(float leftDip, float rightDip)
+{
+    if (leftDip == reserveLeft_ && rightDip == reserveRight_)
+        return;
+    reserveLeft_ = leftDip;
+    reserveRight_ = rightDip;
+    if (enabled_)
+        for (auto& w : widgets_)
+            Place(*w, true);
+}
+
 RECT DesktopWidgets::WorkArea() const
 {
     MONITORINFO mi{sizeof(mi)};
     HMONITOR m = monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     GetMonitorInfoW(m, &mi);
-    return mi.rcWork;
+    RECT wa = mi.rcWork;
+    const float s = PopupScale(wa);
+    wa.left += LONG(std::lround(reserveLeft_ * s));
+    wa.right -= LONG(std::lround(reserveRight_ * s));
+    return wa;
 }
 
 float DesktopWidgets::Scale() const { return PopupScale(WorkArea()); }

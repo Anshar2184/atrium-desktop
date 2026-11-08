@@ -22,6 +22,7 @@ namespace {
 
 constexpr float kW = 340, kGap = 10, kTopH = 150, kSliderH = 68, kHeader = 58, kRowH = 44, kFooter = 46, kPad = 14;
 constexpr float kSection = 30, kAppRowH = 50, kModeH = 78;
+constexpr float kStageH = 58; // Stage Manager's row, under the connections
 constexpr int kMaxRows = 6, kMaxOutputs = 4, kMaxApps = 5, kMaxDisplays = 4;
 constexpr UINT_PTR kStatusTimer = 1;
 constexpr double kPageMs = 320;
@@ -94,7 +95,7 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
     ReadRadios(false); // the brightness (WMI is slow) before the first opening
 }
 
-float ControlCenter::MainHeight() const { return kTopH + kGap + kSliderH + (HasBrightness() ? kGap + kSliderH : 0); }
+float ControlCenter::MainHeight() const { return kTopH + kGap + kStageH + kGap + kSliderH + (HasBrightness() ? kGap + kSliderH : 0); }
 
 float ControlCenter::PageHeight(Page page) const
 {
@@ -112,7 +113,7 @@ float ControlCenter::PageHeight(Page page) const
 
 float ControlCenter::MaxHeight() const
 {
-    return std::max({kTopH + 2 * (kGap + kSliderH), kHeader + float(kMaxRows) * kRowH + kFooter + 6,
+    return std::max({kTopH + kGap + kStageH + 2 * (kGap + kSliderH), kHeader + float(kMaxRows) * kRowH + kFooter + 6,
                      kHeader + float(kMaxOutputs) * kRowH + kSection + float(kMaxApps) * kAppRowH + kFooter + 6,
                      kHeader + float(kMaxDisplays) * kRowH + kSection + kModeH + kFooter + 6});
 }
@@ -126,7 +127,8 @@ std::vector<ShapeDip> ControlCenter::MainShapes() const
     s.push_back({D2D1::RectF(0, 0, colW, kTopH), modR});
     s.push_back({D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2), modR});
     s.push_back({D2D1::RectF(colW + kGap, (kTopH - kGap) / 2 + kGap, kW, kTopH), modR});
-    float y = kTopH + kGap;
+    s.push_back({D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH), modR});
+    float y = kTopH + kGap + kStageH + kGap;
     if (HasBrightness()) {
         s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
         y += kSliderH + kGap;
@@ -458,7 +460,8 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
     const D2D1_RECT_F conn = D2D1::RectF(0, 0, colW, kTopH);
     const D2D1_RECT_F batt = D2D1::RectF(colW + kGap, 0, kW, (kTopH - kGap) / 2);
     const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
-    float y = kTopH + kGap;
+    const D2D1_RECT_F stage = D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH);
+    float y = stage.bottom + kGap;
     D2D1_RECT_F bright{};
     if (HasBrightness()) {
         bright = D2D1::RectF(0, y, kW, y + kSliderH);
@@ -546,6 +549,22 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
         c.Text(projecting_.empty() ? L"无线显示器" : L"已连接", D2D1::RectF(cx + 24, cy + 1, cast.right - 8, cy + 18), 11.5f,
                projecting_.empty() ? t.subtext : t.accent);
         hits_.push_back({cast, L"cast"});
+    }
+    // Stage Manager: the switch is the whole row, its symbol lit while on (macOS's tile).
+    {
+        float sh = Hover(c, L"stage", hover_ == L"stage");
+        if (sh > 0.001f || pressed_ == L"stage")
+            c.Fill(stage, modR, pressed_ == L"stage" ? t.press : Alpha(t.hover, sh));
+        float cx = stage.left + 32, cy = (stage.top + stage.bottom) / 2;
+        c.Circle(cx, cy, 18, stageOn_ ? t.accent : Alpha(t.text, 0.16f + 0.08f * sh));
+        bool halo = c.halo;
+        c.halo = false;
+        c.Glyph(L"\uE7C4", D2D1::RectF(cx - 14, cy - 14, cx + 14, cy + 14), 14, stageOn_ ? D2D1::ColorF(1, 1, 1, 0.98f) : t.text);
+        c.halo = halo;
+        c.Text(L"台前调度", D2D1::RectF(cx + 28, cy - 18, stage.right - kPad, cy), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(stageOn_ ? (stageRight_ ? L"已打开 · 最近使用的应用在右侧" : L"已打开 · 最近使用的应用在左侧") : L"已关闭",
+               D2D1::RectF(cx + 28, cy, stage.right - kPad, cy + 18), 11.5f, t.subtext);
+        hits_.push_back({stage, L"stage"});
     }
     if (HasBrightness())
         PaintSlider(c, t, bright, L"bright", L"显示器", L"\uE706", std::max(brightness_, 0), false,
@@ -1036,6 +1055,11 @@ void ControlCenter::Activate(const std::wstring& id)
         surface_.Invalidate();
         if (onChanged)
             onChanged();
+    } else if (id == L"stage") {
+        stageOn_ = !stageOn_;
+        surface_.Invalidate();
+        if (onStage)
+            onStage(stageOn_);
     } else if (id == L"cast") {
         ShowPage(Page::Cast);
         ReadMode();
@@ -1139,6 +1163,16 @@ void ControlCenter::Activate(const std::wstring& id)
         OpenUri(status_.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep");
     }
     Log(L"control: %s", id.rfind(L"net:", 0) == 0 ? L"connect" : id.rfind(L"bt:", 0) == 0 ? L"device" : id.rfind(L"disp:", 0) == 0 ? L"project" : id.c_str());
+}
+
+void ControlCenter::SetStage(bool on, bool onRight)
+{
+    if (on == stageOn_ && onRight == stageRight_)
+        return;
+    stageOn_ = on;
+    stageRight_ = onRight;
+    if (surface_.Visible())
+        surface_.Invalidate();
 }
 
 void ControlCenter::BrightnessChanged(int percent)

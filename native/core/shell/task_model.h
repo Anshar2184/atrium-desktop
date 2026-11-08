@@ -69,8 +69,9 @@ public:
     TaskModel& operator=(const TaskModel&) = delete;
 
     // Pinned items first in pin order, then running unpinned groups in the
-    // order they first appeared. Unpinned groups are omitted if !showRunning.
-    std::vector<TaskItem> Snapshot() const;
+    // order they first appeared. Unpinned groups are omitted if !showRunning,
+    // unless `all` (Stage Manager sees every app).
+    std::vector<TaskItem> Snapshot(bool all = false) const;
 
     void SetPins(const std::vector<PinnedApp>& pins);
     void SetShowRunning(bool show);

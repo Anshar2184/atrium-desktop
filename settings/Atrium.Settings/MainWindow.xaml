@@ -335,6 +335,26 @@
                             <local:ToggleTile x:Name="HideBannersSwitch" Title="隐藏系统通知横幅" SwitchName="隐藏系统通知横幅" Toggled="OnHideBannersToggled"
                                               Note="打开 Windows 的“请勿打扰”；通知照常显示为 Atrium 卡片。关闭开关或退出时恢复。" />
                         </local:ResponsiveGrid>
+                        <TextBlock Text="窗口" Style="{StaticResource SectionStyle}" Margin="4,28,0,10" />
+                        <local:ResponsiveGrid MinCellWidth="280" Gap="12" StretchLastRow="True">
+                            <local:ToggleTile x:Name="StageSwitch" Title="台前调度" SwitchName="台前调度" Toggled="OnStageToggled"
+                                              Note="前面的应用留在屏幕中间，其他应用收进屏幕一侧。" />
+                            <Border Style="{StaticResource TileStyle}">
+                                <Grid ColumnSpacing="12" MinHeight="32">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="最近使用的应用" Style="{StaticResource RowTitleStyle}" VerticalAlignment="Center" />
+                                    <local:SegmentTrack Grid.Column="1">
+                                        <RadioButton x:Name="StageLeft" GroupName="stageside" Content="左侧" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
+                                        <RadioButton x:Name="StageRight" GroupName="stageside" Content="右侧" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnStageSideChecked" />
+                                    </local:SegmentTrack>
+                                </Grid>
+                            </Border>
+                        </local:ResponsiveGrid>
+                        <TextBlock Style="{StaticResource FootnoteStyle}" Margin="4,10,0,0" TextWrapping="Wrap" MaxWidth="760" HorizontalAlignment="Left"
+                                   Text="台前调度：前面的应用留在屏幕中间，其他应用的窗口收进屏幕一侧，显示为缩略图。点按缩略图换到前面，按住 Shift 点按则加入当前这一组。窗口挡住缩略图时，把指针移到屏幕边缘即可唤出。关闭开关或退出 Atrium 时，收起的窗口全部恢复。" />
                     </StackPanel>
 
                     <!-- ==== Design language: built in code (MainWindow.Design.cs) the first time it is shown ==== -->

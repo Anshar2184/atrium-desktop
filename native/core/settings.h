@@ -50,6 +50,9 @@ struct Settings {
     bool widgets = true;             // desktop widgets (their layout is widgets.json)
     bool widgetsOnRight = false;     // mirror the logical grid without rewriting widgets.json
     std::wstring widgetBackdrop = L"desktop"; // the widgets' glass: desktop (captured live, D38) | wallpaper (the files, least work)
+    // Stage Manager (ui/stage_manager.h): the app in front on the stage, the others in a strip at the side.
+    bool stageManager = false;
+    bool stageOnRight = false;       // the strip's side; left by default
     // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
     bool hideTaskbar = false;        // the system taskbar is hidden while Atrium runs
     bool hideBanners = false;        // Do Not Disturb: no system banners, the notifications still become cards

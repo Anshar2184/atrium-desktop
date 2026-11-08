@@ -40,8 +40,11 @@ public:
     void SetStatus(const SystemStatus& status);
     // Windows reported the built-in screen's brightness (keys, quick settings).
     void BrightnessChanged(int percent);
+    // Stage Manager's state, for its switch.
+    void SetStage(bool on, bool onRight);
 
     std::function<void()> onChanged; // volume, mute or the network changed: the bar's icon updates
+    std::function<void(bool)> onStage; // Stage Manager's switch was pressed: on or off
 
 private:
     enum class Page { Main, Wifi, Bluetooth, Sound, Cast };
@@ -123,6 +126,7 @@ private:
     D2D1_RECT_F volumeTrack_{}, brightTrack_{}; // the sliders' tracks, DIP
     RECT anchor_{}, bar_{};
     float radius_ = 30, barH_ = 60;
+    bool stageOn_ = false, stageRight_ = false;
     ULONGLONG lastClosed_ = 0;
     bool private_ = false;
     std::map<std::wstring, motion::Follow> hoverAnim_;

@@ -659,6 +659,8 @@ public sealed partial class MainWindow : Window
         WidgetsSwitch.IsOn = _current.Widgets;
         (_current.WidgetsOnRight ? WidgetsRight : WidgetsLeft).IsChecked = true;
         HideTaskbarSwitch.IsOn = _current.HideTaskbar;
+        StageSwitch.IsOn = _current.StageManager;
+        (_current.StageOnRight ? StageRight : StageLeft).IsChecked = true;
         (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
         HideBannersSwitch.IsOn = _current.HideBanners;
         StartupSwitch.IsOn = _current.StartOnLogin;
@@ -790,6 +792,20 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.HideTaskbar = HideTaskbarSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnStageToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.StageManager = StageSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnStageSideChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || sender is not RadioButton { Tag: string tag }) return;
+        _current.StageOnRight = tag == "right";
         Changed();
     }
 

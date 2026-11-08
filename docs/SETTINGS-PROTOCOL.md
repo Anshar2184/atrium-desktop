@@ -39,6 +39,8 @@
 | `widgets` | bool | | true | 桌面小组件；布局由 Core 存于 `widgets.json`（D35） |
 | `widgetsOnRight` | bool | | false | 小组件逻辑网格从右侧排布；切换时镜像现有列，不改写 `widgets.json` |
 | `widgetBackdrop` | string | `desktop` / `wallpaper` | `desktop` | 小组件玻璃的背景：实时抓取桌面窗口，或直接读取壁纸图片（省电）；都不含上层窗口（D38） |
+| `stageManager` | bool | | false | 台前调度：前台应用留在屏幕中间，其他应用的窗口最小化（不激活）并在屏幕一侧显示为实时缩略图；关闭或 Core 退出时全部恢复。Core 把收起的窗口记在 `%LOCALAPPDATA%\Atrium\stage.json`（窗口句柄、应用键与分组），异常退出后再次启动时接回仍处于最小化的窗口 |
+| `stageOnRight` | bool | | false | 台前调度的缩略图放在屏幕右侧；默认左侧 |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37） |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |
 | `startOnLogin` | bool | | true | 当前用户开机自启；仅在正式安装归属变化或用户切换此值时写 Windows 开机项；开发构建不修改该项 |

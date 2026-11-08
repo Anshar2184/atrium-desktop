@@ -23,6 +23,7 @@
 #include "ui/glass_menu.h"
 #include "ui/window_preview.h"
 #include "ui/notifications.h"
+#include "ui/stage_manager.h"
 #include "ui/start_menu.h"
 #include "ui/tray_panel.h"
 
@@ -62,7 +63,7 @@ constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
     kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager,
-    kCmdWidgets
+    kCmdWidgets, kCmdStage
 };
 
 struct App {
@@ -89,6 +90,7 @@ struct App {
     std::unique_ptr<SystemChrome> chrome;
     std::unique_ptr<GlassMenu> menu;
     std::unique_ptr<WindowPreview> preview;
+    std::unique_ptr<StageManager> stage;
     bool widgetsOn = false;
     int brightness = -1; // the built-in screen's, from GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS
     HPOWERNOTIFY brightnessNotify = nullptr;
@@ -322,6 +324,7 @@ void ShowMenu(POINT pt)
     std::vector<MenuEntry> entries = {{L"外观设置…", kCmdSettings}, {}, {L"显示桌面", kCmdDesktop}, {L"任务管理器", kCmdTaskManager}};
     if (g_app.widgetsOn)
         entries.push_back({L"添加小组件…", kCmdWidgets});
+    entries.push_back({L"台前调度", kCmdStage, g_app.stage->Enabled()});
     entries.push_back({});
     entries.push_back({g_app.bar->Visible() ? L"隐藏玻璃栏" : L"显示玻璃栏", kCmdToggle});
     entries.push_back({L"退出 Atrium", kCmdExit});
@@ -339,6 +342,11 @@ void ShowMenu(POINT pt)
         case kCmdDesktop:
             SendWinShortcut('D');
             break;
+        case kCmdStage: {
+            bool on = !g_app.stage->Enabled();
+            g_app.server->Modify([on](Settings& s) { s.stageManager = on; });
+            break;
+        }
         case kCmdTaskManager:
             ShellExecuteW(nullptr, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
             break;
@@ -458,6 +466,10 @@ void ApplySettings(const Settings& s)
     RECT bar = g_app.bar->BarRect();
     g_app.widgets->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
     g_app.widgets->SetOnRight(s.widgetsOnRight);
+    g_app.stage->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
+    g_app.stage->SetOnRight(s.stageOnRight);
+    g_app.stage->SetEnabled(s.stageManager);
+    g_app.control->SetStage(s.stageManager, s.stageOnRight);
     g_app.widgets->SetEnabled(s.widgets);
     g_app.widgetsOn = s.widgets;
     if (g_app.chrome) {
@@ -839,6 +851,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     Surface::SetCapturable(capturable);
     g_app.menu = std::make_unique<GlassMenu>(instance);
     g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
+        if (g_app.stage)
+            g_app.stage->Update(g_app.tasks->Snapshot(true));
         auto items = g_app.tasks->Snapshot();
         if (g_app.preview)
             g_app.preview->Refresh(items);
@@ -870,6 +884,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.start->onStatusRequest = UpdateStatus;
     g_app.calendar = std::make_unique<CalendarPanel>(instance);
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
+    // Stage Manager: its strip keeps the widgets out of its way.
+    g_app.stage = std::make_unique<StageManager>(instance, *g_app.tasks);
+    g_app.stage->onReserve = [] {
+        float room = g_app.stage->Reserve();
+        g_app.widgets->SetReserve(g_app.stage->OnRight() ? 0 : room, g_app.stage->OnRight() ? room : 0);
+    };
+    g_app.control->onStage = [](bool on) { g_app.server->Modify([on](Settings& s) { s.stageManager = on; }); };
     g_app.widgets->onStatusRequest = UpdateStatus;
     g_app.status = std::make_unique<SystemStatusReader>(g_app.host, WM_STATUS, WM_VOLUME);
     g_app.widgets->menu = g_app.menu.get();
@@ -949,6 +970,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // in the desktop duplication (it holds the shared device) must not keep Atrium from exiting:
     // the system taskbar comes back and the process ends.
     if (g_app.chrome) g_app.chrome->RestoreForExit();
+    g_app.stage->RestoreAll(); // the windows Stage Manager put away come back
     g_app.status.reset();
     g_app.preview->Close();
     if (!g_app.bar->StopRendering(3000)) {
@@ -973,6 +995,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.start.reset();
     g_app.menu.reset();
     g_app.preview.reset();
+    g_app.stage.reset();
     Surface::SetGlassHost(nullptr);
     g_app.catalog.reset();
     g_app.tasks.reset();

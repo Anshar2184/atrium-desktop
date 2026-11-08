@@ -1023,9 +1023,9 @@ struct TaskModel::Impl {
         return nullptr;
     }
 
-    std::vector<TaskItem> Snapshot() const
+    std::vector<TaskItem> Snapshot(bool all) const
     {
-        if (showRunning)
+        if (showRunning || all)
             return items;
         std::vector<TaskItem> out;
         for (const TaskItem& t : items)
@@ -1554,10 +1554,10 @@ TaskModel::TaskModel(HWND uiWindow, std::function<void()> onChanged, std::functi
 
 TaskModel::~TaskModel() = default;
 
-std::vector<TaskItem> TaskModel::Snapshot() const
+std::vector<TaskItem> TaskModel::Snapshot(bool all) const
 {
     try {
-        return impl_->Snapshot();
+        return impl_->Snapshot(all);
     } catch (...) {
         Log(L"tasks: Snapshot failed");
         return {};

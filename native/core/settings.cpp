@@ -86,6 +86,8 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
     o.SetNamedValue(L"widgetsOnRight", json::JsonValue::CreateBooleanValue(widgetsOnRight));
     o.SetNamedValue(L"widgetBackdrop", json::JsonValue::CreateStringValue(widgetBackdrop));
+    o.SetNamedValue(L"stageManager", json::JsonValue::CreateBooleanValue(stageManager));
+    o.SetNamedValue(L"stageOnRight", json::JsonValue::CreateBooleanValue(stageOnRight));
     o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
     o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
     o.SetNamedValue(L"startOnLogin", json::JsonValue::CreateBooleanValue(startOnLogin));
@@ -157,6 +159,8 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"notifyFeishu", s.notifyFeishu);
     flag(L"widgets", s.widgets);
     flag(L"widgetsOnRight", s.widgetsOnRight);
+    flag(L"stageManager", s.stageManager);
+    flag(L"stageOnRight", s.stageOnRight);
     flag(L"hideTaskbar", s.hideTaskbar);
     flag(L"hideBanners", s.hideBanners);
     flag(L"startOnLogin", s.startOnLogin);
