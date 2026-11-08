@@ -12,37 +12,44 @@
 #>
 param(
     [string]$Configuration = "Release",
-    [switch]$Zip
+    [switch]$Zip,
+    [switch]$Development
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$dist = Join-Path $root "dist/Atrium"
+$dist = Join-Path $root $(if ($Development) { "dist/Development/Atrium" } else { "dist/Atrium" })
+$buildDirectory = if ($Development) { 'native/build/development' } else { 'native/build/win-x64' }
+$developmentFlag = if ($Development) { 'ON' } else { 'OFF' }
 
 Push-Location $root
 try {
-    cmake --preset win-x64 -S native
+    cmake --preset win-x64 -S native -B $buildDirectory "-DATRIUM_DEVELOPMENT=$developmentFlag"
     if ($LASTEXITCODE) { throw "cmake configure failed" }
-    cmake --build native/build/win-x64 --config $Configuration
+    cmake --build $buildDirectory --config $Configuration
     if ($LASTEXITCODE) { throw "native build failed" }
 
     if (Test-Path $dist) {
         # A running Atrium (or its settings window) locks files: stop before deleting anything.
         $full = (Resolve-Path $dist).Path
-        $busy = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($full, [StringComparison]::OrdinalIgnoreCase) })
+        $expected = [IO.Path]::GetFullPath((Join-Path $root $(if ($Development) { 'dist/Development/Atrium' } else { 'dist/Atrium' })))
+        if (![string]::Equals($full, $expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected distribution path' }
+        $busy = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($full + '\', [StringComparison]::OrdinalIgnoreCase) })
         if ($busy) { throw "dist/Atrium is in use by $(($busy | ForEach-Object { "$($_.Name) ($($_.Id))" }) -join ', '); close it first" }
         Remove-Item -Recurse -Force $dist
     }
     New-Item -ItemType Directory -Force $dist | Out-Null
-    dotnet publish settings/Atrium.Settings/Atrium.Settings.csproj -c $Configuration -o (Join-Path $dist "Settings")
+    dotnet publish settings/Atrium.Settings/Atrium.Settings.csproj -c $Configuration -p:AtriumDevelopment=$($Development.IsPresent.ToString().ToLowerInvariant()) -o (Join-Path $dist "Settings")
     if ($LASTEXITCODE) { throw "settings publish failed" }
 
-    Copy-Item (Join-Path "native/build/win-x64/$Configuration" "Atrium.exe") $dist
+    Copy-Item (Join-Path "$buildDirectory/$Configuration" "Atrium.exe") $dist
+    if ($Development) { Set-Content -LiteralPath (Join-Path $dist 'development.txt') -Value 'Development distribution: does not register or change Windows startup.' }
     Copy-Item (Join-Path $PSScriptRoot "Uninstall.ps1") $dist
     Copy-Item LICENSE $dist
 
     if ($Zip) {
         $version = (Select-String -Path native/CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
-        $zipPath = Join-Path $root "dist/Atrium-$version-win-x64.zip"
+        $zipPath = if ($Development) { Join-Path $root "dist/Development/Atrium-$version-development-win-x64.zip" }
+                   else { Join-Path $root "dist/Atrium-$version-win-x64.zip" }
         if (Test-Path $zipPath) { Remove-Item $zipPath }
         Compress-Archive -Path $dist -DestinationPath $zipPath
         Write-Host "wrote $zipPath"

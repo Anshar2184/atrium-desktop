@@ -1,8 +1,10 @@
 #include "glass_renderer.h"
+#include "continuous_corners.h"
 
 #include "compare_cs.h"
 #include "glass_ps.h"
 #include "glass_vs.h"
+#include "backdrop_edge_ps.h"
 #include "../motion.h"
 
 #include <algorithm>
@@ -72,18 +74,21 @@ void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool op
 
 void GlassRenderer::Pop(bool open, float cx, float cy) { PopVisual(dcomp_.get(), visual_.get(), open, cx, cy); }
 
-GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost, bool overlay) : gpu_(gpu), w_(width), h_(height)
+GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost, bool overlay, bool alignedBackdrop)
+    : gpu_(gpu), w_(width), h_(height), alignedBackdrop_(alignedBackdrop)
 {
     sync_ = overlay ? 1 : 0; // the bar draws its content over the glass; a popup's content is its own
     auto* dev = gpu_.device.get();
     Check(dev->CreateVertexShader(g_GlassVS, sizeof(g_GlassVS), nullptr, vs_.put()));
     Check(dev->CreatePixelShader(g_GlassPS, sizeof(g_GlassPS), nullptr, ps_.put()));
+    Check(dev->CreatePixelShader(g_BackdropEdgePS, sizeof(g_BackdropEdgePS), nullptr, edgePs_.put()));
     Check(dev->CreateComputeShader(g_CompareCS, sizeof(g_CompareCS), nullptr, cs_.put()));
 
     D3D11_BUFFER_DESC cbd{sizeof(GlassParams), D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER};
     Check(dev->CreateBuffer(&cbd, nullptr, cb_.put()));
     D3D11_BUFFER_DESC ccbd{16, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER};
     Check(dev->CreateBuffer(&ccbd, nullptr, cmpCb_.put()));
+    Check(dev->CreateBuffer(&ccbd, nullptr, edgeCb_.put()));
     // Out[0] changed pixels, Out[1] max difference (per-tile slots unused here).
     D3D11_BUFFER_DESC ob{4 * 4, D3D11_USAGE_DEFAULT, D3D11_BIND_UNORDERED_ACCESS, 0, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, 4};
     Check(dev->CreateBuffer(&ob, nullptr, cmpOut_.put()));
@@ -154,6 +159,7 @@ GlassRenderer::GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, b
 
 GlassRenderer::~GlassRenderer()
 {
+    ForgetContinuousMasks(d2d_.get());
     if (waitable_)
         CloseHandle(waitable_);
 }
@@ -165,10 +171,21 @@ bool GlassRenderer::Ready()
     return ready_;
 }
 
+void GlassRenderer::SetOffset(POINT offset)
+{
+    // DXGI applies this translation with the next pixel buffer, not as an
+    // independently committed DirectComposition visual property.
+    const DXGI_MATRIX_3X2_F matrix{1, 0, 0, 1, float(offset.x), float(offset.y)};
+    Check(swap_.as<IDXGISwapChain2>()->SetMatrixTransform(&matrix));
+}
+
 void GlassRenderer::CreateSizeDependent()
 {
     auto* dev = gpu_.device.get();
-    UINT rw = UINT(w_ + 2 * kPad), rh = UINT(h_ + 2 * kPad);
+    // All blur levels (up to ceil(5.5) = 6) retain the desktop's texel phase.
+    // A moving crop must not rebuild a different box-filter grid each frame.
+    auto extent = [&](int size) { return alignedBackdrop_ ? UINT((size + 2 * kPad + 63 + 63) / 64 * 64) : UINT(size + 2 * kPad); };
+    const UINT rw = roiW_ = extent(w_), rh = roiH_ = extent(h_);
     D3D11_TEXTURE2D_DESC td{};
     td.Width = rw;
     td.Height = rh;
@@ -180,8 +197,15 @@ void GlassRenderer::CreateSizeDependent()
     td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
     roi_ = nullptr;
     roiSrv_ = nullptr;
+    roiRtv_ = nullptr;
+    edgeSourceSrv_ = nullptr;
+    edgeSource_ = nullptr;
     Check(dev->CreateTexture2D(&td, nullptr, roi_.put()));
     Check(dev->CreateShaderResourceView(roi_.get(), nullptr, roiSrv_.put()));
+    D3D11_RENDER_TARGET_VIEW_DESC rd{};
+    rd.Format = td.Format;
+    rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    Check(dev->CreateRenderTargetView(roi_.get(), &rd, roiRtv_.put()));
     // Luminance grid: the first mip at most 96 texels wide (~16 px cells).
     D3D11_TEXTURE2D_DESC created{};
     roi_->GetDesc(&created);
@@ -231,16 +255,80 @@ void GlassRenderer::UpdateBackdrop(ID3D11Texture2D* frame, int x, int y)
 {
     D3D11_TEXTURE2D_DESC fd{};
     frame->GetDesc(&fd);
-    int x0 = x - kPad, y0 = y - kPad, x1 = x + w_ + kPad, y1 = y + h_ + kPad;
+    int x0 = x - kPad, y0 = y - kPad;
+    if (alignedBackdrop_) {
+        x0 = int(std::floor(double(x0) / 64)) * 64;
+        y0 = int(std::floor(double(y0) / 64)) * 64;
+    }
+    roiOrigin_ = POINT{x - x0, y - y0};
+    int x1 = x0 + int(roiW_), y1 = y0 + int(roiH_);
     int cx0 = std::max(0, x0), cy0 = std::max(0, y0), cx1 = std::min(int(fd.Width), x1), cy1 = std::min(int(fd.Height), y1);
-    if (cx1 <= cx0 || cy1 <= cy0)
-        return;
-    D3D11_BOX box{UINT(cx0), UINT(cy0), 0, UINT(cx1), UINT(cy1), 1};
-    gpu_.context->CopySubresourceRegion(roi_.get(), 0, UINT(cx0 - x0), UINT(cy0 - y0), 0, frame, 0, &box);
+    if (!fd.Width || !fd.Height) return;
+    if (cx1 > cx0 && cy1 > cy0) {
+        D3D11_BOX box{UINT(cx0), UINT(cy0), 0, UINT(cx1), UINT(cy1), 1};
+        gpu_.context->CopySubresourceRegion(roi_.get(), 0, UINT(cx0 - x0), UINT(cy0 - y0), 0, frame, 0, &box);
+    }
+    if (x0 < 0 || y0 < 0 || x1 > int(fd.Width) || y1 > int(fd.Height))
+        ExtendBackdropEdges(frame, fd, x0, y0);
     mipsDirty_ = true;
     hasBackdrop_ = true;
     comparisonPending_ = true;
     QueueComparison();
+}
+
+void GlassRenderer::ExtendBackdropEdges(ID3D11Texture2D* frame, const D3D11_TEXTURE2D_DESC& source, int x, int y)
+{
+    auto* ctx = gpu_.context.get();
+    if (!edgeSource_) {
+        // Reused local scratch, allocated only at a monitor edge. Captured
+        // textures need not have SHADER_RESOURCE binding, so copy their borders.
+        D3D11_TEXTURE2D_DESC td{roiW_, roiH_, 1, 1, source.Format, {1, 0}, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE};
+        Check(gpu_.device->CreateTexture2D(&td, nullptr, edgeSource_.put()));
+        Check(gpu_.device->CreateShaderResourceView(edgeSource_.get(), nullptr, edgeSourceSrv_.put()));
+    }
+    const int l = std::clamp(x, 0, int(source.Width) - 1), t = std::clamp(y, 0, int(source.Height) - 1);
+    const int r = std::clamp(x + int(roiW_), 1, int(source.Width)), b = std::clamp(y + int(roiH_), 1, int(source.Height));
+    const int width = r - l, height = b - t;
+    auto copy = [&](UINT dx, UINT dy, int left, int top, int right, int bottom) {
+        D3D11_BOX box{UINT(left), UINT(top), 0, UINT(right), UINT(bottom), 1};
+        ctx->CopySubresourceRegion(edgeSource_.get(), 0, dx, dy, 0, frame, 0, &box);
+    };
+    if (y < 0) copy(0, 0, l, t, r, t + 1);
+    if (y + int(roiH_) > int(source.Height)) copy(0, UINT(height - 1), l, b - 1, r, b);
+    if (x < 0) copy(0, 0, l, t, l + 1, b);
+    if (x + int(roiW_) > int(source.Width)) copy(UINT(width - 1), 0, r - 1, t, r, b);
+
+    const int params[] = {x - l, y - t, width, height};
+    ctx->UpdateSubresource(edgeCb_.get(), 0, nullptr, params, 0, 0);
+    ID3D11Buffer* cb = edgeCb_.get();
+    ctx->PSSetConstantBuffers(0, 1, &cb);
+    ID3D11RenderTargetView* target = roiRtv_.get();
+    ctx->OMSetRenderTargets(1, &target, nullptr);
+    ctx->OMSetBlendState(nullptr, nullptr, ~0u);
+    D3D11_VIEWPORT viewport{0, 0, float(roiW_), float(roiH_), 0, 1};
+    ctx->RSSetViewports(1, &viewport);
+    ctx->RSSetState(scissor_.get());
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(vs_.get(), nullptr, 0);
+    ctx->PSSetShader(edgePs_.get(), nullptr, 0);
+    ID3D11ShaderResourceView* resource = edgeSourceSrv_.get();
+    ctx->PSSetShaderResources(0, 1, &resource);
+    auto draw = [&](int left, int top, int right, int bottom) {
+        if (right <= left || bottom <= top) return;
+        D3D11_RECT rect{left, top, right, bottom};
+        ctx->RSSetScissorRects(1, &rect);
+        ctx->Draw(3, 0);
+    };
+    const int top = std::clamp(-y, 0, int(roiH_)), bottom = std::clamp(int(source.Height) - y, 0, int(roiH_));
+    draw(0, 0, int(roiW_), top);
+    draw(0, bottom, int(roiW_), int(roiH_));
+    draw(0, top, std::clamp(-x, 0, int(roiW_)), bottom);
+    draw(std::clamp(int(source.Width) - x, 0, int(roiW_)), top, int(roiW_), bottom);
+    resource = nullptr;
+    ctx->PSSetShaderResources(0, 1, &resource);
+    ctx->OMSetRenderTargets(0, nullptr, nullptr);
+    ctx->RSSetState(nullptr);
 }
 
 void GlassRenderer::PrepareBackdrop()
@@ -269,12 +357,13 @@ bool GlassRenderer::QueueComparison()
     ctx->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
     ID3D11Buffer* cb = cmpCb_.get();
     ctx->CSSetConstantBuffers(0, 1, &cb);
-    ctx->Dispatch(UINT(w_ + 2 * kPad + kCompareGroup - 1) / kCompareGroup, UINT(h_ + 2 * kPad + kCompareGroup - 1) / kCompareGroup, 1);
+    ctx->Dispatch((roiW_ + kCompareGroup - 1) / kCompareGroup, (roiH_ + kCompareGroup - 1) / kCompareGroup, 1);
     ID3D11ShaderResourceView* noSrv[2] = {};
     ctx->CSSetShaderResources(0, 2, noSrv);
     ID3D11UnorderedAccessView* noUav = nullptr;
     ctx->CSSetUnorderedAccessViews(0, 1, &noUav, nullptr);
     int slot = nextSlot_;
+    slots_[slot].origin = roiOrigin_;
     nextSlot_ = (nextSlot_ + 1) % kSlots;
     ctx->CopyResource(slots_[slot].counters.get(), cmpOut_.get());
     ctx->CopySubresourceRegion(slots_[slot].grid.get(), 0, 0, 0, 0, roi_.get(), gridMip_, nullptr);
@@ -298,8 +387,9 @@ bool GlassRenderer::ReadSlot(int slot, Readback& out)
     Check(hr);
     out.gridW = gridW_;
     out.gridH = gridH_;
-    out.cellX = float(w_ + 2 * kPad) / float(gridW_);
-    out.cellY = float(h_ + 2 * kPad) / float(gridH_);
+    out.cellX = float(roiW_) / float(gridW_);
+    out.cellY = float(roiH_) / float(gridH_);
+    out.origin = slots_[slot].origin;
     out.luma.resize(size_t(gridW_) * size_t(gridH_));
     for (int y = 0; y < gridH_; ++y) {
         const auto* row = static_cast<const uint8_t*>(m.pData) + size_t(y) * m.RowPitch;
@@ -381,9 +471,10 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
         GlassParams p = shapes[k];
         p.sizeX = float(w_);
         p.sizeY = float(h_);
-        p.roiOriginX = p.roiOriginY = float(kPad);
-        p.roiSizeX = float(w_ + 2 * kPad);
-        p.roiSizeY = float(h_ + 2 * kPad);
+        p.roiOriginX = float(roiOrigin_.x);
+        p.roiOriginY = float(roiOrigin_.y);
+        p.roiSizeX = float(roiW_);
+        p.roiSizeY = float(roiH_);
         if (p.shapeR <= p.shapeL || p.shapeB <= p.shapeT) {
             p.shapeL = p.shapeT = p.inset;
             p.shapeR = float(w_) - p.inset;
@@ -392,6 +483,8 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
         // The shader runs only over the shape's bounds and its shadow (a tall
         // popup with a few cards would otherwise shade every pixel per card).
         float l = p.shapeL, t = p.shapeT, r = p.shapeR, b = p.shapeB;
+        if (p.tailHeight > 0)
+            b += p.tailHeight;
         for (int i = 0; i < int(p.partCount) && i < kMaxGlassParts; ++i) {
             l = std::min(l, p.parts[i][0]);
             t = std::min(t, p.parts[i][1]);

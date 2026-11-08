@@ -559,6 +559,10 @@ void DesktopWidgets::Place(Widget& w, bool glide)
         w.surface->Move(to);
         return;
     }
+    RECT current = w.surface->Rect();
+    if (current.right - current.left != to.right - to.left || current.bottom - current.top != to.bottom - to.top)
+        w.surface->ReserveResize(D2D1::SizeF(WidgetWidth(WidgetSupports(w.kind, WidgetSize::Medium) ? WidgetSize::Medium : WidgetSize::Small),
+                                           WidgetHeight(WidgetSupports(w.kind, WidgetSize::Large) ? WidgetSize::Large : WidgetSize::Small)));
     w.glideFrom = w.surface->Rect();
     w.glideTo = to;
     w.glideMs = ClockMs();
@@ -578,9 +582,11 @@ void DesktopWidgets::Glide()
         RECT r{lerp(w->glideFrom.left, w->glideTo.left), lerp(w->glideFrom.top, w->glideTo.top), lerp(w->glideFrom.right, w->glideTo.right),
                lerp(w->glideFrom.bottom, w->glideTo.bottom)};
         w->surface->Move(r);
-        if (k >= 1)
+        if (k >= 1) {
             w->glideMs = 0;
-        else
+            if (!w->resizing)
+                w->surface->ReserveResize(D2D1::SizeF());
+        } else
             any = true;
     }
     if (!any)
@@ -607,7 +613,14 @@ bool DesktopWidgets::Add(WidgetKind kind, WidgetSize size)
 bool DesktopWidgets::AddNamed(const std::wstring& kind, const std::wstring& size)
 {
     WidgetKind k;
-    return ParseKind(kind, k) && Add(k, ParseSize(size));
+    WidgetSize s;
+    return ParseNames(kind, size, k, s) && Add(k, s);
+}
+
+bool DesktopWidgets::ParseNames(const std::wstring& kind, const std::wstring& size, WidgetKind& outKind, WidgetSize& outSize)
+{
+    outSize = ParseSize(size);
+    return ParseKind(kind, outKind);
 }
 
 void DesktopWidgets::Remove(Widget& w)
@@ -1020,8 +1033,11 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
         w.resizing = grip != 0;
         w.downSize = w.size;
         w.downCol = w.col;
-        if (w.resizing)
+        if (w.resizing) {
             EndEdit(w);
+            w.surface->ReserveResize(D2D1::SizeF(WidgetWidth(WidgetSupports(w.kind, WidgetSize::Medium) ? WidgetSize::Medium : WidgetSize::Small),
+                                                WidgetHeight(WidgetSupports(w.kind, WidgetSize::Large) ? WidgetSize::Large : WidgetSize::Small)));
+        }
         SetCapture(w.surface->Hwnd());
         return true;
     }
@@ -1069,6 +1085,8 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
             w.surface->Invalidate();
         }
         if (resized) {
+            if (w.glideMs <= 0)
+                w.surface->ReserveResize(D2D1::SizeF());
             if (w.size != w.downSize) {
                 if (w.kind == WidgetKind::Photos)
                     LoadPhoto(w, false); // the same photo, cropped for the new size
@@ -1426,18 +1444,26 @@ void DesktopWidgets::Menu(Widget& w)
 
 void DesktopWidgets::Paint(Widget& w, Canvas& c)
 {
+    RECT rect = w.surface->Rect();
+    const float width = float(rect.right - rect.left) / c.scale, height = float(rect.bottom - rect.top) / c.scale;
+    const auto bounds = D2D1::RectF(0, 0, width, height);
+    // Preserve each size's layout. Only its viewport grows or shrinks, so a
+    // large face is revealed without squeezing its columns into a small one.
+    c.Clip(bounds);
     if (c.panel)
-        c.Fill(D2D1::RectF(0, 0, WidgetWidth(w.size), WidgetHeight(w.size)), kWidgetRadius, c.theme.panel);
+        c.Fill(bounds, 0, c.theme.panel);
     GetLocalTime(&world_.now);
     if (w.kind == WidgetKind::Reminders)
         w.content.scroll = std::clamp(w.content.scroll, 0.f, ReminderScrollMax(w.content, w.size));
     PaintWidget(c, w.kind, w.size, w.content, world_, w.hits);
     if ((w.hover || w.resizing) && !w.dragging && Resizable(w.kind)) {
         // Both corners use the same quiet arc; either can be dragged to resize.
-        const float r = kWidgetRadius, h = WidgetHeight(w.size);
+        const float r = kWidgetRadius, h = height;
         c.Arc(r, h - r, r - 6, 100.f, 170.f, c.theme.subtext, 3.5f);
-        c.Arc(WidgetWidth(w.size) - r, h - r, r - 6, 10.f, 80.f, c.theme.subtext, 3.5f);
+        c.Arc(width - r, h - r, r - 6, 10.f, 80.f, c.theme.subtext, 3.5f);
     }
+    c.Unclip();
+    c.MaskRounded(bounds, kWidgetRadius);
     if (w.content.editing)
         PlaceImeWindow(w);
 }

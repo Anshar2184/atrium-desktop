@@ -1,13 +1,13 @@
 using System.Diagnostics;
 using System.IO.Compression;
-using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Atrium.Settings;
 
-// Download/stage in the user cache. Only the user's restart action runs the
-// short-lived replacement script; no updater service or background installer.
+// BITS owns downloads; its completion starts this executable in headless mode
+// to validate/stage the package. Only the user's restart action replaces the app.
 internal static class ReleaseInstaller
 {
     internal sealed record Prepared(string Tag, string Version, string Directory);
@@ -16,12 +16,15 @@ internal static class ReleaseInstaller
     internal static string CacheDirectory => Path.Combine(Path.GetDirectoryName(CoreClient.SettingsPath)!, "Updates",
         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(InstallDirectory.ToUpperInvariant())))[..16]);
     private static string StatePath => Path.Combine(CacheDirectory, "ready.json");
+    private static string DownloadPath => Path.Combine(CacheDirectory, "download.json");
+    private static string WorkDirectory => Path.Combine(CacheDirectory, "package-background");
     internal static string ResultPath => Path.Combine(CacheDirectory, "result.json");
+    private sealed record Download(ReleaseInfo Release, Guid Job, string? Error = null);
+    internal sealed record TransferStatus(string Text, bool CanRetry = false);
 
     internal static Prepared? ReadPrepared(Version current)
     {
-        if (!File.Exists(StatePath)) return null;
-        var ready = JsonSerializer.Deserialize<Prepared>(File.ReadAllText(StatePath));
+        var ready = ReadJson<Prepared>(StatePath);
         if (ready == null || !Version.TryParse(ready.Version, out var version) || version <= current) return null;
         if (!Path.GetFullPath(ready.Directory).StartsWith(CacheDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new IOException("更新缓存路径无效，请重新下载。");
@@ -38,67 +41,204 @@ internal static class ReleaseInstaller
         return string.IsNullOrEmpty(error) ? null : error;
     }
 
-    internal static async Task<Prepared> PrepareAsync(ReleaseInfo release, IProgress<string> progress, CancellationToken cancel)
+    internal static Process StartBackgroundDownload(ReleaseInfo release)
     {
-        Directory.CreateDirectory(CacheDirectory);
-        string work = Path.Combine(CacheDirectory, "package-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(work);
+        var start = BackgroundStart("--queue-update");
+        start.ArgumentList.Add(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(release))));
+        return Process.Start(start) ?? throw new IOException("无法开始后台下载，请重试。");
+    }
+
+    internal static Process ResumeBackgroundDownload() => Process.Start(BackgroundStart("--resume-update"))
+        ?? throw new IOException("无法恢复后台下载，请重试。");
+
+    private static ProcessStartInfo BackgroundStart(string command)
+    {
+        var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add(command);
+        return start;
+    }
+
+    internal static TransferStatus? ReadTransferStatus()
+    {
+        var download = ReadDownload();
+        if (download == null || download.Release.Version <= CurrentVersion) return null;
+        if (download.Error != null) return new("更新准备失败，请重试", true);
+        using var job = BitsTransfer.Open(download.Job);
+        if (job == null) return File.Exists(Path.Combine(WorkDirectory, "release.zip"))
+            ? new("正在准备更新…") : new("下载未完成，请重试", true);
+        if (job.CurrentState == BitsTransfer.State.Error) return new("后台下载失败，请重试", true);
+        if (job.CurrentState == BitsTransfer.State.Transferred) return new("正在准备更新…");
+        if (job.CurrentState == BitsTransfer.State.TransientError) return new("等待恢复后台下载…");
+        var progress = job.CurrentProgress;
+        return new(progress.Total is > 0 and < ulong.MaxValue
+            ? $"正在后台下载… {Math.Min(100, progress.Transferred * 100 / progress.Total)}%" : "正在后台下载…");
+    }
+
+    private static Version CurrentVersion => typeof(ReleaseInstaller).Assembly.GetName().Version!;
+    private static Download? ReadDownload() => ReadJson<Download>(DownloadPath);
+    private static T? ReadJson<T>(string path)
+    {
         try
         {
-            string zip = Path.Combine(work, "release.zip");
-            using (var response = await ReleaseInfo.Http.GetAsync(release.Download!, HttpCompletionOption.ResponseHeadersRead, cancel))
-            {
-                response.EnsureSuccessStatusCode();
-                using var input = await response.Content.ReadAsStreamAsync(cancel);
-                using var output = File.Create(zip);
-                byte[] buffer = new byte[81920];
-                long total = response.Content.Headers.ContentLength ?? 0, downloaded = 0;
-                int lastPercent = -1;
-                while (true)
-                {
-                    int count = await input.ReadAsync(buffer, cancel);
-                    if (count == 0) break;
-                    await output.WriteAsync(buffer.AsMemory(0, count), cancel);
-                    downloaded += count;
-                    int percent = total > 0 ? (int)(downloaded * 100 / total) : 0;
-                    if (percent != lastPercent)
-                    {
-                        progress.Report(total > 0 ? $"正在下载… {percent}%" : "正在下载…");
-                        lastPercent = percent;
-                    }
-                }
-                if (total > 0 && downloaded != total) throw new IOException("下载未完成，请重试。");
-            }
-            progress.Report("正在准备安装…");
-            string package = await Task.Run(() =>
-            {
-                cancel.ThrowIfCancellationRequested();
-                if (release.Digest is { } digest)
-                {
-                    using var stream = File.OpenRead(zip);
-                    string actual = "sha256:" + Convert.ToHexString(SHA256.HashData(stream));
-                    if (!actual.Equals(digest, StringComparison.OrdinalIgnoreCase)) throw new IOException("更新包校验失败，请重新下载。");
-                }
-                // ExtractToDirectory rejects entries escaping the destination directory.
-                string unpacked = Path.Combine(work, "unpacked");
-                ZipFile.ExtractToDirectory(zip, unpacked);
-                cancel.ThrowIfCancellationRequested();
-                string root = File.Exists(Path.Combine(unpacked, "Atrium.exe")) ? unpacked : Path.Combine(unpacked, "Atrium");
-                ValidatePackage(root, release.Version);
-                File.Delete(zip);
-                return root;
-            }, cancel);
-            var prepared = new Prepared(release.Tag, release.Version.ToString(), package);
-            string temporary = StatePath + ".tmp";
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(prepared), cancel);
-            File.Move(temporary, StatePath, true);
-            return prepared;
+            // The worker atomically replaces/removes state as the UI reads progress.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            return JsonSerializer.Deserialize<T>(stream) ?? throw new JsonException($"更新状态为空或不完整：{Path.GetFileName(path)}");
         }
-        catch
+        catch (FileNotFoundException) { return default; }
+        catch (DirectoryNotFoundException) { return default; }
+    }
+    private static void SaveJson<T>(string path, T value)
+    {
+        string temporary = path + ".tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(value));
+        File.Move(temporary, path, true);
+    }
+
+    // Called before XAML starts. The mutex covers the short queue/finalize work,
+    // not the transfer; closing any Atrium process never calls BITS.Cancel().
+    internal static int RunBackground(string[] args)
+    {
+        Download? pending = null;
+        string? cache = null;
+        Mutex? mutex = null;
+        bool acquired = false;
+        try
         {
-            Directory.Delete(work, true);
-            throw;
+            cache = CacheDirectory;
+            Directory.CreateDirectory(cache);
+            mutex = new Mutex(false, @"Local\Atrium.Update." + Path.GetFileName(cache));
+            try { mutex.WaitOne(); } catch (AbandonedMutexException) { }
+            acquired = true;
+            // Read once. Error reporting must not depend on the same corrupt or
+            // inaccessible state that brought us into the catch branch.
+            pending = ReadDownload();
+            if (args[0] == "--queue-update")
+            {
+                var release = JsonSerializer.Deserialize<ReleaseInfo>(Convert.FromBase64String(args[1]))
+                    ?? throw new JsonException("Missing release.");
+                Queue(release, pending);
+            }
+            else if (args[0] == "--resume-update")
+            {
+                if (pending != null) Queue(pending.Release, pending);
+                else NotifyReady();
+            }
+            else Finish(pending);
+            return 0;
         }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException or JsonException
+            or FormatException or InvalidOperationException or ArgumentException)
+        {
+            App.LogCrash(error);
+            if (cache != null)
+            {
+                try
+                {
+                    // A known transfer keeps its identity. Unknown/unreadable
+                    // state is left intact, including any recoverable package.
+                    SaveJson(Path.Combine(cache, "result.json"), new { error = $"更新未完成：{error.Message}" });
+                    File.WriteAllText(Path.Combine(cache, "worker-error.txt"), error.ToString());
+                    if (pending != null) SaveJson(DownloadPath, pending with { Error = error.Message });
+                }
+                catch (Exception reporting) when (reporting is IOException or UnauthorizedAccessException)
+                { App.LogCrash(new AggregateException("无法写入更新错误状态", error, reporting)); }
+            }
+            return args[0] == "--finish-update" ? 0 : 1; // permanent failures wait for a retry, not callback loops
+        }
+        finally
+        {
+            if (acquired) mutex!.ReleaseMutex();
+            mutex?.Dispose();
+        }
+    }
+
+    private static void Queue(ReleaseInfo release, Download? pending)
+    {
+        if (release.Download == null || release.Version <= CurrentVersion) return;
+        if (ReadPrepared(CurrentVersion) is { } ready && Version.Parse(ready.Version) >= release.Version)
+        { NotifyReady(); return; }
+        if (pending != null && pending.Release.Version > release.Version) release = pending.Release;
+        if (release.Download == null) return;
+        if (pending != null && pending.Release.Version >= release.Version && pending.Error == null)
+        {
+            bool finish = false;
+            using (var existing = BitsTransfer.Open(pending.Job))
+            {
+                if (existing != null)
+                {
+                    existing.OnTransferred(Environment.ProcessPath!);
+                    finish = existing.CurrentState == BitsTransfer.State.Transferred;
+                    if (!finish) { existing.Resume(); return; }
+                }
+            }
+            if (finish || File.Exists(Path.Combine(WorkDirectory, "release.zip"))) { Finish(pending); return; }
+        }
+        if (pending != null)
+        {
+            using var previous = BitsTransfer.Open(pending.Job);
+            previous?.Cancel(); // only this install's superseded or failed transfer
+        }
+        if (Directory.Exists(WorkDirectory)) Directory.Delete(WorkDirectory, true);
+        File.Delete(StatePath);
+        Directory.CreateDirectory(WorkDirectory);
+        using var job = BitsTransfer.Create("Atrium update " + Path.GetFileName(CacheDirectory));
+        try
+        {
+            SaveJson(DownloadPath, new Download(release, job.Id));
+            job.Add(release.Download, Path.Combine(WorkDirectory, "release.zip"));
+            job.OnTransferred(Environment.ProcessPath!);
+            job.Resume();
+        }
+        catch { job.Cancel(); throw; }
+    }
+
+    private static void Finish(Download? pending)
+    {
+        if (pending == null) { NotifyReady(); return; }
+        using (var job = BitsTransfer.Open(pending.Job))
+        {
+            if (job != null)
+            {
+                if (job.CurrentState == BitsTransfer.State.Error)
+                { SaveJson(DownloadPath, pending with { Error = "后台下载失败" }); return; }
+                if (job.CurrentState != BitsTransfer.State.Transferred) return;
+                job.Complete();
+            }
+        }
+        string zip = Path.Combine(WorkDirectory, "release.zip");
+        if (pending.Release.Digest is { } digest)
+        {
+            using var stream = File.OpenRead(zip);
+            string actual = "sha256:" + Convert.ToHexString(SHA256.HashData(stream));
+            if (!actual.Equals(digest, StringComparison.OrdinalIgnoreCase)) throw new IOException("更新包校验失败，请重新下载。");
+        }
+        string unpacked = Path.Combine(WorkDirectory, "unpacked");
+        if (Directory.Exists(unpacked)) Directory.Delete(unpacked, true); // an interrupted extraction, not transfer data
+        ZipFile.ExtractToDirectory(zip, unpacked);
+        string root = File.Exists(Path.Combine(unpacked, "Atrium.exe")) ? unpacked : Path.Combine(unpacked, "Atrium");
+        ValidatePackage(root, pending.Release.Version);
+        SaveJson(StatePath, new Prepared(pending.Release.Tag, pending.Release.Version.ToString(), root));
+        File.Delete(DownloadPath);
+        File.Delete(zip);
+        NotifyReady();
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string cls, string? title);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
+    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, uint message, UIntPtr wp, IntPtr lp);
+    private static void NotifyReady()
+    {
+        IntPtr host = FindWindow("AtriumCoreHost", null);
+        if (host == IntPtr.Zero) return;
+        GetWindowThreadProcessId(host, out uint pid);
+        try
+        {
+            using var core = Process.GetProcessById((int)pid);
+            if (string.Equals(core.MainModule?.FileName, CoreClient.CoreExe(), StringComparison.OrdinalIgnoreCase))
+                PostMessage(host, 0x8000 + 11, UIntPtr.Zero, IntPtr.Zero);
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { /* The core may have exited; it reads ready.json on its next startup. */ }
     }
 
     private static void ValidatePackage(string directory, Version expected)

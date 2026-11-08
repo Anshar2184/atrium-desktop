@@ -71,8 +71,10 @@ std::wstring SettingsPath();
 std::wstring ReadTextFile(const std::wstring& path);
 bool WriteTextFile(const std::wstring& path, const std::wstring& text);
 Settings LoadSettings();
-// Atomic file replace, followed by updating the Windows logon entry.
-bool SaveSettings(const Settings& s);
+// True means the file was saved. A failed startup change is reported separately;
+// callers must accept the saved snapshot even when warning is nonempty.
+bool SaveSettings(const Settings& s, std::wstring* warning = nullptr);
+bool IsDevelopmentBuild();
 // The current user's Windows logon entry, pointing at this core executable.
 bool SetStartOnLogin(bool enabled);
 

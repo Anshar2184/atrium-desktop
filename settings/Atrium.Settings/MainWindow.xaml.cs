@@ -110,8 +110,11 @@ public sealed partial class MainWindow : Window
         SetWindowSubclass(hwnd, _updateMessage, (UIntPtr)1, UIntPtr.Zero);
         Closed += (_, _) =>
         {
+            _client.Dispose();
             RemoveWindowSubclass(hwnd, _updateMessage, (UIntPtr)1);
             _updateCheck?.Cancel();
+            _updatesClosed = true;
+            _downloadTimer?.Stop();
             _coreProcess?.Dispose();
             _widgetWatcher?.Dispose();
             StopDesignAnimations();
@@ -133,6 +136,8 @@ public sealed partial class MainWindow : Window
             if (_page == 3) ShowNotifyPreview(false);
         };
         PathText.Text = CoreClient.SettingsPath;
+        StartupSwitch.IsEnabled = !CoreClient.Development;
+        if (CoreClient.Development) ToolTipService.SetToolTip(StartupSwitch, "开发构建不修改 Windows 开机启动项。");
         var v = typeof(MainWindow).Assembly.GetName().Version;
         VersionText.Text = "版本 " + (v?.ToString(3) ?? "1.0.0");
         ShowStatus(false);
@@ -341,54 +346,104 @@ public sealed partial class MainWindow : Window
 
     private ReleaseInfo? _latestRelease;
     private ReleaseInstaller.Prepared? _preparedRelease, _restartUpdate;
+    private ReleaseInstaller.TransferStatus? _transferStatus;
+    private DispatcherTimer? _downloadTimer;
+    private bool _downloadRefreshBusy, _queueingDownload, _updatesClosed;
 
     private void ShowInstallAction()
     {
-        InstallRelease.Content = _preparedRelease != null ? "重启并完成更新" : "下载并安装";
-        InstallRelease.Visibility = _preparedRelease != null || _latestRelease?.Download != null
+        InstallRelease.Content = _preparedRelease != null ? "重启并完成更新"
+            : _transferStatus is { CanRetry: false } || _queueingDownload ? "后台下载中" : "重试下载";
+        InstallRelease.IsEnabled = _updateCheck == null && !_queueingDownload
+            && (_preparedRelease != null || _transferStatus?.CanRetry != false);
+        InstallRelease.Visibility = _preparedRelease != null || _transferStatus != null || _latestRelease?.Download != null
             && _latestRelease.Version > typeof(MainWindow).Assembly.GetName().Version!
             ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    private void ObserveDownload()
+    {
+        if (_downloadTimer == null)
+        {
+            _downloadTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _downloadTimer.Tick += async (_, _) => await RefreshDownloadAsync();
+        }
+        _downloadTimer.Start();
+    }
+
+    private async Task RefreshDownloadAsync()
+    {
+        if (_downloadRefreshBusy || _updatesClosed) return;
+        _downloadRefreshBusy = true;
+        try
+        {
+            var state = await Task.Run(() => (Transfer: ReleaseInstaller.ReadTransferStatus(),
+                Ready: ReleaseInstaller.ReadPrepared(typeof(MainWindow).Assembly.GetName().Version!)));
+            if (_updatesClosed) return;
+            _preparedRelease = state.Ready;
+            _transferStatus = state.Transfer;
+            if (_preparedRelease != null)
+            {
+                UpdateStatus.Text = "更新已准备好，重启后生效";
+                UpdateAvailableButton.Visibility = ReleaseLinks.Visibility = Visibility.Visible;
+                ReleaseNotes.NavigateUri ??= new Uri("https://github.com/wynter-yaxley/atrium-desktop/releases/latest");
+                _downloadTimer?.Stop();
+            }
+            else if (_transferStatus != null)
+            {
+                UpdateStatus.Text = _transferStatus.Text;
+                UpdateAvailableButton.Visibility = ReleaseLinks.Visibility = Visibility.Visible;
+                ReleaseNotes.NavigateUri ??= new Uri("https://github.com/wynter-yaxley/atrium-desktop/releases/latest");
+                if (_transferStatus.CanRetry) _downloadTimer?.Stop();
+                else ObserveDownload();
+            }
+            else _downloadTimer?.Stop();
+            ShowInstallAction();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException or JsonException)
+        {
+            if (!_updatesClosed) UpdateStatus.Text = $"无法读取下载进度：{error.Message}";
+            _downloadTimer?.Stop();
+        }
+        finally { _downloadRefreshBusy = false; }
+    }
+
+    private async Task QueueDownloadAsync(ReleaseInfo? release)
+    {
+        if (_queueingDownload) return;
+        _queueingDownload = true;
+        ShowInstallAction();
+        try
+        {
+            using var worker = release != null ? ReleaseInstaller.StartBackgroundDownload(release)
+                : ReleaseInstaller.ResumeBackgroundDownload();
+            await worker.WaitForExitAsync(); // closing this window never cancels the transfer
+            if (_updatesClosed) return;
+            await RefreshDownloadAsync();
+            if (worker.ExitCode != 0 && _transferStatus == null) UpdateStatus.Text = "无法开始后台下载，请重试";
+        }
+        catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception)
+        {
+            if (!_updatesClosed) UpdateStatus.Text = $"无法开始后台下载：{error.Message}";
+        }
+        finally
+        {
+            _queueingDownload = false;
+            if (!_updatesClosed) ShowInstallAction();
+        }
+    }
+
     private async void OnInstallRelease(object sender, RoutedEventArgs e)
     {
-        if (_updateCheck != null) return;
+        if (_updateCheck != null || _queueingDownload) return;
         if (_preparedRelease != null)
         {
             _restartUpdate = _preparedRelease;
             await CloseRequestedAsync();
             return;
         }
-        if (_latestRelease?.Download == null) return;
-        using var cancel = new CancellationTokenSource();
-        _updateCheck = cancel;
-        CheckUpdateButton.IsEnabled = InstallRelease.IsEnabled = false;
-        UpdateProgress.Visibility = Visibility.Visible;
-        UpdateProgress.IsActive = true;
-        UpdateStatus.Text = "正在下载…";
-        try
-        {
-            _preparedRelease = await ReleaseInstaller.PrepareAsync(_latestRelease,
-                new Progress<string>(text => { if (!cancel.IsCancellationRequested) UpdateStatus.Text = text; }), cancel.Token);
-            UpdateStatus.Text = "更新已准备好，重启后生效";
-            ShowInstallAction();
-        }
-        catch (Exception error) when (error is HttpRequestException or IOException or UnauthorizedAccessException
-            or OperationCanceledException)
-        {
-            if (!cancel.IsCancellationRequested)
-                UpdateStatus.Text = error is HttpRequestException ? "下载失败，请检查网络后重试" : $"更新未完成：{error.Message}";
-        }
-        finally
-        {
-            _updateCheck = null;
-            if (!cancel.IsCancellationRequested)
-            {
-                CheckUpdateButton.IsEnabled = InstallRelease.IsEnabled = true;
-                UpdateProgress.IsActive = false;
-                UpdateProgress.Visibility = Visibility.Collapsed;
-            }
-        }
+        if (_latestRelease?.Download == null && _transferStatus == null) return;
+        await QueueDownloadAsync(_latestRelease);
     }
 
     private void OnOpenUpdate(object sender, RoutedEventArgs e) => Nav.SelectedIndex = 7;
@@ -408,7 +463,8 @@ public sealed partial class MainWindow : Window
         try
         {
             string? installFailure = ReleaseInstaller.ReadFailure();
-            _preparedRelease = ReleaseInstaller.ReadPrepared(typeof(MainWindow).Assembly.GetName().Version!);
+            await RefreshDownloadAsync();
+            if (cancel.IsCancellationRequested) return;
             if (_preparedRelease != null)
             {
                 UpdateAvailableButton.Visibility = ReleaseLinks.Visibility = Visibility.Visible;
@@ -417,6 +473,7 @@ public sealed partial class MainWindow : Window
                 ShowInstallAction();
                 return;
             }
+            if (_transferStatus is { CanRetry: false }) await QueueDownloadAsync(null);
             var release = await ReleaseInfo.FetchLatestAsync(cancel.Token);
             if (cancel.IsCancellationRequested) return;
             if (release == null)
@@ -434,12 +491,14 @@ public sealed partial class MainWindow : Window
             _latestRelease = release;
             ShowInstallAction();
             ReleaseLinks.Visibility = Visibility.Visible;
+            if (comparison > 0 && release.Download != null) await QueueDownloadAsync(release);
+            else if (_transferStatus != null) UpdateStatus.Text = _transferStatus.Text;
         }
         catch (Exception error) when (error is HttpRequestException or OperationCanceledException
             or JsonException or FormatException or InvalidOperationException or KeyNotFoundException or IOException or UnauthorizedAccessException)
         {
             if (cancel.IsCancellationRequested) return; // the window closed while checking
-            UpdateStatus.Text = error switch
+            UpdateStatus.Text = _transferStatus?.Text ?? (error switch
             {
                 OperationCanceledException => "连接超时，请重试",
                 HttpRequestException { StatusCode: HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests }
@@ -447,7 +506,7 @@ public sealed partial class MainWindow : Window
                 HttpRequestException => "无法连接 GitHub，请重试",
                 IOException or UnauthorizedAccessException => $"无法准备更新：{error.Message}",
                 _ => "无法读取版本信息，请稍后重试",
-            };
+            });
         }
         finally
         {
@@ -457,6 +516,7 @@ public sealed partial class MainWindow : Window
                 UpdateProgress.IsActive = false;
                 UpdateProgress.Visibility = Visibility.Collapsed;
                 CheckUpdateButton.IsEnabled = true;
+                ShowInstallAction();
             }
         }
     }
@@ -467,6 +527,7 @@ public sealed partial class MainWindow : Window
     {
         await _client.ConnectAsync(800);
         var (saved, current) = await _client.GetAsync();
+        if (_updatesClosed) return;
         _saved = saved;
         _current = current;
         _coreChanging = false;
@@ -474,6 +535,8 @@ public sealed partial class MainWindow : Window
         ShowStatus(_client.Connected);
         LoadIntoControls();
         UpdateButtons();
+        if (Content is FrameworkElement { IsLoaded: true }) App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
+        else if (Content is FrameworkElement root) root.Loaded += (_, _) => App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
     }
 
     private static readonly SolidColorBrush RunningBrush = new(Color.FromArgb(255, 76, 194, 106));
@@ -483,10 +546,11 @@ public sealed partial class MainWindow : Window
     {
         StatusDot.Fill = connected ? RunningBrush : IdleBrush;
         _updatingCoreSwitch = true;
-        CoreSwitch.IsOn = connected;
+        CoreSwitch.IsOn = connected || (_coreProcess != null && !_coreProcess.HasExited);
         _updatingCoreSwitch = false;
         CoreSwitch.IsEnabled = !_coreChanging && CoreClient.CoreExe() != null;
-        if (!_coreChanging) StatusMessage.Text = connected ? "正在运行" : "已关闭，系统任务栏已恢复";
+        if (!_coreChanging) StatusMessage.Text = connected ? "正在运行" : _client.ConnectionError ??
+            (_coreProcess != null && !_coreProcess.HasExited ? "核心进程仍在运行，设置连接已断开" : "已关闭，系统任务栏已恢复");
     }
 
     private void ShowMessage(InfoBarSeverity severity, string title, string message)
@@ -500,9 +564,11 @@ public sealed partial class MainWindow : Window
     // Follow the process exit event rather than polling the pipe while the settings window is idle.
     private void WatchCore()
     {
+        if (_updatesClosed) return;
+        if (!_client.Connected && _coreProcess != null && !_coreProcess.HasExited) return;
         _coreProcess?.Dispose();
         _coreProcess = null;
-        if (!_client.Connected) return;
+        if (!_client.Connected || _updatesClosed) return;
         try
         {
             var process = Process.GetProcessById(_client.ProcessId);
@@ -510,14 +576,14 @@ public sealed partial class MainWindow : Window
             process.Exited += (_, _) => DispatcherQueue.TryEnqueue(() =>
             {
                 if (_coreProcess != process) return;
-                _client.Disconnect();
+                _client.Disconnect(coreStopped: true);
                 _coreProcess.Dispose();
                 _coreProcess = null;
                 ShowStatus(false);
             });
             process.EnableRaisingEvents = true;
         }
-        catch (ArgumentException) { _client.Disconnect(); }
+        catch (ArgumentException) { _client.Disconnect(coreStopped: true); }
     }
 
     private async void OnCoreToggled(object sender, RoutedEventArgs e)
@@ -551,6 +617,7 @@ public sealed partial class MainWindow : Window
                     ?? throw new InvalidOperationException("未能发送退出请求。");
                 await quit.WaitForExitAsync();
                 if (quit.ExitCode != 0) throw new InvalidOperationException("Atrium 尚未退出，请稍后重试。");
+                _client.Disconnect(coreStopped: true);
             }
         }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException or TimeoutException or IOException)
@@ -793,7 +860,7 @@ public sealed partial class MainWindow : Window
     // so dragging a slider never queues up stale frames.
     private async void SchedulePreview()
     {
-        if (!_client.Connected) return;
+        if (!_client.Connected || _updatesClosed) return;
         if (_previewBusy)
         {
             _previewPending = true;
@@ -805,9 +872,9 @@ public sealed partial class MainWindow : Window
             _previewPending = false;
             await _client.PreviewAsync(_current.Clone());
             await Task.Delay(16);
-        } while (_previewPending);
+        } while (_previewPending && !_updatesClosed);
         _previewBusy = false;
-        if (!_client.Connected) ShowStatus(false);
+        if (!_updatesClosed && !_client.Connected) ShowStatus(false);
     }
 
     private async void OnSave(object sender, RoutedEventArgs e) => await SaveAsync();
@@ -817,6 +884,7 @@ public sealed partial class MainWindow : Window
         // What is saved is this snapshot: edits made while it is on its way stay unsaved.
         var sent = _current.Clone();
         var error = await _client.CommitAsync(sent.Clone());
+        if (_updatesClosed) return false;
         if (error != null)
         {
             ShowMessage(InfoBarSeverity.Error, "保存失败", error);
@@ -825,7 +893,9 @@ public sealed partial class MainWindow : Window
         _saved = sent;
         Status.IsOpen = false;
         UpdateButtons();
-        if (_current.SameAs(_saved)) FlashSaved(); // edits made meanwhile keep the capsule as it is
+        if (_client.LastSaveWarning is { } warning)
+            ShowMessage(InfoBarSeverity.Warning, "设置已保存", warning);
+        else if (_current.SameAs(_saved)) FlashSaved(); // edits made meanwhile keep the capsule as it is
         ShowStatus(_client.Connected);
         return true;
     }

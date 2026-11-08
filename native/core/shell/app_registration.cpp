@@ -1,6 +1,7 @@
 #include "shell/app_registration.h"
 
 #include "log.h"
+#include "settings.h"
 
 #include <windows.h>
 #include <shlobj.h>
@@ -11,8 +12,18 @@
 
 namespace atrium {
 
+bool IsRegisteredApplication(const std::wstring& directory)
+{
+    wchar_t value[32768]{};
+    DWORD bytes = sizeof(value);
+    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Atrium",
+                        L"InstallLocation", RRF_RT_REG_SZ, nullptr, value, &bytes) == ERROR_SUCCESS &&
+           _wcsicmp(value, directory.c_str()) == 0;
+}
+
 void RegisterApplication(const std::wstring& directory)
 {
+    if (IsDevelopmentBuild()) return;
     const std::wstring exe = directory + L"\\Atrium.exe";
     const std::wstring uninstall = directory + L"\\Uninstall.ps1";
     if (GetFileAttributesW(uninstall.c_str()) == INVALID_FILE_ATTRIBUTES ||

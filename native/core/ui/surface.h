@@ -15,12 +15,14 @@
 #include <d3d11.h>
 #include <dcomp.h>
 #include <dwrite_3.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <winrt/base.h>
 
 #include <functional>
+#include <array>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -56,6 +58,7 @@ struct ShapeDip {
     std::vector<Part> parts;
     float melt = 0; // DIP
     float partMix = 0; // 0: the parts, 1: rect with radius
+    float tailX = 0, tailHalfWidth = 0, tailHeight = 0, tailInset = 0; // optional Dock label pointer, DIP
 };
 
 class Surface;
@@ -85,6 +88,7 @@ public:
 
     // Asks for another frame (an animation is still running).
     void Continue();
+    void Callout(D2D1_RECT_F body, float radius, float tipX, float halfWidth, float tailHeight, float tailInset, D2D1_COLOR_F color);
     // Draws what follows faded and scaled around (cx, cy), moved by (dx, dy); DIP. Groups nest.
     void BeginGroup(float opacity, float scale, float cx, float cy, float dx = 0, float dy = 0);
     void EndGroup();
@@ -117,6 +121,8 @@ public:
     void Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1_COLOR_F c);
     void Clip(D2D1_RECT_F r);
     void Unclip();
+    // Apply the analytic glass outline to the content already drawn.
+    void MaskRounded(D2D1_RECT_F r, float radius);
     ID2D1DeviceContext* D2D() const { return d2d_; }
 
 private:
@@ -161,6 +167,9 @@ public:
     // screen point); activatable surfaces take the foreground.
     void Show(RECT rect, bool activate, POINT anchor, bool pop = true); // pop: false appears in place (a hand-over from another popup)
     void Move(RECT rect);
+    // Keep backing buffers stable during a resize; {0,0} releases the reserve.
+    // Input bounds and glass shape keep their actual size.
+    void ReserveResize(D2D1_SIZE_F sizeDip);
     // Plays the closing animation, then hides the window. Visible() is false at once.
     void Hide(bool animate = true);
     bool Visible() const { return visible_; }
@@ -188,11 +197,13 @@ private:
     void Present();
     bool EnsureDevice();
     void ResetDevice();
-    void Place(RECT rect);   // window = content + margin
+    void Place(RECT rect); // texture = content + margin; desktop HWND stays stationary
+    void ApplyPlacement();
     void PublishPanel();
     void SetInk(bool dark, const InkGrid& grid); // WM_GLASS_INK: the inks start fading there
     void FinishHide();
     int InsetPx() const;
+    D2D1_SIZE_U BufferSize() const;
 
     HWND hwnd_ = nullptr;
     bool activatable_;
@@ -206,6 +217,8 @@ private:
     unsigned glassGen_ = 0;  // of the panel last published
     bool glassPending_ = false; // published since the last content frame
     bool presentPending_ = false; // one content buffer awaiting its glass; input stays responsive
+    std::optional<RECT> nextResize_;
+    bool releaseResize_ = false;
     unsigned presentGen_ = 0;
     double paintMs_ = 0;
     // An animation's frames, logged when it ends (smoothness checks).
@@ -215,9 +228,13 @@ private:
     } burst_;
     double shownMs_ = 0;
     RECT rect_{};            // content, screen px
-    RECT window_{};          // window, screen px
+    RECT window_{};          // texture rectangle including shadow, screen px
+    RECT nativeWindow_{};    // desktop host: monitor bounds, with a tight window region
+    RECT presentedWindow_{}; // last content frame, used only to protect in-flight pixels from clipping
+    RECT inputRegion_{};
     float scale_ = 1;
     float radius_ = 20;
+    D2D1_SIZE_F resizeReserve_{};
     std::vector<ShapeDip> shapes_;
     bool shapesAnimating_ = false;
     bool darkInk_ = false;
@@ -250,6 +267,12 @@ private:
     winrt::com_ptr<ID2D1DeviceContext> d2d_;
     winrt::com_ptr<IDWriteFactory> dwrite_;
     winrt::com_ptr<ID2D1SolidColorBrush> brush_;
+    winrt::com_ptr<ID2D1Bitmap> calloutMask_; // one current label mask, only allocated for the plain fallback
+    std::array<float, 7> calloutMaskKey_{};
+    winrt::com_ptr<ID2D1BitmapBrush> roundedImageBrush_;
+    winrt::com_ptr<ID2D1CommandList> roundedMask_;
+    D2D1_RECT_F roundedMaskRect_{};
+    float roundedMaskRadius_ = 0;
     std::map<std::tuple<int, int, bool, int, bool>, winrt::com_ptr<IDWriteTextFormat>> formats_;
     std::map<std::wstring, winrt::com_ptr<ID2D1Bitmap>> bitmaps_;
 };

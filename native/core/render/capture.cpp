@@ -81,7 +81,7 @@ MonitorCapture::MonitorCapture(const Gpu& gpu, HMONITOR monitor, HANDLE frameEve
     session_ = pool_.CreateCaptureSession(item);
     session_.IsCursorCaptureEnabled(false);
     try {
-        session_.IsBorderRequired(false); // no yellow border (VERIFICATION 1.11)
+        session_.IsBorderRequired(false); // no yellow border
     } catch (const winrt::hresult_error& e) {
         Log(L"capture: IsBorderRequired(false) rejected: 0x%08X", static_cast<unsigned>(e.code()));
     }

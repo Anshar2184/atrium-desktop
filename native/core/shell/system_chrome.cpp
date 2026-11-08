@@ -119,13 +119,21 @@ SystemChrome::SystemChrome()
 
 SystemChrome::~SystemChrome()
 {
+    RestoreForExit();
+    g_chrome = nullptr;
+}
+
+void SystemChrome::RestoreForExit()
+{
+    if (exiting_) return;
+    exiting_ = true;
     SetTaskbarHidden(false);
     SetBannersHidden(false);
-    g_chrome = nullptr;
 }
 
 void SystemChrome::SetTaskbarHidden(bool hidden)
 {
+    if (hidden && exiting_) return;
     if (hidden == taskbarHidden_)
         return;
     taskbarHidden_ = hidden;
@@ -155,6 +163,7 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
 
 void SystemChrome::SetBannersHidden(bool hidden)
 {
+    if (hidden && exiting_) return;
     if (hidden == quietOurs_)
         return;
     if (hidden) {
@@ -180,6 +189,7 @@ void SystemChrome::SetBannersHidden(bool hidden)
 
 void SystemChrome::Enforce()
 {
+    if (exiting_) return;
     if (taskbarHidden_) {
         HideTaskbars();
         Watch(); // Explorer may have been restarted

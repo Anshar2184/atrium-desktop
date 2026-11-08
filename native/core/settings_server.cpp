@@ -1,6 +1,7 @@
 #include "settings_server.h"
 
 #include "log.h"
+#include "ui/desktop_widgets.h"
 
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
@@ -132,6 +133,7 @@ void SettingsServer::Run()
                 break;
             continue;
         }
+        ready_ = true;
         Serve(pipe);
         CloseHandle(pipe);
 
@@ -210,8 +212,11 @@ std::string SettingsServer::Handle(const std::string& request)
     if (op == L"add-widget") {
         // Not a settings change (no txn_: the UI thread may be waiting for it in Modify).
         std::wstring kind(o.GetNamedString(L"kind", L"")), size(o.GetNamedString(L"size", L"small"));
+        WidgetKind widgetKind;
+        WidgetSize widgetSize;
+        if (!DesktopWidgets::ParseNames(kind, size, widgetKind, widgetSize)) return Reply(L"error", L"unknown widget kind");
         DWORD_PTR added = 0;
-        SendMessageTimeoutW(host_, WM_ATRIUM_ADD_WIDGET, reinterpret_cast<WPARAM>(&kind), reinterpret_cast<LPARAM>(&size), SMTO_ABORTIFHUNG, 3000,
+        SendMessageTimeoutW(host_, WM_ATRIUM_ADD_WIDGET, WPARAM(widgetKind), LPARAM(widgetSize), SMTO_ABORTIFHUNG, 3000,
                             &added);
         return added ? Reply(L"ok") : Reply(L"error", L"no room for another widget");
     }
@@ -244,13 +249,24 @@ std::string SettingsServer::Handle(const std::string& request)
         if (!Settings::FromJson(std::wstring(o.GetNamedObject(L"settings").Stringify()), current, next))
             return Reply(L"error", L"invalid settings");
         if (op == L"commit") {
-            if (!SaveSettings(next)) {
-                Log(L"pipe: could not save settings or update Windows startup (%s)", SettingsPath().c_str());
-                return Reply(L"error", L"could not save settings or update Windows startup");
+            std::wstring warning;
+            if (!SaveSettings(next, &warning)) {
+                Log(L"pipe: could not save settings (%s)", SettingsPath().c_str());
+                return Reply(L"error", L"could not save settings");
             }
             Log(L"pipe: commit saved");
-            std::lock_guard g(lock_);
-            saved_ = next;
+            {
+                std::lock_guard g(lock_);
+                saved_ = next;
+            }
+            SetCurrent(next);
+            if (!warning.empty()) {
+                json::JsonObject reply;
+                reply.SetNamedValue(L"op", json::JsonValue::CreateStringValue(L"ok"));
+                reply.SetNamedValue(L"warning", json::JsonValue::CreateStringValue(warning));
+                return Narrow(std::wstring(reply.Stringify()));
+            }
+            return Reply(L"ok");
         } // lock released before SetCurrent takes it again
         SetCurrent(next);
         return Reply(L"ok");

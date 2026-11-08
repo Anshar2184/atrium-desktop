@@ -4,6 +4,7 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
@@ -244,22 +245,61 @@ Settings LoadSettings()
 
 bool SetStartOnLogin(bool enabled)
 {
+    if (IsDevelopmentBuild())
+        return true;
     constexpr auto key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    wchar_t exe[32768]{};
+    DWORD length = GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)));
+    if (!length || length == std::size(exe))
+        return false;
+    std::wstring command = L"\"" + std::wstring(exe) + L"\"";
+    wchar_t current[32771]{};
+    DWORD size = sizeof(current);
+    LSTATUS read = RegGetValueW(HKEY_CURRENT_USER, key, L"Atrium", RRF_RT_REG_SZ, nullptr, current, &size);
     if (!enabled) {
+        if (read == ERROR_FILE_NOT_FOUND || read == ERROR_PATH_NOT_FOUND) return true;
+        if (read != ERROR_SUCCESS || _wcsicmp(command.c_str(), current) != 0) return false; // another distribution owns it
         LSTATUS result = RegDeleteKeyValueW(HKEY_CURRENT_USER, key, L"Atrium");
         return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
     }
-    wchar_t exe[MAX_PATH];
-    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH))
-        return false;
-    std::wstring command = L"\"" + std::wstring(exe) + L"\"";
-    wchar_t current[MAX_PATH + 3]{};
-    DWORD size = sizeof(current);
-    if (RegGetValueW(HKEY_CURRENT_USER, key, L"Atrium", RRF_RT_REG_SZ, nullptr, current, &size) == ERROR_SUCCESS && command == current)
+    if (read == ERROR_SUCCESS && command == current)
         return true;
     return RegSetKeyValueW(HKEY_CURRENT_USER, key, L"Atrium", REG_SZ, command.c_str(), DWORD((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
 }
 
-bool SaveSettings(const Settings& s) { return WriteTextFile(SettingsPath(), s.ToJson()) && SetStartOnLogin(s.startOnLogin); }
+bool IsDevelopmentBuild()
+{
+#ifdef ATRIUM_DEVELOPMENT
+    return true;
+#else
+    static const bool development = [] {
+        int count = 0;
+        auto args = CommandLineToArgvW(GetCommandLineW(), &count);
+        bool explicitDevelopment = false;
+        for (int i = 1; args && i < count; ++i)
+            explicitDevelopment |= wcscmp(args[i], L"--development") == 0;
+        LocalFree(args);
+        wchar_t exe[32768]{};
+        GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe)));
+        std::wstring path(exe);
+        path = path.substr(0, path.find_last_of(L'\\')) + L"\\development.txt";
+        return explicitDevelopment || GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+    }();
+    return development;
+#endif
+}
+
+bool SaveSettings(const Settings& s, std::wstring* warning)
+{
+    if (warning) warning->clear();
+    const bool startupChanged = LoadSettings().startOnLogin != s.startOnLogin;
+    if (!WriteTextFile(SettingsPath(), s.ToJson()))
+        return false;
+    if (startupChanged && !SetStartOnLogin(s.startOnLogin)) {
+        Log(L"settings: settings saved, but Windows startup could not be changed");
+        if (warning) *warning = L"设置已保存，但未能修改 Windows 开机启动。请重新切换开机启动后再保存。";
+    }
+    return true;
+}
 
 } // namespace atrium

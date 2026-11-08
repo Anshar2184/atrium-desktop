@@ -9,7 +9,6 @@
 #include "render/ui_font.h"
 #include "ui/surface.h"
 
-#include <commctrl.h>
 #include <dwmapi.h>
 #include <psapi.h>
 #include <shellapi.h>
@@ -22,8 +21,6 @@
 #include <cstring>
 #include <cwctype>
 #include <vector>
-
-#pragma comment(lib, "comctl32.lib")
 
 namespace atrium {
 
@@ -50,6 +47,8 @@ constexpr double kInsetDip = 14; // room for the drop shadow around the shape
 constexpr DWORD kStaleMs = 2000;  // present at least this often (echo filter cap)
 constexpr UINT_PTR kTooltipTimer = 1;
 constexpr UINT kTooltipDelayMs = 450;
+constexpr float kTooltipFont = 12.5f, kTooltipPadX = 12, kTooltipPadY = 6, kTooltipMinH = 28;
+constexpr float kTooltipTailH = 5, kTooltipTailHalfW = 12, kTooltipTailInset = 8;
 constexpr UINT kPreviewSwapMs = 60;
 constexpr UINT_PTR kFileHoverTimer = 2;
 constexpr UINT kFileHoverDelayMs = 600;
@@ -123,6 +122,9 @@ void PanelParams(const Settings& s, float scale, const GlassPanel& p, std::vecto
     GlassParams g = ParamsFor(s, scale);
     g.inset = p.inset;
     if (p.shapes.empty()) {
+        g.shapeL = g.shapeT = p.inset;
+        g.shapeR = float(p.window.right - p.window.left) - p.inset;
+        g.shapeB = float(p.window.bottom - p.window.top) - p.inset;
         g.radius = p.radius;
         out.push_back(g);
         return;
@@ -137,6 +139,10 @@ void PanelParams(const Settings& s, float scale, const GlassPanel& p, std::vecto
         g.partCount = float(std::min<size_t>(sh.parts.size(), kMaxGlassParts));
         g.melt = sh.melt;
         g.partMix = sh.partMix;
+        g.tailX = sh.tailX;
+        g.tailHalfWidth = sh.tailHalfWidth;
+        g.tailHeight = sh.tailHeight;
+        g.tailInset = sh.tailInset;
         for (size_t i = 0; i < sh.parts.size() && i < kMaxGlassParts; ++i) {
             const GlassShape::Part& pt = sh.parts[i];
             g.parts[i][0] = pt.left;
@@ -281,19 +287,22 @@ Bar::Bar(HINSTANCE instance, bool debugCapturable) : debugCapturable_(debugCaptu
     SetCaptureExclusion(visual_, captureVisible_);
     SetCaptureExclusion(input_, captureVisible_);
 
-    INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_WIN95_CLASSES};
-    InitCommonControlsEx(&icc);
-    // One tracking tooltip, positioned by hand centred above the hovered item
-    // (a standard tooltip would appear under the cursor, on top of the bar).
-    tooltip_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, 0, 0, 0, 0,
-                               input_, nullptr, instance, nullptr);
-    TTTOOLINFOW ti{sizeof(ti)};
-    ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
-    ti.hwnd = input_;
-    ti.uId = 1;
-    ti.lpszText = const_cast<wchar_t*>(L"");
-    SendMessageW(tooltip_, TTM_ADDTOOLW, 0, LPARAM(&ti));
-    SetCaptureExclusion(tooltip_, captureVisible_); // it may overlap the glass
+    // A compact Dock-style label, using the same material and adaptive ink as
+    // every other surface. It never takes focus or receives pointer input.
+    tooltip_ = std::make_unique<Surface>(instance, L"Atrium Hover Label", false);
+    tooltip_->message = [](UINT m, WPARAM, LPARAM, LRESULT& result) {
+        if (m != WM_NCHITTEST)
+            return false;
+        result = HTTRANSPARENT;
+        return true;
+    };
+    tooltip_->paint = [this](Canvas& c) {
+        auto bounds = D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height);
+        if (c.panel)
+            c.Callout(bounds, std::min(16.f, tooltipSize_.height / 2), tooltipTailX_, kTooltipTailHalfW, kTooltipTailH, kTooltipTailInset, c.theme.panel);
+        c.Text(tooltipText_, D2D1::RectF(kTooltipPadX, kTooltipPadY, bounds.right - kTooltipPadX, bounds.bottom - kTooltipPadY),
+               kTooltipFont, c.theme.text, DWRITE_FONT_WEIGHT_MEDIUM, 1);
+    };
 
     // Drag and drop needs OLE on this (STA) thread; balanced in the destructor.
     oleReady_ = SUCCEEDED(OleInitialize(nullptr));
@@ -332,7 +341,7 @@ Bar::~Bar()
     if (dropTarget_)
         RevokeDragDrop(input_);
     dropTarget_ = nullptr;
-    DestroyWindow(tooltip_);
+    tooltip_.reset();
     DestroyWindow(input_);
     DestroyWindow(visual_);
     CloseHandle(wake_);
@@ -379,7 +388,6 @@ LRESULT CALLBACK Bar::VisualProc(HWND h, UINT m, WPARAM w, LPARAM l)
         bool visible = w != 0;
         SetCaptureExclusion(self->visual_, visible);
         SetCaptureExclusion(self->input_, visible);
-        SetCaptureExclusion(self->tooltip_, visible);
         Surface::SetCaptureVisible(visible);
         SetEvent(self->captureAck_);
         return 0;
@@ -1369,6 +1377,7 @@ void Bar::ShowTooltip()
     if (onPreview && hit != hits_.end() && !IsEntry(key)) {
         auto item = std::find_if(items_.begin(), items_.end(), [&](const TaskItem& t) { return t.key == key; });
         if (item != items_.end() && !item->windows.empty()) {
+            tooltip_->Hide(false);
             int rise = scene_.magnify > 1.001f ? rise_ : 0;
             POINT anchor{window_.left + (hit->rect.left + hit->rect.right) / 2, window_.top + int(scene_.bar.top) - rise};
             previewShown_ = true;
@@ -1382,22 +1391,47 @@ void Bar::ShowTooltip()
             onPreviewClose();
     }
     std::wstring text = TooltipText(key);
-    if (hit == hits_.end() || text.empty())
+    if (hit == hits_.end() || text.empty()) {
+        tooltip_->Hide(false);
         return;
-    TTTOOLINFOW ti{sizeof(ti)};
-    ti.hwnd = input_;
-    ti.uId = 1;
-    ti.lpszText = text.data();
-    SendMessageW(tooltip_, TTM_UPDATETIPTEXTW, 0, LPARAM(&ti));
-    DWORD size = DWORD(SendMessageW(tooltip_, TTM_GETBUBBLESIZE, 0, LPARAM(&ti)));
-    int w = LOWORD(size), h = HIWORD(size);
+    }
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(hmonitor_, &mi);
+    int margin = Px(8, scale_);
+    const float maxTextW = std::min(320.f, float(mi.rcWork.right - mi.rcWork.left - 2 * margin) / scale_ - 2 * kTooltipPadX);
+    winrt::com_ptr<IDWriteTextFormat> format;
+    winrt::com_ptr<IDWriteTextLayout> layout;
+    if (FAILED(UiTextFormat(dwrite_.get(), kTooltipFont, DWRITE_FONT_WEIGHT_MEDIUM, format.put())))
+        return;
+    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    if (FAILED(UiTextLayout(dwrite_.get(), text, format.get(), maxTextW, 1000, layout.put())))
+        return;
+    DWRITE_TEXT_METRICS metrics{};
+    layout->GetMetrics(&metrics);
+    tooltipText_ = std::move(text);
+    tooltipSize_ = D2D1::SizeF(std::min(maxTextW, std::ceil(metrics.widthIncludingTrailingWhitespace)) + 2 * kTooltipPadX,
+                              std::max(kTooltipMinH, std::ceil(metrics.height) + 2 * kTooltipPadY));
+    int w = Px(tooltipSize_.width, scale_), h = Px(tooltipSize_.height, scale_);
     int cx = window_.left + (hit->rect.left + hit->rect.right) / 2;
     // Above the magnified icons when they grow.
     int rise = scene_.magnify > 1.001f ? rise_ : 0;
-    int top = window_.top + int(scene_.bar.top) - rise - h - Px(8, scale_);
-    SendMessageW(tooltip_, TTM_TRACKPOSITION, 0, MAKELPARAM(cx - w / 2, top));
-    SendMessageW(tooltip_, TTM_TRACKACTIVATE, TRUE, LPARAM(&ti));
-    tooltipShown_ = true;
+    int top = std::max(int(mi.rcWork.top) + margin, int(window_.top) + int(scene_.bar.top) - rise - h - margin);
+    int left = std::clamp(cx - w / 2, int(mi.rcWork.left) + margin, int(mi.rcWork.right) - margin - w);
+    RECT rect{left, top, left + w, top + h + Px(kTooltipTailH, scale_)};
+    tooltipTailX_ = std::clamp(float(cx - left) / scale_, 0.f, tooltipSize_.width);
+    tooltip_->SetRadius(std::min(16.f, tooltipSize_.height / 2));
+    ShapeDip label{D2D1::RectF(0, 0, tooltipSize_.width, tooltipSize_.height), std::min(16.f, tooltipSize_.height / 2)};
+    label.tailX = tooltipTailX_;
+    label.tailHalfWidth = kTooltipTailHalfW;
+    label.tailHeight = kTooltipTailH;
+    label.tailInset = kTooltipTailInset;
+    tooltip_->SetShapes({label});
+    if (tooltip_->Visible()) {
+        tooltip_->Move(rect);
+        tooltip_->Invalidate();
+    } else {
+        tooltip_->Show(rect, false, POINT{cx, rect.bottom});
+    }
 }
 
 void Bar::HideTooltip()
@@ -1408,18 +1442,12 @@ void Bar::HideTooltip()
         if (onPreviewLeave)
             onPreviewLeave();
     }
-    if (!tooltipShown_)
-        return;
-    TTTOOLINFOW ti{sizeof(ti)};
-    ti.hwnd = input_;
-    ti.uId = 1;
-    SendMessageW(tooltip_, TTM_TRACKACTIVATE, FALSE, LPARAM(&ti));
-    tooltipShown_ = false;
+    tooltip_->Hide();
 }
 
 void Bar::UpdateTooltips()
 {
-    if (tooltipShown_ || previewShown_)
+    if (tooltip_->Visible() || previewShown_)
         ShowTooltip(); // e.g. the window count changed while hovering
 }
 
@@ -1634,12 +1662,13 @@ bool Bar::RenderSession()
             if (w <= 0 || h <= 0 || !IsWindow(p.hwnd))
                 continue;
             PanelState& ps = panels.try_emplace(p.hwnd, p.hwnd).first->second;
+            const int bufferW = std::max(w, p.bufferW), bufferH = std::max(h, p.bufferH);
             const double t0 = ClockMs();
             double created = 0;
             if (!ps.renderer) {
                 created = 1;
                 try {
-                    ps.renderer = std::make_unique<GlassRenderer>(gpu, p.hwnd, w, h, false, false);
+                    ps.renderer = std::make_unique<GlassRenderer>(gpu, p.hwnd, bufferW, bufferH, false, false, p.desktop);
                 } catch (const winrt::hresult_error& e) {
                     Log(L"render: popup glass unavailable: 0x%08X", static_cast<unsigned>(e.code()));
                     continue;
@@ -1649,12 +1678,12 @@ bool Bar::RenderSession()
                 created = ClockMs() - t0;
             GlassRenderer& r = *ps.renderer;
             const bool moved = !EqualRect(&ps.window, &p.window);
-            bool changed = r.Width() != w || r.Height() != h || moved;
+            bool changed = r.Width() != bufferW || r.Height() != bufferH || moved;
             bool newDesktop = false, under = false;
             ps.window = p.window;
             if (moved)
                 panelMovedMs = now;
-            r.Resize(w, h);
+            r.Resize(bufferW, bufferH);
             if (p.desktop) {
                 ID3D11Texture2D* pic = desktop.Texture();
                 // Again once the glass is on screen if its ink was never measured: the
@@ -1677,7 +1706,7 @@ bool Bar::RenderSession()
                 // The ink region by region (cells of about 20 DIP), from what
                 // the glass shows there, each cell with the bar's hysteresis;
                 // the popup's own ink is what most of it needs.
-                const float pad = float(GlassRenderer::kPad);
+                const float padX = float(rb->origin.x), padY = float(rb->origin.y);
                 const float cell = std::max(8.f, 20.f * snap.scale);
                 InkGrid grid;
                 grid.w = std::max(1, int(std::ceil(float(w) / cell)));
@@ -1697,7 +1726,7 @@ bool Bar::RenderSession()
                             d = tc == L"dark";
                         } else {
                             float x0 = float(x) * grid.cellX, y0 = float(y) * grid.cellY;
-                            float lum = GlassLuma(snap.settings, rb->RegionLuma(x0 + pad, y0 + pad, x0 + grid.cellX + pad, y0 + grid.cellY + pad));
+                            float lum = GlassLuma(snap.settings, rb->RegionLuma(x0 + padX, y0 + padY, x0 + grid.cellX + padX, y0 + grid.cellY + padY));
                             if (!was && lum > kDarkInkAbove)
                                 d = true;
                             else if (was && lum < kLightInkBelow)
@@ -1751,6 +1780,8 @@ bool Bar::RenderSession()
             }
             ps.owed = false;
             ps.drawnTick = tick;
+            if (p.desktop)
+                r.SetOffset(p.offset);
             if (!r.Present(gp, nullptr)) {
                 lost = true;
                 return false;

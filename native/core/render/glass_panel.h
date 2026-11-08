@@ -28,12 +28,14 @@ struct GlassShape {
     std::vector<Part> parts;
     float melt = 0;
     float partMix = 0; // 0: the parts, 1: the rounded rectangle (left..bottom, radius) they become
+    float tailX = 0, tailHalfWidth = 0, tailHeight = 0, tailInset = 0; // Dock label pointer, window px; height 0 disables it
     bool operator==(const GlassShape&) const = default;
 };
 
 struct GlassPanel {
     HWND hwnd = nullptr;
     RECT window{};            // screen px
+    int bufferW = 0, bufferH = 0; // resize gesture: backing capacity, independently of the visible window
     float inset = 0;          // px from the window edge to the glass shape (shadow room)
     float radius = 0;         // px
     // Separate pieces of glass, drawn back to front; empty: one shape, the
@@ -48,6 +50,7 @@ struct GlassPanel {
     float rippleX = 0, rippleY = 0; // press ripple centre, window px
     double rippleMs = 0;      // ClockMs() of the press; 0 = none
     unsigned gen = 0;         // bumped with every change: aligns content with the presented glass
+    POINT offset{};          // texture origin inside a stable desktop host, committed with Present
 };
 
 // A popup's content and its glass come from two threads. So that both show

@@ -2,7 +2,7 @@
 // the capture, builds mips for the blur, draws one full-window triangle and the
 // text overlay into a premultiplied composition swap chain hosted by
 // DirectComposition. Exact echo detection compares the ROI with the ROI that
-// was last presented (VERIFICATION 1.7).
+// was last presented.
 #pragma once
 
 #include "gpu.h"
@@ -18,7 +18,7 @@
 
 namespace atrium {
 
-// Mirrors cbuffer GlassParams in shaders/glass.hlsl (336 bytes). Lengths in px.
+// Mirrors cbuffer GlassParams in shaders/glass.hlsl (352 bytes). Lengths in px.
 struct GlassParams {
     float sizeX, sizeY, roiOriginX, roiOriginY;
     float roiSizeX, roiSizeY, radius, edge;
@@ -34,8 +34,9 @@ struct GlassParams {
     float parts[6][4];
     float partRadii[6][4];
     float partCount, melt, partMix, pad1; // partMix: 0 the parts, 1 the rectangle above (Shape, Radius)
+    float tailX, tailHalfWidth, tailHeight, tailInset; // optional Dock label pointer
 };
-static_assert(sizeof(GlassParams) == 336);
+static_assert(sizeof(GlassParams) == 352);
 constexpr int kMaxGlassParts = 6;
 
 // Scale and fade of a composition visual, run by DWM so it stays smooth
@@ -47,6 +48,7 @@ void PopVisual(IDCompositionDevice* device, IDCompositionVisual* visual, bool op
 // Result of one backdrop comparison, read back without stalling the CPU.
 struct Readback {
     bool changed = false; // ROI differed from the last presented ROI
+    POINT origin{64, 64}; // content origin in the mip texture that produced this result
     // Backdrop luminance (0..1) on a coarse grid over the ROI; one cell covers
     // cellX x cellY ROI pixels. The ROI is the window plus GlassRenderer::kPad.
     std::vector<float> luma;
@@ -63,12 +65,13 @@ public:
     // topmost: the composition target's layer. A popup window has two: the
     // glass below (topmost = false) and its content drawn by Surface above.
     // overlay: whether Present draws a Direct2D overlay (the popups' glass does not).
-    GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost = true, bool overlay = true);
+    GlassRenderer(const Gpu& gpu, HWND hwnd, int width, int height, bool topmost = true, bool overlay = true, bool alignedBackdrop = false);
     ~GlassRenderer();
     GlassRenderer(const GlassRenderer&) = delete;
     GlassRenderer& operator=(const GlassRenderer&) = delete;
 
     void Resize(int width, int height);
+    void SetOffset(POINT offset);
     int Width() const { return w_; }
     int Height() const { return h_; }
 
@@ -101,9 +104,13 @@ public:
 private:
     void CreateSizeDependent();
     void PrepareBackdrop();
+    void ExtendBackdropEdges(ID3D11Texture2D* frame, const D3D11_TEXTURE2D_DESC& source, int x, int y);
 
     Gpu gpu_;
     int w_, h_;
+    bool alignedBackdrop_ = false;
+    UINT roiW_ = 0, roiH_ = 0;
+    POINT roiOrigin_{kPad, kPad};
     winrt::com_ptr<IDXGISwapChain1> swap_;
     // Views of the back buffer (buffer 0 is always the one to draw in): made
     // once, dropped before the buffers are resized.
@@ -114,11 +121,17 @@ private:
     winrt::com_ptr<IDCompositionVisual> visual_;
     winrt::com_ptr<ID3D11VertexShader> vs_;
     winrt::com_ptr<ID3D11PixelShader> ps_;
+    winrt::com_ptr<ID3D11PixelShader> edgePs_;
+    winrt::com_ptr<ID3D11Buffer> edgeCb_;
+    winrt::com_ptr<ID3D11RenderTargetView> roiRtv_;
+    winrt::com_ptr<ID3D11Texture2D> edgeSource_;
+    winrt::com_ptr<ID3D11ShaderResourceView> edgeSourceSrv_;
     winrt::com_ptr<ID3D11ComputeShader> cs_;
     // Readback ring: comparison counters and a small mip (luminance grid).
     struct Slot {
         winrt::com_ptr<ID3D11Buffer> counters;
         winrt::com_ptr<ID3D11Texture2D> grid;
+        POINT origin{};
     };
     static constexpr int kSlots = 3;
     Slot slots_[kSlots];

@@ -9,6 +9,8 @@ public partial class App : Application
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int cmd);
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, uint message, UIntPtr wparam, IntPtr lparam);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int MessageBox(IntPtr hwnd, string text, string title, uint type);
     internal const uint OpenAboutMessage = 0x8000 + 31;
 
     public const string WindowTitle = "Atrium 设置";
@@ -44,6 +46,20 @@ public partial class App : Application
             var other = FindWindow(null, WindowTitle);
             if (other != IntPtr.Zero)
             {
+                GetWindowThreadProcessId(other, out uint pid);
+                bool same = false;
+                try
+                {
+                    using var process = System.Diagnostics.Process.GetProcessById((int)pid);
+                    same = string.Equals(process.MainModule?.FileName, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase);
+                }
+                catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                if (!same)
+                {
+                    MessageBox(IntPtr.Zero, "另一位置的 Atrium 设置正在运行。请先关闭该窗口，再打开本目录中的设置中心。", "Atrium", 0x40);
+                    Exit();
+                    return;
+                }
                 ShowWindow(other, 9 /* SW_RESTORE */);
                 SetForegroundWindow(other);
                 var command = Environment.GetCommandLineArgs();
@@ -64,5 +80,19 @@ public partial class App : Application
             LogCrash(e);
             throw;
         }
+    }
+
+    internal static void SignalStartupReady(bool coreReady)
+    {
+        var command = Environment.GetCommandLineArgs();
+        if (command.Contains("--require-core-ready") && !coreReady) return;
+        int index = Array.IndexOf(command, "--ready-event");
+        if (index < 0 || index + 1 >= command.Length || !command[index + 1].StartsWith(@"Local\Atrium.Update.Settings.", StringComparison.Ordinal)) return;
+        try
+        {
+            using var ready = EventWaitHandle.OpenExisting(command[index + 1]);
+            ready.Set();
+        }
+        catch (WaitHandleCannotBeOpenedException) { }
     }
 }

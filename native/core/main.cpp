@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -51,9 +52,11 @@ constexpr UINT WM_NOTICE = WM_APP + 5;        // lParam: Notice* from the listen
 constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the icons
 constexpr UINT WM_VOLUME = WM_APP + 7;        // the default playback device's volume changed
 constexpr UINT WM_STATUS = WM_APP + 10;       // lParam: SystemStatus*, read off the UI thread
+constexpr UINT WM_UPDATE_READY = WM_APP + 11; // background package is validated and ready
 constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
+constexpr UINT_PTR kReadyTimer = 0x54;       // only during an update startup handshake
 constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
 
@@ -92,6 +95,7 @@ struct App {
 };
 
 App g_app;
+std::wstring g_readyEvent;
 
 // GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS: Windows reports every change of the
 // built-in screen's brightness (keys, quick settings, our slider), and the
@@ -106,6 +110,19 @@ std::wstring ExeDir()
     return p.substr(0, p.find_last_of(L'\\'));
 }
 
+bool SameCoreExecutable(HWND window)
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    wchar_t other[32768]{}, current[32768]{};
+    DWORD length = DWORD(std::size(other));
+    bool same = process && QueryFullProcessImageNameW(process, 0, other, &length) &&
+                GetModuleFileNameW(nullptr, current, DWORD(std::size(current))) && _wcsicmp(other, current) == 0;
+    if (process) CloseHandle(process);
+    return same;
+}
+
 // page: the settings app opens on it ("widgets"); an open window just comes to the front.
 void OpenSettings(const wchar_t* page = nullptr)
 {
@@ -114,7 +131,8 @@ void OpenSettings(const wchar_t* page = nullptr)
     // A development build (native\build\win-x64\Release): the packaged settings app of the same repository.
     for (std::wstring up = dir; up.size() > 3;) {
         up = up.substr(0, up.find_last_of(L'\\'));
-        candidates.push_back(up + L"\\dist\\Atrium\\Settings\\Atrium.Settings.exe");
+        candidates.push_back(up + (IsDevelopmentBuild() ? L"\\dist\\Development\\Atrium\\Settings\\Atrium.Settings.exe"
+                                                       : L"\\dist\\Atrium\\Settings\\Atrium.Settings.exe"));
     }
     for (const std::wstring& exe : candidates) {
         if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
@@ -575,6 +593,9 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     }
     switch (m) {
+    case WM_UPDATE_READY:
+        if (g_app.updates && g_app.notes) g_app.updates->NotifyPrepared(*g_app.notes);
+        return 0;
     case WM_TRAY:
         switch (LOWORD(l)) {
         case WM_CONTEXTMENU:
@@ -634,6 +655,16 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             g_app.trayPanel->Refresh();
         return 0;
     case WM_TIMER:
+        if (w == kReadyTimer) {
+            if (g_app.server && g_app.server->Ready()) {
+                if (HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, g_readyEvent.c_str())) {
+                    SetEvent(event);
+                    CloseHandle(event);
+                }
+                KillTimer(h, kReadyTimer);
+            }
+            return 0;
+        }
         if (w == kTrayTimer) {
             OpenTrayStep2();
             return 0;
@@ -687,7 +718,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         break;
     case WM_ATRIUM_ADD_WIDGET:
-        return g_app.widgetsOn && g_app.widgets->AddNamed(*reinterpret_cast<const std::wstring*>(w), *reinterpret_cast<const std::wstring*>(l)) ? 1 : 0;
+        return w <= WPARAM(WidgetKind::Photos) && l >= 0 && l <= LPARAM(WidgetSize::Large) &&
+               g_app.widgetsOn && g_app.widgets->Add(WidgetKind(w), WidgetSize(l)) ? 1 : 0;
     case WM_ATRIUM_SETTINGS:
         ApplySettings(g_app.server->Current());
         return 0;
@@ -701,10 +733,14 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (w == SPI_SETWORKAREA)
             g_app.bar->Relayout(); // e.g. the system taskbar changed size or auto-hide
         return 0;
+    case WM_CLOSE:
+        if (g_app.chrome) g_app.chrome->RestoreForExit();
+        DestroyWindow(h);
+        return 0;
     case WM_ENDSESSION:
         if (w) {
             Log(L"core: session ending");
-            g_app.chrome.reset(); // Do Not Disturb outlives the session
+            if (g_app.chrome) g_app.chrome->RestoreForExit(); // no later message may hide Windows again
         }
         return 0;
     case WM_DESTROY:
@@ -721,6 +757,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
 {
+    int argumentCount = 0;
+    auto startupArguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+    for (int i = 1; startupArguments && i + 1 < argumentCount; ++i)
+        if (wcscmp(startupArguments[i], L"--ready-event") == 0 && std::wstring_view(startupArguments[i + 1]).starts_with(L"Local\\Atrium.Update.Core."))
+            g_readyEvent = startupArguments[i + 1];
+    LocalFree(startupArguments);
     if (wcscmp(cmdLine, L"--uninstall") == 0) {
         if (MessageBoxW(nullptr, L"卸载 Atrium？个人设置和桌面小组件布局将会保留。", L"Atrium",
                         MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
@@ -737,6 +779,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         HWND other = FindWindowW(kHostClass, nullptr);
         if (!other)
             return 0;
+        if (!SameCoreExecutable(other)) return 1;
         DWORD pid = 0;
         GetWindowThreadProcessId(other, &pid);
         HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
@@ -747,16 +790,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         return wait == WAIT_OBJECT_0 ? 0 : 1;
     }
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
+    if (!mutex) return 1;
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // Already running: launching it again opens the settings instead.
-        if (HWND other = FindWindowW(kHostClass, nullptr))
-            PostMessageW(other, WM_OPEN_SETTINGS, 0, 0);
+        if (HWND other = FindWindowW(kHostClass, nullptr)) {
+            if (SameCoreExecutable(other)) PostMessageW(other, WM_OPEN_SETTINGS, 0, 0);
+            else MessageBoxW(nullptr, L"另一位置的 Atrium 正在运行。请先退出该实例，再启动本目录中的版本。", L"Atrium", MB_OK | MB_ICONINFORMATION);
+        }
+        CloseHandle(mutex);
         return 0;
     }
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     SetCurrentProcessExplicitAppUserModelID(kAppId);
     g_app.instance = instance;
     Log(L"core: starting");
+    const bool registeredHere = IsRegisteredApplication(ExeDir());
     RegisterApplication(ExeDir());
     // A crash must not leave the user without a taskbar.
     SetUnhandledExceptionFilter([](EXCEPTION_POINTERS*) -> LONG {
@@ -777,7 +825,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ChangeWindowMessageFilterEx(g_app.host, g_app.taskbarCreated, MSGFLT_ALLOW, nullptr);
 
     Settings settings = LoadSettings();
-    if (!SetStartOnLogin(settings.startOnLogin))
+    if (!registeredHere && IsRegisteredApplication(ExeDir()) && !SetStartOnLogin(settings.startOnLogin))
         Log(L"startup: could not update the Windows logon entry");
     if (!settings.pins) {
         // First run: start from the user's Windows taskbar pins (saved on the next save).
@@ -791,7 +839,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     Surface::SetCapturable(capturable);
     g_app.menu = std::make_unique<GlassMenu>(instance);
     g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
-        g_app.bar->SetItems(g_app.tasks->Snapshot());
+        auto items = g_app.tasks->Snapshot();
+        if (g_app.preview)
+            g_app.preview->Refresh(items);
+        g_app.bar->SetItems(std::move(items));
         if (g_app.start)
             g_app.start->Refresh();
     }, [](const std::wstring& exe) {
@@ -886,7 +937,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.brightnessNotify = RegisterPowerSettingNotification(g_app.host, &kBrightnessSetting, DEVICE_NOTIFY_WINDOW_HANDLE);
     SetTimer(g_app.host, kStatusTimer, kStatusMs, nullptr);
     g_app.tray->Refresh(); // the panel opens with the icons already read
-    g_app.updates = std::make_unique<UpdateChecker>(g_app.host, WM_NOTICE);
+    g_app.updates = std::make_unique<UpdateChecker>(g_app.host);
+    if (!g_readyEvent.empty()) SetTimer(g_app.host, kReadyTimer, 50, nullptr);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -896,6 +948,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // First the render thread, while every window it draws for is still there; a driver call stuck
     // in the desktop duplication (it holds the shared device) must not keep Atrium from exiting:
     // the system taskbar comes back and the process ends.
+    if (g_app.chrome) g_app.chrome->RestoreForExit();
     g_app.status.reset();
     g_app.preview->Close();
     if (!g_app.bar->StopRendering(3000)) {

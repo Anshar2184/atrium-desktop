@@ -1557,10 +1557,18 @@ void TaskModel::ActivateWindow(HWND window)
         Impl::BringToFront(window);
 }
 
-void TaskModel::CloseWindow(HWND window)
+bool TaskModel::CloseWindow(HWND window)
 {
-    if (IsWindow(window))
-        PostMessageW(window, WM_CLOSE, 0, 0);
+    if (!IsWindow(window)) {
+        SetLastError(ERROR_INVALID_WINDOW_HANDLE);
+        return false;
+    }
+    if (!PostMessageW(window, WM_SYSCOMMAND, SC_CLOSE, 0)) {
+        const DWORD error = GetLastError();
+        Log(L"tasks: window close request failed for %p (%lu)", window, error);
+        return false;
+    }
+    return true;
 }
 
 void TaskModel::Launch(const std::wstring& key)

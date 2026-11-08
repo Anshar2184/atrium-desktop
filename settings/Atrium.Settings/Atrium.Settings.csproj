@@ -8,6 +8,9 @@
     <AssemblyName>Atrium.Settings</AssemblyName>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <AtriumDevelopment Condition="'$(AtriumDevelopment)' == ''">true</AtriumDevelopment>
+    <DefineConstants Condition="'$(AtriumDevelopment)' == 'true'">$(DefineConstants);ATRIUM_DEVELOPMENT</DefineConstants>
     <!-- Unpackaged and self-contained: runs from a plain folder, no runtime install. -->
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -18,7 +21,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\atrium.ico</ApplicationIcon>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <Product>Atrium Desktop</Product>
     <Copyright>MIT License</Copyright>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>

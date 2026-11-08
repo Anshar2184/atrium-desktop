@@ -27,6 +27,9 @@ public:
     // Shows (or updates) the windows of app `key` centred above `anchor` (screen px: the icon's
     // centre, the top of what the bar draws); `icon` stands in when DWM has no thumbnail.
     void Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, const IconImage& icon);
+    // Window changes still reach the open preview after the pointer leaves
+    // the taskbar for a card. This does not restart its leave/fade timers.
+    void Refresh(const std::vector<TaskItem>& items);
     // The pointer left the app on the bar: the preview goes soon, unless the pointer comes onto it.
     void Leave();
     void Close();
@@ -55,6 +58,7 @@ private:
     void Place();          // the surface's rectangle for the cards, above the anchor
     void UpdateThumbs();   // DWM: where the pictures go, how visible
     void DropThumbs();
+    void SetWindows(const std::vector<HWND>& windows);
     int CardAt(POINT content) const;
 
     Surface surface_;

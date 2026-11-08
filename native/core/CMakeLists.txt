@@ -22,6 +22,7 @@ endfunction()
 atrium_shader(glass.hlsl vs_5_0 VS g_GlassVS glass_vs.h)
 atrium_shader(glass.hlsl ps_5_0 PS g_GlassPS glass_ps.h)
 atrium_shader(compare.hlsl cs_5_0 CS g_CompareCS compare_cs.h)
+atrium_shader(backdrop_edge.hlsl ps_5_0 PS g_BackdropEdgePS backdrop_edge_ps.h)
 
 add_executable(atrium_core WIN32
     main.cpp
@@ -78,6 +79,9 @@ add_custom_command(TARGET atrium_core POST_BUILD
 # C++/WinRT headers come with the Windows SDK.
 target_compile_options(atrium_core PRIVATE /bigobj)
 target_compile_definitions(atrium_core PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+if(ATRIUM_DEVELOPMENT)
+    target_compile_definitions(atrium_core PRIVATE ATRIUM_DEVELOPMENT)
+endif()
 target_include_directories(atrium_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(atrium_core PRIVATE
     windowsapp d3d11 dxgi dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32

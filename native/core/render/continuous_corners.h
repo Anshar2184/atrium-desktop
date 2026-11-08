@@ -1,145 +1,159 @@
-// Round G3 corners: f(x) + f(y) = 1, f(t) = t^4 / (0.02 + 0.98 t^2).
-// Sixteen fitted cubics per quarter: radial error < 0.000010 * R.
-// Capsules keep circular ends. Cache local paths, translate on movement.
+// Rasterize the analytic G3 boundary, never a fitted cubic path.
 #pragma once
 
+#include "corner_profile.h"
 #include <d2d1_1.h>
 #include <winrt/base.h>
-
-#include <algorithm>
 #include <array>
-#include <cmath>
 #include <vector>
 
 namespace atrium {
+struct CornerMask {
+    CornerProfile outer, inner;
+    float stroke = 0;
+    size_t bytes = 0;
+    winrt::com_ptr<IUnknown> domain;
+    winrt::com_ptr<ID2D1Bitmap> bitmap;
+};
 
-inline D2D1_POINT_2F ContinuousCornerPoint(double theta)
+struct CornerMaskCache {
+    std::vector<CornerMask> entries;
+    size_t bytes = 0;
+};
+inline CornerMaskCache& ContinuousMasks()
+{
+    thread_local CornerMaskCache cache;
+    return cache;
+}
+inline winrt::com_ptr<IUnknown> CornerResourceDomain(ID2D1RenderTarget* target)
+{
+    winrt::com_ptr<IUnknown> domain;
+    winrt::com_ptr<ID2D1DeviceContext> context;
+    if (SUCCEEDED(target->QueryInterface(IID_PPV_ARGS(context.put())))) {
+        winrt::com_ptr<ID2D1Device> device;
+        context->GetDevice(device.put());
+        domain = device.as<IUnknown>();
+    } else winrt::check_hresult(target->QueryInterface(IID_PPV_ARGS(domain.put())));
+    return domain;
+}
+inline void ForgetContinuousMaskDomain(IUnknown* domain)
+{
+    if (!domain) return;
+    auto& cache = ContinuousMasks();
+    std::erase_if(cache.entries, [&](const auto& entry) {
+        if (entry.domain.get() != domain) return false;
+        cache.bytes -= entry.bytes;
+        return true;
+    });
+}
+inline void ForgetContinuousMasks(ID2D1RenderTarget* target)
+{
+    if (target) ForgetContinuousMaskDomain(CornerResourceDomain(target).get());
+}
+inline ID2D1Bitmap* ContinuousMask(ID2D1RenderTarget* target, float width, float height, float radius, float stroke = 0)
+{
+    auto& storage = ContinuousMasks();
+    auto& cache = storage.entries;
+    auto& bytes = storage.bytes;
+    if (width <= 0 || height <= 0) return nullptr;
+    stroke = std::clamp(stroke, 0.f, std::min(width, height) * 0.5f);
+    auto domain = CornerResourceDomain(target);
+    const auto outer = CornerFor(width, height, radius);
+    const auto inner = CornerFor(std::max(0.f, width - 2 * stroke), std::max(0.f, height - 2 * stroke), std::max(0.f, radius - stroke));
+    for (auto& entry : cache)
+        if (entry.domain == domain && entry.outer.reach == outer.reach && entry.outer.a == outer.a &&
+            entry.inner.reach == inner.reach && entry.inner.a == inner.a && entry.stroke == stroke)
+            return entry.bitmap.get();
+    // A corner stamp has a small stretchable centre. Animated lengths reuse it
+    // without allocating or rasterizing a full-size bitmap every frame.
+    const UINT32 w = UINT32(2 * (std::ceil(std::max(outer.reach, stroke)) + 1) + 1), h = w;
+    std::vector<BYTE> pixels(size_t(w) * h);
+    for (UINT32 y = 0; y < h; ++y)
+        for (UINT32 x = 0; x < w; ++x) {
+            float alpha = CornerCoverage(float(x) + 0.5f, float(y) + 0.5f, float(w), float(h), outer);
+            if (stroke > 0 && width > 2 * stroke && height > 2 * stroke)
+                alpha = std::max(0.f, alpha - CornerCoverage(float(x) + 0.5f - stroke, float(y) + 0.5f - stroke,
+                    float(w) - 2 * stroke, float(h) - 2 * stroke, inner));
+            pixels[size_t(y) * w + x] = BYTE(std::lround(alpha * 255));
+        }
+    winrt::com_ptr<ID2D1Bitmap> bitmap;
+    auto properties = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+    if (FAILED(target->CreateBitmap(D2D1::SizeU(w, h), pixels.data(), w, &properties, bitmap.put()))) return nullptr;
+    constexpr size_t budget = 4 * 1024 * 1024;
+    while (!cache.empty() && (bytes + pixels.size() > budget || cache.size() >= 64)) {
+        bytes -= cache.front().bytes;
+        cache.erase(cache.begin());
+    }
+    bytes += pixels.size();
+    cache.push_back({outer, inner, stroke, pixels.size(), std::move(domain), std::move(bitmap)});
+    return cache.back().bitmap.get();
+}
+
+inline void PaintContinuousRect(ID2D1RenderTarget* target, D2D1_RECT_F rect, float radius, ID2D1Brush* brush, float stroke = 0)
+{
+    const float width = rect.right - rect.left, height = rect.bottom - rect.top;
+    stroke = std::clamp(stroke, 0.f, std::max(0.f, std::min(width, height) * 0.5f));
+    if (auto* mask = ContinuousMask(target, width, height, radius, stroke)) {
+        const auto antialias = target->GetAntialiasMode();
+        target->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+        const auto size = mask->GetSize();
+        const float cap = std::max(CornerFor(width, height, radius).reach, stroke);
+        const float x[] = {rect.left, rect.left + cap, rect.right - cap, rect.right};
+        const float y[] = {rect.top, rect.top + cap, rect.bottom - cap, rect.bottom};
+        const float sx[] = {0, cap, size.width - cap, size.width};
+        const float sy[] = {0, cap, size.height - cap, size.height};
+        for (int row = 0; row < 3; ++row)
+            for (int col = 0; col < 3; ++col)
+                if (x[col + 1] > x[col] && y[row + 1] > y[row]) {
+                    const auto destination = D2D1::RectF(x[col], y[row], x[col + 1], y[row + 1]);
+                    const auto source = D2D1::RectF(sx[col], sy[row], sx[col + 1], sy[row + 1]);
+                    target->FillOpacityMask(mask, brush, D2D1_OPACITY_MASK_CONTENT_GRAPHICS, destination, source);
+                }
+        target->SetAntialiasMode(antialias);
+    }
+}
+inline void FillContinuousRect(ID2D1RenderTarget* target, D2D1_RECT_F rect, float radius, ID2D1Brush* brush)
+{
+    PaintContinuousRect(target, rect, radius, brush);
+}
+inline void StrokeContinuousRect(ID2D1RenderTarget* target, D2D1_RECT_F rect, float radius, ID2D1Brush* brush, float width)
+{
+    const float half = width * 0.5f;
+    PaintContinuousRect(target, D2D1::RectF(rect.left - half, rect.top - half, rect.right + half, rect.bottom + half), radius + half, brush, width);
+}
+
+inline D2D1_POINT_2F ContinuousCornerPoint(double theta, double a)
 {
     const double x = std::sin(theta), y = -std::cos(theta);
+    if (a == 0) return D2D1::Point2F(float(x), float(y));
     double n = 1;
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 8; ++i) {
         const double vx = x / n, vy = y / n, xx = vx * vx, yy = vy * vy;
-        const double dx = 0.02 + 0.98 * xx, dy = 0.02 + 0.98 * yy;
-        const double fx = 2 * vx * xx * (0.04 + 0.98 * xx) / (dx * dx);
-        const double fy = 2 * vy * yy * (0.04 + 0.98 * yy) / (dy * dy);
+        const double dx = a + (1 - a) * xx, dy = a + (1 - a) * yy;
+        const double fx = 2 * vx * xx * (2 * a + (1 - a) * xx) / (dx * dx);
+        const double fy = 2 * vy * yy * (2 * a + (1 - a) * yy) / (dy * dy);
         n *= 1 + (xx * xx / dx + yy * yy / dy - 1) / (vx * fx + vy * fy);
     }
     return D2D1::Point2F(float(x / n), float(y / n));
 }
 
-inline ID2D1PathGeometry* ContinuousGeometry(ID2D1RenderTarget* target, float width, float height, float radius)
-{
-    struct Shape {
-        float width = 0, height = 0, radius = 0;
-        winrt::com_ptr<ID2D1PathGeometry> path;
-    };
-    thread_local winrt::com_ptr<ID2D1Factory> made;
-    thread_local std::array<Shape, 64> cache;
-    thread_local size_t next = 0;
-    winrt::com_ptr<ID2D1Factory> factory;
-    target->GetFactory(factory.put());
-    if (factory != made) {
-        cache = {};
-        next = 0;
-        made = factory;
-    }
-    radius = std::clamp(radius, 0.f, std::max(0.f, std::min(width, height) / 2));
-    for (const auto& entry : cache)
-        if (entry.path && entry.width == width && entry.height == height && entry.radius == radius)
-            return entry.path.get();
-
-    constexpr float curve[16][6] = {
-        {0.032498308f, -1.000000000f, 0.065710536f, -1.000178492f, 0.098338114f, -0.998443629f},
-        {0.131553444f, -0.996677515f, 0.163540056f, -0.993057048f, 0.196386850f, -0.987303366f},
-        {0.228803327f, -0.981625061f, 0.261034933f, -0.974022988f, 0.292662745f, -0.964779776f},
-        {0.324313483f, -0.955529865f, 0.355545339f, -0.944582888f, 0.386091437f, -0.932107184f},
-        {0.416654437f, -0.919624577f, 0.446598774f, -0.905584742f, 0.475764260f, -0.890092326f},
-        {0.504935401f, -0.874596906f, 0.533328642f, -0.857648022f, 0.560822831f, -0.839330681f},
-        {0.588318859f, -0.821012115f, 0.614896140f, -0.801338079f, 0.640450527f, -0.780391226f},
-        {0.666005469f, -0.759443918f, 0.690512781f, -0.737244022f, 0.713878402f, -0.713878402f},
-        {0.737244022f, -0.690512781f, 0.759443918f, -0.666005469f, 0.780391226f, -0.640450527f},
-        {0.801338079f, -0.614896140f, 0.821012115f, -0.588318859f, 0.839330681f, -0.560822831f},
-        {0.857648022f, -0.533328642f, 0.874596906f, -0.504935401f, 0.890092326f, -0.475764260f},
-        {0.905584742f, -0.446598774f, 0.919624577f, -0.416654437f, 0.932107184f, -0.386091437f},
-        {0.944582888f, -0.355545339f, 0.955529865f, -0.324313483f, 0.964779776f, -0.292662745f},
-        {0.974022988f, -0.261034933f, 0.981625061f, -0.228803327f, 0.987303366f, -0.196386850f},
-        {0.993057048f, -0.163540056f, 0.996677515f, -0.131553444f, 0.998443629f, -0.098338114f},
-        {1.000178492f, -0.065710536f, 1.000000000f, -0.032498308f, 1.000000000f, 0.000000000f}
-    };
-    winrt::com_ptr<ID2D1PathGeometry> path;
-    winrt::com_ptr<ID2D1GeometrySink> sink;
-    if (FAILED(factory->CreatePathGeometry(path.put())) || FAILED(path->Open(sink.put())))
-        return nullptr;
-    sink->BeginFigure(D2D1::Point2F(radius, 0), D2D1_FIGURE_BEGIN_FILLED);
-    const D2D1_POINT_2F centres[] = {{width - radius, radius}, {width - radius, height - radius}, {radius, height - radius}, {radius, radius}};
-    const D2D1_POINT_2F starts[] = {{width - radius, 0}, {width, height - radius}, {radius, height}, {0, radius}};
-    for (int corner = 0; corner < 4; ++corner) {
-        sink->AddLine(starts[corner]);
-        auto point = [&](float x, float y) {
-            float rx = corner == 0 ? x : corner == 1 ? -y : corner == 2 ? -x : y;
-            float ry = corner == 0 ? y : corner == 1 ? x : corner == 2 ? -y : -x;
-            return D2D1::Point2F(centres[corner].x + radius * rx, centres[corner].y + radius * ry);
-        };
-        if (radius >= std::min(width, height) / 2)
-            sink->AddArc(D2D1::ArcSegment(point(1, 0), D2D1::SizeF(radius, radius), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
-        else
-            for (const auto& segment : curve)
-                sink->AddBezier(D2D1::BezierSegment(point(segment[0], segment[1]), point(segment[2], segment[3]), point(segment[4], segment[5])));
-    }
-    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-    if (FAILED(sink->Close()))
-        return nullptr;
-    auto& entry = cache[next++ % cache.size()];
-    entry = {width, height, radius, std::move(path)};
-    return entry.path.get();
-}
-
-inline void FillContinuousRect(ID2D1RenderTarget* target, D2D1_RECT_F rect, float radius, ID2D1Brush* brush)
-{
-    if (auto* path = ContinuousGeometry(target, rect.right - rect.left, rect.bottom - rect.top, radius)) {
-        D2D1_MATRIX_3X2_F saved;
-        target->GetTransform(&saved);
-        target->SetTransform(D2D1::Matrix3x2F::Translation(rect.left, rect.top) * saved);
-        D2D1_MATRIX_3X2_F brushSaved;
-        brush->GetTransform(&brushSaved);
-        brush->SetTransform(brushSaved * D2D1::Matrix3x2F::Translation(-rect.left, -rect.top));
-        target->FillGeometry(path, brush);
-        brush->SetTransform(brushSaved);
-        target->SetTransform(saved);
-    }
-}
-
-inline void StrokeContinuousRect(ID2D1RenderTarget* target, D2D1_RECT_F rect, float radius, ID2D1Brush* brush, float width)
-{
-    if (auto* path = ContinuousGeometry(target, rect.right - rect.left, rect.bottom - rect.top, radius)) {
-        D2D1_MATRIX_3X2_F saved;
-        target->GetTransform(&saved);
-        target->SetTransform(D2D1::Matrix3x2F::Translation(rect.left, rect.top) * saved);
-        target->DrawGeometry(path, brush, width);
-        target->SetTransform(saved);
-    }
-}
-
-// The input region follows the same silhouette as the glass, including its fuller corners.
+// HRGN is an integer-pixel input region sampled from the same analytic boundary.
 inline HRGN ContinuousRegion(RECT rect, int radius)
 {
-    radius = std::clamp(radius, 0, int(std::min(rect.right - rect.left, rect.bottom - rect.top) / 2));
-    if (radius >= std::min(rect.right - rect.left, rect.bottom - rect.top) / 2)
-        return CreateRoundRectRgn(rect.left, rect.top, rect.right, rect.bottom, 2 * radius, 2 * radius);
+    const auto profile = CornerFor(float(rect.right - rect.left), float(rect.bottom - rect.top), float(radius));
+    const double r = profile.reach;
     std::vector<POINT> points;
     points.reserve(260);
-    const POINT centres[] = {{rect.right - radius, rect.top + radius}, {rect.right - radius, rect.bottom - radius},
-                             {rect.left + radius, rect.bottom - radius}, {rect.left + radius, rect.top + radius}};
+    const D2D1_POINT_2F centres[] = {{float(rect.right - r), float(rect.top + r)}, {float(rect.right - r), float(rect.bottom - r)},
+                                   {float(rect.left + r), float(rect.bottom - r)}, {float(rect.left + r), float(rect.top + r)}};
     for (int corner = 0; corner < 4; ++corner)
         for (int i = 0; i <= 64; ++i) {
-            const double theta = double(i) * 1.5707963267948966 / 64;
-            const auto p = ContinuousCornerPoint(theta);
+            const auto p = ContinuousCornerPoint(double(i) * 1.5707963267948966 / 64, profile.a);
             const double x = p.x, y = p.y;
             const double rx = corner == 0 ? x : corner == 1 ? -y : corner == 2 ? -x : y;
             const double ry = corner == 0 ? y : corner == 1 ? x : corner == 2 ? -y : -x;
-            points.push_back({centres[corner].x + LONG(std::lround(radius * rx)), centres[corner].y + LONG(std::lround(radius * ry))});
+            points.push_back({LONG(std::lround(centres[corner].x + r * rx)), LONG(std::lround(centres[corner].y + r * ry))});
         }
     return CreatePolygonRgn(points.data(), int(points.size()), WINDING);
 }
-
 } // namespace atrium

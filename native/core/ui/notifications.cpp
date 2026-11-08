@@ -117,14 +117,23 @@ bool Notifications::BodyHidden() const { return hideBody_ || QuietState() == QUN
 
 float Notifications::CardHeight() const { return 16 + 16 + 6 + 20 + 4 + 36 + 14; }
 
-void Notifications::Post(Notice n)
+void Notifications::ClearPreparedUpdate()
+{
+    std::erase_if(notices_, [](const Notice& n) { return n.source == L"atrium-update"; });
+    std::erase_if(popupIds_, [&](uint64_t id) {
+        return std::none_of(notices_.begin(), notices_.end(), [&](const Notice& n) { return n.id == id; });
+    });
+    Changed();
+}
+
+void Notifications::Post(Notice n, bool silent)
 {
     n.time = GetTickCount64();
     // Repeats of the listener's notices, and bursts of the same title from one
     // app, become one card with a count.
     for (auto it = notices_.begin(); it != notices_.end(); ++it) {
         bool sameExternal = n.externalId && it->externalId == n.externalId && it->source == n.source;
-        bool burst = it->appId == n.appId && it->app == n.app && it->title == n.title && n.time - it->time < kMergeMs;
+        bool burst = it->source == n.source && it->appId == n.appId && it->app == n.app && it->title == n.title && n.time - it->time < kMergeMs;
         if (sameExternal && it->title == n.title && it->body == n.body)
             return; // seen already
         if (sameExternal) { // the sender changed its notification: the card follows, as new
@@ -167,7 +176,7 @@ void Notifications::Post(Notice n)
 
     // The open list shows it right away; otherwise it pops up, unless the user
     // is in a full-screen app, presenting or in quiet hours.
-    if (center_.surface->Visible()) {
+    if (silent || center_.surface->Visible()) {
         Changed();
         return;
     }

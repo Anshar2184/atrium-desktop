@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include <functional>
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -17,8 +18,8 @@ namespace atrium {
 // Posted to the host window when the effective settings changed; lParam is
 // unused, the host reads SettingsServer::Current().
 constexpr UINT WM_ATRIUM_SETTINGS = WM_APP + 1;
-// Sent (not posted) by the pipe's thread: add a desktop widget. wParam, lParam:
-// const std::wstring* kind and size ("clock", "medium"); the result is 1 if it was added.
+// Sent by the pipe thread: WidgetKind in wParam, WidgetSize in lParam, both
+// scalar values. A timeout must not leave pointers to the sender's stack.
 constexpr UINT WM_ATRIUM_ADD_WIDGET = WM_APP + 9;
 
 std::wstring SettingsPipeName();
@@ -31,6 +32,7 @@ public:
     SettingsServer& operator=(const SettingsServer&) = delete;
 
     Settings Current();
+    bool Ready() const { return ready_.load(); }
     // A change made by the core itself (e.g. pinning from the bar's menu):
     // applied to the saved settings and to the current preview, then written.
     bool Modify(const std::function<void(Settings&)>& change);
@@ -47,6 +49,7 @@ private:
     std::mutex txn_, lock_;
     Settings saved_, current_;
     HANDLE quit_;
+    std::atomic_bool ready_ = false;
     std::thread thread_;
 };
 

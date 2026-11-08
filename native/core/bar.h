@@ -33,6 +33,8 @@
 
 namespace atrium {
 
+class Surface;
+
 class Bar : public GlassHost {
 public:
     // debugCapturable: development only. Leaves the bar visible to screen capture
@@ -153,14 +155,16 @@ private:
     void ShowOwnWindowsToCapture(bool visible); // render thread; waits for the UI thread
     HWND visual_ = nullptr;
     HWND input_ = nullptr;
-    HWND tooltip_ = nullptr;
+    std::unique_ptr<Surface> tooltip_;
+    std::wstring tooltipText_;
+    D2D1_SIZE_F tooltipSize_{};
+    float tooltipTailX_ = 0;
     Settings settings_;
     std::vector<TaskItem> items_;
     std::map<std::wstring, CachedIcon> icons_;
     uint64_t nextIconId_ = 1;
     BarScene scene_;
     std::vector<Hit> hits_;
-    bool tooltipShown_ = false;
     bool previewShown_ = false; // the hovered app's windows are previewed instead of its tooltip
     bool visible_ = true;
     bool tracking_ = false;

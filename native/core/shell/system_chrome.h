@@ -26,6 +26,9 @@ public:
     // Hides the taskbars again if Explorer has shown them (a restart of
     // Explorer, a display change); follows the user turning Do Not Disturb off.
     void Enforce();
+    // Irreversible for this instance: disable every hide entry point, then
+    // restore Windows before joining workers or waiting for the renderer.
+    void RestoreForExit();
     // Do Not Disturb is on because Atrium turned it on (Atrium's own cards
     // still pop up then).
     bool QuietIsOurs() const { return quietOurs_; }
@@ -42,6 +45,7 @@ private:
     std::atomic_bool taskbarHidden_ = false; // also cleared by a crashing worker
     std::atomic_bool autoHideOurs_ = false; // Atrium switched the taskbar to auto-hide
     bool quietOurs_ = false;
+    bool exiting_ = false;
     HWINEVENTHOOK hook_ = nullptr;
     DWORD hookedPid_ = 0;
 };

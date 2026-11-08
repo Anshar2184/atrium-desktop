@@ -1,5 +1,5 @@
 // Atrium glass material. One signed-distance shape; Liquid and Frosted are
-// parameter presets (docs/RENDERING-DESIGN.md). Ported from poc/Probe/Shaders.
+// parameter presets (docs/DESIGN.md, material presets).
 
 cbuffer GlassParams : register(b0)
 {
@@ -28,6 +28,7 @@ cbuffer GlassParams : register(b0)
     float  Melt;        // width of the smooth union in px
     float  PartMix;     // 0: the parts, 1: the rounded rectangle Shape (the parts' union has seams inside where they meet)
     float  Pad1;
+    float4 Tail;        // Dock label pointer: tip x, base half width, height below Shape.w, overlap inside the body
 };
 
 Texture2D Bg : register(t0);
@@ -48,9 +49,31 @@ VSOut VS(uint id : SV_VertexID)
     return o;
 }
 
-// A rounder G3 profile: f(x) + f(y) = 1, f(t) = t^4 / (0.02 + 0.98 t^2).
-// It follows a circular corner closely; its straight-edge joins remain quartic.
-float sdCorner(float2 q, float r)
+// Shared with corner_profile.h / CornerProfile.cs. All rounded rectangles,
+// including pills, retain quartic straight-edge joins (k = dk/ds = 0).
+float2 cornerProfile(float2 b, float r)
+{
+    r = clamp(r, 0, min(b.x, b.y));
+    float reach = min(r * 1.6, min(b.x, b.y));
+    float v = 1 - 0.2928932188134525 * r / max(reach, 1e-12);
+    float v2 = v * v;
+    float a = b.x == b.y && r == b.x ? 0 : max(0.02, (2 * v2 * v2 - v2) / max(1 - v2, 1e-12));
+    return float2(reach, a);
+}
+
+float cornerEdge(float2 q, float2 profile)
+{
+    float r = profile.x, a = profile.y;
+    if (r <= 0 || min(q.x, q.y) <= 0) return max(q.x, q.y) - r;
+    float2 v = q / r, v2 = v * v;
+    float2 den = a + (1 - a) * v2;
+    float2 derivative = 2 * v * v2 * (2 * a + (1 - a) * v2) / (den * den);
+    return (dot(v2 * v2 / den, 1) - 1) * r / max(length(derivative), 1e-12);
+}
+
+// Approximate metric distance only for refraction/shading. Coverage below is
+// evaluated directly from the analytic implicit equation, not this iteration.
+float sdCorner(float2 q, float r, float a)
 {
     if (min(q.x, q.y) <= 0)
         return max(q.x, q.y) - r;
@@ -61,61 +84,86 @@ float sdCorner(float2 q, float r)
     [unroll] for (int i = 0; i < 2; ++i) {
         v = q / n;
         float2 v2 = v * v;
-        float2 denominator = 0.02 + 0.98 * v2;
+        float2 denominator = a + (1 - a) * v2;
         float2 f = v2 * v2 / denominator;
-        derivative = 2 * v * v2 * (0.04 + 0.98 * v2) / (denominator * denominator);
+        derivative = 2 * v * v2 * (2 * a + (1 - a) * v2) / (denominator * denominator);
         n *= 1 + (f.x + f.y - 1) / dot(v, derivative);
     }
     return (n - r) * dot(v, derivative) / length(derivative);
 }
 
-float sdRoundRect(float2 p, float2 b, float r)
+float sdRoundRect(float2 p, float2 b, float r, bool edge)
 {
-    float2 q = abs(p) - b + r;
-    if (r >= min(b.x, b.y)) // genuine capsules keep circular ends
-        return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
-    return sdCorner(q, r);
+    float2 profile = cornerProfile(b, r);
+    float2 q = abs(p) - b + profile.x;
+    return edge ? cornerEdge(q, profile) : sdCorner(q, profile.x, profile.y);
 }
 
 // A rounded rectangle whose corners differ (r: top left, top right, bottom right, bottom left; y down).
-float sdRoundRect4(float2 p, float2 b, float4 r)
+float sdRoundRect4(float2 p, float2 b, float4 r, bool edge)
 {
     float rr = p.x < 0 ? (p.y < 0 ? r.x : r.w) : (p.y < 0 ? r.y : r.z);
     rr = min(rr, min(b.x, b.y));
-    float2 q = abs(p) - b + rr;
-    if (rr >= min(b.x, b.y))
-        return length(max(q, 0)) + min(max(q.x, q.y), 0) - rr;
-    return sdCorner(q, rr);
+    return sdRoundRect(p, b, rr, edge);
 }
 
 // Smooth minimum: two shapes melt where they come within k px of each other.
 float smin(float a, float b, float k)
 {
-    float h = saturate(0.5 + 0.5 * (b - a) / max(k, 1e-3));
-    return lerp(b, a, h) - k * h * (1 - h);
+    if (a - b <= -k) return a;
+    if (a - b >= k) return b;
+    float x = (a - b) / k, x2 = x * x;
+    // C3 at both ends, with the original blend width and k/4 centre depth.
+    float p = (8 + x2 * (3 + x2 * (13 + x2 * (-11 + 3 * x2)))) / 32;
+    return (a + b) * 0.5 - k * p;
 }
 
 // Signed distance to the glass shape at window px `px` (negative inside).
-float Dist(float2 px)
+float sdTail(float2 px)
 {
+    float width = Shape.z - Shape.x;
+    float margin = max(0.5, Tail.w * 0.25);
+    float halfWidth = min(Tail.y, max(0.5, width * 0.5 - margin));
+    float centre = clamp(Tail.x, Shape.x + halfWidth + margin, max(Shape.x + halfWidth + margin, Shape.z - halfWidth - margin));
+    float2 a = float2(centre - halfWidth, Shape.w - Tail.w);
+    float2 b = float2(centre + halfWidth, a.y), c = float2(Tail.x, Shape.w + Tail.z);
+    float2 e0 = b - a, e1 = c - b, e2 = a - c;
+    float2 v0 = px - a, v1 = px - b, v2 = px - c;
+    float2 q0 = v0 - e0 * saturate(dot(v0, e0) / max(dot(e0, e0), 1e-12));
+    float2 q1 = v1 - e1 * saturate(dot(v1, e1) / max(dot(e1, e1), 1e-12));
+    float2 q2 = v2 - e2 * saturate(dot(v2, e2) / max(dot(e2, e2), 1e-12));
+    float distance = sqrt(min(dot(q0, q0), min(dot(q1, q1), dot(q2, q2))));
+    bool inside = e0.x * v0.y - e0.y * v0.x >= 0 && e1.x * v1.y - e1.y * v1.x >= 0 && e2.x * v2.y - e2.y * v2.x >= 0;
+    return inside ? -distance : distance;
+}
+
+float ShapeDistance(float2 px, bool edge)
+{
+    // C3 metric fields are used while shapes merge. The isolated outline
+    // uses the exact implicit equation below; a blend needs a smooth field.
+    edge = edge && PartCount < 0.5;
     float2 c = px - (Shape.xy + Shape.zw) * 0.5;
     float2 b = max((Shape.zw - Shape.xy) * 0.5, 1);
     float r = min(Radius, min(b.x, b.y));
-    float d = sdRoundRect(c, b, r);
+    float d = sdRoundRect(c, b, r, edge);
     if (PartCount > 0.5) {
         float card = d;
         d = 1e6;
         [unroll] for (int i = 0; i < 6; ++i) {
             if (float(i) < PartCount) {
                 float4 pr = PartRect[i];
-                float di = sdRoundRect4(px - (pr.xy + pr.zw) * 0.5, max((pr.zw - pr.xy) * 0.5, 1), PartRadii[i]);
+                float di = sdRoundRect4(px - (pr.xy + pr.zw) * 0.5, max((pr.zw - pr.xy) * 0.5, 1), PartRadii[i], edge);
                 d = Melt > 0.01 ? smin(d, di, Melt) : min(d, di);
             }
         }
         d = lerp(d, card, PartMix);
     }
+    if (Tail.z > 0)
+        d = min(d, sdTail(px));
     return d;
 }
+
+float Dist(float2 px) { return ShapeDistance(px, false); }
 
 float3 bg(float2 px, float lod)
 {
@@ -143,8 +191,9 @@ float4 PS(VSOut i) : SV_Target
     float ds = Dist(px - float2(0, Inset * 0.25));
     float shadowA = Shadow * exp(-max(ds, 0) / max(Inset * 0.35, 1)) * step(0, d);
 
-    float aa = max(fwidth(d), 1e-3);
-    float cov = saturate(0.5 - d / aa);
+    float edgeDistance = ShapeDistance(px, true);
+    float aa = max(fwidth(edgeDistance), 1e-3);
+    float cov = saturate(0.5 - edgeDistance / aa);
     float keep = saturate(1 - Fade);
     shadowA *= keep;
     if (cov <= 0)

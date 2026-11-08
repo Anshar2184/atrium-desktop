@@ -49,7 +49,8 @@ public:
     // (Atrium's setting): the cards still pop up then.
     std::function<bool()> quietIsOurs;
 
-    void Post(Notice n);
+    void Post(Notice n, bool silent = false);
+    void ClearPreparedUpdate();
     void PanelsChanged(); // a panel opened: the cards on screen step aside
     void ToggleCenter(bool expand = false);
     bool CenterVisible() const { return center_.surface && center_.surface->Visible(); }

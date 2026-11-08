@@ -15,15 +15,35 @@ internal sealed class CoreClient : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint processId);
 
-    private static string PipeName => "Atrium.Core." + Process.GetCurrentProcess().SessionId;
+    private readonly string _pipeName;
+    internal CoreClient(string? pipeName = null) => _pipeName = pipeName ?? "Atrium.Core." + Process.GetCurrentProcess().SessionId;
     public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "settings.json");
 
     private readonly SemaphoreSlim _io = new(1, 1);
+    private readonly CancellationTokenSource _lifetime = new();
+    private CancellationTokenSource? _connection;
     private readonly byte[] _readBuffer = new byte[4096];
     private NamedPipeClientStream? _pipe;
+    private bool _connectionLost;
+    internal static bool Development
+    {
+        get
+        {
+#if ATRIUM_DEVELOPMENT
+            return true;
+#else
+            var exe = CoreExe();
+            return Environment.GetCommandLineArgs().Contains("--development") ||
+                (exe != null && File.Exists(Path.Combine(Path.GetDirectoryName(exe)!, "development.txt")));
+#endif
+        }
+    }
+    public string? LastSaveWarning { get; private set; }
+    public string? ConnectionError { get; private set; }
 
     public bool Connected => _pipe is { IsConnected: true };
     public int ProcessId { get; private set; }
+    public bool StateConfirmed { get; private set; }
 
     public static string? CoreExe()
     {
@@ -35,63 +55,98 @@ internal sealed class CoreClient : IDisposable
     public async Task<bool> ConnectAsync(int timeoutMs)
     {
         Disconnect();
-        var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         try
         {
-            await pipe.ConnectAsync(timeoutMs);
+            await pipe.ConnectAsync(timeoutMs, _lifetime.Token);
             pipe.ReadMode = PipeTransmissionMode.Message;
-            // Only talk to the real core, not to another process holding the name.
-            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid) ||
-                !string.Equals(Process.GetProcessById((int)pid).ProcessName, "Atrium", StringComparison.OrdinalIgnoreCase))
+            // The name is session-wide; only this distribution's executable owns our settings.
+            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid))
             {
                 pipe.Dispose();
                 return false;
             }
+            using var process = Process.GetProcessById((int)pid);
+            var expected = CoreExe();
+            if (expected == null || !string.Equals(process.MainModule?.FileName, expected, StringComparison.OrdinalIgnoreCase))
+            {
+                _connectionLost = true;
+                ConnectionError = "另一位置的 Atrium 正在运行，未连接本目录中的核心。";
+                pipe.Dispose();
+                return false;
+            }
+            _lifetime.Token.ThrowIfCancellationRequested();
+            _connection = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             _pipe = pipe;
             ProcessId = (int)pid;
+            _connectionLost = false;
+            ConnectionError = null;
             return true;
         }
-        catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or OperationCanceledException or System.ComponentModel.Win32Exception)
         {
+            if (e is not TimeoutException and not OperationCanceledException)
+            {
+                _connectionLost = true;
+                ConnectionError = $"无法连接本目录中的核心：{e.Message}";
+            }
             pipe.Dispose();
             return false;
         }
     }
 
-    public void Disconnect()
+    public void Disconnect(bool coreStopped = false)
     {
+        _connection?.Cancel(); // also wakes every request waiting for the semaphore
+        _connection?.Dispose();
+        _connection = null;
         _pipe?.Dispose();
         _pipe = null;
         ProcessId = 0;
+        StateConfirmed = false;
+        if (coreStopped) { _connectionLost = false; ConnectionError = null; }
     }
 
     private async Task<JsonObject?> RequestAsync(JsonObject request)
     {
-        await _io.WaitAsync();
+        var pipe = _pipe;
+        var connection = _connection;
+        if (pipe is not { IsConnected: true } || connection == null || _lifetime.IsCancellationRequested) return null;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(connection.Token, _lifetime.Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5)); // includes queueing, writing and the reply
+        bool entered = false;
         try
         {
-            var pipe = _pipe;
-            if (pipe is not { IsConnected: true }) return null;
+            await _io.WaitAsync(deadline.Token);
+            entered = true;
+            deadline.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(pipe, _pipe)) return null;
             var bytes = JsonSerializer.SerializeToUtf8Bytes(request);
-            await pipe.WriteAsync(bytes);
-            await pipe.FlushAsync();
+            await pipe.WriteAsync(bytes, deadline.Token);
+            await pipe.FlushAsync(deadline.Token);
             using var message = new MemoryStream();
             do
             {
-                int n = await pipe.ReadAsync(_readBuffer);
+                int n = await pipe.ReadAsync(_readBuffer, deadline.Token);
                 if (n == 0) throw new IOException("pipe closed");
                 message.Write(_readBuffer, 0, n);
+                if (message.Length > 1024 * 1024) throw new IOException("核心回复过大");
             } while (!pipe.IsMessageComplete);
             return JsonNode.Parse(message.GetBuffer().AsSpan(0, (int)message.Length)) as JsonObject;
         }
-        catch (Exception e) when (e is IOException or ObjectDisposedException or System.Text.Json.JsonException)
+        catch (Exception e) when (e is IOException or ObjectDisposedException or System.Text.Json.JsonException or OperationCanceledException)
         {
-            Disconnect();
+            if (ReferenceEquals(pipe, _pipe))
+            {
+                _connectionLost = true;
+                ConnectionError = "核心未响应或连接已中断，尚未确认运行状态。";
+                Disconnect();
+            }
             return null;
         }
         finally
         {
-            _io.Release();
+            if (entered) _io.Release();
         }
     }
 
@@ -100,7 +155,10 @@ internal sealed class CoreClient : IDisposable
     {
         var r = await RequestAsync(new JsonObject { ["op"] = "get" });
         if (r?["op"]?.GetValue<string>() == "state")
+        {
+            StateConfirmed = true;
             return (BarSettings.FromJson(r["saved"] as JsonObject, new()), BarSettings.FromJson(r["current"] as JsonObject, new()));
+        }
         var file = ReadFile();
         return (file, file.Clone());
     }
@@ -109,11 +167,14 @@ internal sealed class CoreClient : IDisposable
 
     public async Task<string?> CommitAsync(BarSettings s)
     {
+        LastSaveWarning = null;
         if (Connected)
             return await Send("commit", s);
+        if (_connectionLost || _lifetime.IsCancellationRequested)
+            return "核心连接已中断，尚未确认保存结果。请重新连接后检查已保存的设置。";
         try
         {
-            WriteFile(s);
+            LastSaveWarning = WriteFile(s);
             return null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -140,7 +201,8 @@ internal sealed class CoreClient : IDisposable
         bool connected = Connected;
         var r = await RequestAsync(request);
         // Not connected: nothing to preview. A connection lost on the way: not done.
-        if (r == null) return connected ? "no reply" : null;
+        if (r == null) return connected || _connectionLost ? "核心未在期限内回复或连接已关闭，尚未确认操作结果。请重新连接。" : null;
+        if (op == "commit") LastSaveWarning = r["warning"]?.GetValue<string>();
         return r["op"]?.GetValue<string>() == "ok" ? null : r["message"]?.GetValue<string>() ?? "error";
     }
 
@@ -178,23 +240,40 @@ internal sealed class CoreClient : IDisposable
         return pins.Count > 64 ? pins.GetRange(0, 64) : pins;
     }
 
-    private static void WriteFile(BarSettings s)
+    private static string? WriteFile(BarSettings s)
     {
+        bool startupChanged = ReadFile().StartOnLogin != s.StartOnLogin;
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
         var tmp = SettingsPath + ".tmp";
         File.WriteAllText(tmp, s.ToJson().ToJsonString(), new UTF8Encoding(false));
         File.Move(tmp, SettingsPath, overwrite: true);
-        using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        if (s.StartOnLogin)
+        if (!startupChanged || Development) return null;
+        try
         {
+            using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
             var exe = CoreExe() ?? throw new FileNotFoundException("没有找到 Atrium.exe");
-            run.SetValue("Atrium", $"\"{exe}\"");
+            var command = $"\"{exe}\"";
+            if (s.StartOnLogin)
+            {
+                run.SetValue("Atrium", command);
+            }
+            else
+            {
+                if (run.GetValue("Atrium") is string owner && !string.Equals(owner, command, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("该开机启动项属于另一位置的 Atrium");
+                run.DeleteValue("Atrium", throwOnMissingValue: false);
+            }
         }
-        else run.DeleteValue("Atrium", throwOnMissingValue: false);
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return $"设置已保存，但未能修改 Windows 开机启动：{e.Message}。请重新切换开机启动后再保存。";
+        }
+        return null;
     }
 
     public void Dispose()
     {
+        _lifetime.Cancel();
         Disconnect();
         // In-flight requests still release this semaphore after Disconnect completes their I/O.
     }

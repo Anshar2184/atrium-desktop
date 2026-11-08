@@ -3,6 +3,7 @@
 #include "clock.h"
 #include "render/capture.h"
 #include "render/continuous_corners.h"
+#include "render/callout_profile.h"
 #include "log.h"
 #include "render/glass_renderer.h"
 #include "render/round_stroke.h"
@@ -215,6 +216,35 @@ void Canvas::Fill(D2D1_RECT_F r, float radius, D2D1_COLOR_F c)
         d2d_->FillRectangle(Px(r), Brush(c));
 }
 
+void Canvas::Callout(D2D1_RECT_F body, float radius, float tipX, float halfWidth, float tailHeight, float tailInset, D2D1_COLOR_F color)
+{
+    if (tailHeight <= 0) { Fill(body, radius, color); return; }
+    auto rect = Px(body);
+    rect = D2D1::RectF(std::round(rect.left), std::round(rect.top), std::round(rect.right), std::round(rect.bottom));
+    const float width = rect.right - rect.left, height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0) return;
+    const std::array<float, 7> key{width, height, radius * scale, std::round(tipX * scale) - rect.left,
+                                  halfWidth * scale, tailHeight * scale, tailInset * scale};
+    if (!s_.calloutMask_ || key != s_.calloutMaskKey_) {
+        const UINT32 w = UINT32(std::ceil(width)), h = UINT32(std::ceil(height + key[5]));
+        std::vector<BYTE> pixels(size_t(w) * h);
+        for (UINT32 y = 0; y < h; ++y)
+            for (UINT32 x = 0; x < w; ++x)
+                pixels[size_t(y) * w + x] = BYTE(std::lround(255 * std::clamp(0.5f - CalloutEdge(float(x) + 0.5f, float(y) + 0.5f,
+                    key[0], key[1], key[2], key[3], key[4], key[5], key[6]), 0.f, 1.f)));
+        s_.calloutMask_ = nullptr;
+        const auto properties = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+        if (FAILED(d2d_->CreateBitmap(D2D1::SizeU(w, h), pixels.data(), w, properties, s_.calloutMask_.put()))) return;
+        s_.calloutMaskKey_ = key;
+    }
+    const auto antialias = d2d_->GetAntialiasMode();
+    d2d_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+    const auto size = s_.calloutMask_->GetSize();
+    d2d_->FillOpacityMask(s_.calloutMask_.get(), Brush(color), D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
+        D2D1::RectF(rect.left, rect.top, rect.left + size.width, rect.top + size.height), D2D1::RectF(0, 0, size.width, size.height));
+    d2d_->SetAntialiasMode(antialias);
+}
+
 void Canvas::Stroke(D2D1_RECT_F r, float radius, D2D1_COLOR_F c, float width)
 {
     D2D1_COLOR_F unused;
@@ -422,13 +452,18 @@ D2D1_RECT_F Canvas::Caret(const std::wstring& s, D2D1_RECT_F r, float size, DWRI
 
 void Canvas::ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius)
 {
-    const D2D1_RECT_F p = Px(r);
-    auto* g = ContinuousGeometry(d2d_, p.right - p.left, p.bottom - p.top, radius * scale);
-    if (!g)
-        return;
-    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Translation(p.left, p.top)), nullptr);
-    Image(key, image, r);
-    d2d_->PopLayer();
+    if (!Cached(key)) Image(key, image, D2D1::RectF(), 0);
+    auto found = s_.bitmaps_.find(key);
+    if (found == s_.bitmaps_.end() || !found->second) return;
+    const auto p = Px(r);
+    if (!s_.roundedImageBrush_ && FAILED(d2d_->CreateBitmapBrush(found->second.get(), s_.roundedImageBrush_.put()))) return;
+    auto* brush = s_.roundedImageBrush_.get();
+    brush->SetBitmap(found->second.get());
+    const auto size = found->second->GetSize();
+    brush->SetTransform(D2D1::Matrix3x2F::Scale((p.right - p.left) / size.width, (p.bottom - p.top) / size.height) *
+                        D2D1::Matrix3x2F::Translation(p.left, p.top));
+    brush->SetOpacity(alpha_);
+    FillContinuousRect(d2d_, p, radius * scale, brush);
 }
 
 void Canvas::ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r)
@@ -450,9 +485,6 @@ void Canvas::Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1
 {
     t = std::clamp(t, 0.f, 1.f);
     const D2D1_RECT_F p = Px(r);
-    auto* g = ContinuousGeometry(d2d_, p.right - p.left, p.bottom - p.top, radius * scale);
-    if (!g)
-        return;
     float reach = std::hypot(r.right - r.left, r.bottom - r.top) * scale;
     float rr = std::max(1.f, reach * (1 - (1 - t) * (1 - t) * (1 - t)));
     float a = c.a * alpha_ * (1 - t) * (1 - t);
@@ -463,13 +495,40 @@ void Canvas::Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1
     if (FAILED(d2d_->CreateGradientStopCollection(stops, 3, coll.put())) ||
         FAILED(d2d_->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(centre, D2D1::Point2F(), rr, rr), coll.get(), brush.put())))
         return;
-    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Translation(p.left, p.top)), nullptr);
-    d2d_->FillEllipse(D2D1::Ellipse(centre, rr, rr), brush.get());
-    d2d_->PopLayer();
+    FillContinuousRect(d2d_, p, radius * scale, brush.get());
 }
 
 void Canvas::Clip(D2D1_RECT_F r) { d2d_->PushAxisAlignedClip(Px(r), D2D1_ANTIALIAS_MODE_ALIASED); }
 void Canvas::Unclip() { d2d_->PopAxisAlignedClip(); }
+
+void Canvas::MaskRounded(D2D1_RECT_F r, float radius)
+{
+    const auto p = Px(r);
+    const float rp = radius * scale;
+    const auto& old = s_.roundedMaskRect_;
+    if (!s_.roundedMask_ || old.left != p.left || old.top != p.top || old.right != p.right || old.bottom != p.bottom ||
+        s_.roundedMaskRadius_ != rp) {
+        winrt::com_ptr<ID2D1CommandList> mask;
+        if (FAILED(d2d_->CreateCommandList(mask.put())))
+            return;
+        winrt::com_ptr<ID2D1Image> target;
+        D2D1_MATRIX_3X2_F transform;
+        d2d_->GetTarget(target.put());
+        d2d_->GetTransform(&transform);
+        d2d_->SetTarget(mask.get());
+        d2d_->SetTransform(D2D1::Matrix3x2F::Identity());
+        FillContinuousRect(d2d_, p, rp, Brush(D2D1::ColorF(1, 1, 1, 1)));
+        d2d_->SetTarget(target.get());
+        d2d_->SetTransform(transform);
+        if (FAILED(mask->Close()))
+            return;
+        s_.roundedMask_ = std::move(mask);
+        s_.roundedMaskRect_ = p;
+        s_.roundedMaskRadius_ = rp;
+    }
+    d2d_->DrawImage(s_.roundedMask_.get(), nullptr, nullptr, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                   D2D1_COMPOSITE_MODE_DESTINATION_IN);
+}
 
 void Canvas::Continue() { s_.frameWanted_ = true; }
 
@@ -505,6 +564,7 @@ struct Surface::Shared {
     winrt::com_ptr<ID2D1Factory1> d2dFactory;
     winrt::com_ptr<ID2D1Device> d2d;
     bool lost = false;
+    ~Shared() { if (d2d) ForgetContinuousMaskDomain(d2d.as<IUnknown>().get()); }
 };
 
 std::shared_ptr<Surface::Shared> Surface::SharedDevice()
@@ -596,6 +656,13 @@ void Surface::SetPrivate(bool on)
 
 int Surface::InsetPx() const { return int(std::lround(insetDip_ * scale_)); }
 
+D2D1_SIZE_U Surface::BufferSize() const
+{
+    const int inset = 2 * InsetPx();
+    return D2D1::SizeU(UINT32(std::max({1, int(window_.right - window_.left), int(std::lround(resizeReserve_.width * scale_)) + inset})),
+                      UINT32(std::max({1, int(window_.bottom - window_.top), int(std::lround(resizeReserve_.height * scale_)) + inset})));
+}
+
 POINT Surface::ScreenToContent(POINT p) const { return POINT{p.x - rect_.left, p.y - rect_.top}; }
 POINT Surface::ContentToScreen(POINT p) const { return POINT{p.x + rect_.left, p.y + rect_.top}; }
 
@@ -614,6 +681,7 @@ void Surface::SetShapes(const std::vector<ShapeDip>& shapes, bool animating)
         auto sameRect = [](const D2D1_RECT_F& x, const D2D1_RECT_F& y) { return x.left == y.left && x.top == y.top && x.right == y.right && x.bottom == y.bottom; };
         auto samePart = [&](const ShapeDip::Part& x, const ShapeDip::Part& y) { return sameRect(x.rect, y.rect) && std::equal(x.radii, x.radii + 4, y.radii); };
         return a.radius == b.radius && a.fade == b.fade && sameRect(a.rect, b.rect) && a.melt == b.melt && a.partMix == b.partMix &&
+               a.tailX == b.tailX && a.tailHalfWidth == b.tailHalfWidth && a.tailHeight == b.tailHeight && a.tailInset == b.tailInset &&
                a.parts.size() == b.parts.size() && std::equal(a.parts.begin(), a.parts.end(), b.parts.begin(), samePart);
     };
     if (!animating && !shapesAnimating_ && shapes.size() == shapes_.size() && std::equal(shapes.begin(), shapes.end(), shapes_.begin(), same))
@@ -633,6 +701,9 @@ void Surface::PublishPanel()
     p.gen = ++glassGen_;
     glassPending_ = true;
     p.window = window_;
+    const auto buffer = BufferSize();
+    p.bufferW = int(buffer.width);
+    p.bufferH = int(buffer.height);
     p.inset = float(InsetPx());
     p.radius = radius_ * scale_;
     for (const ShapeDip& s : shapes_) {
@@ -644,15 +715,21 @@ void Surface::PublishPanel()
                                {part.radii[0] * scale_, part.radii[1] * scale_, part.radii[2] * scale_, part.radii[3] * scale_}});
         g.melt = s.melt * scale_;
         g.partMix = s.partMix;
+        g.tailX = px(s.tailX);
+        g.tailHalfWidth = s.tailHalfWidth * scale_;
+        g.tailHeight = s.tailHeight * scale_;
+        g.tailInset = s.tailInset * scale_;
         p.shapes.push_back(std::move(g));
     }
     p.visible = visible_ || hiding_;
     p.desktop = desktopLayer_;
+    if (desktopLayer_)
+        p.offset = POINT{window_.left - nativeWindow_.left, window_.top - nativeWindow_.top};
     p.animating = shapesAnimating_;
     p.pop = pop_;
     p.popOpen = popOpen_;
-    p.popX = float(anchor_.x - window_.left);
-    p.popY = float(anchor_.y - window_.top);
+    p.popX = float(anchor_.x - (desktopLayer_ ? nativeWindow_.left : window_.left));
+    p.popY = float(anchor_.y - (desktopLayer_ ? nativeWindow_.top : window_.top));
     p.rippleX = rippleX_;
     p.rippleY = rippleY_;
     p.rippleMs = rippleMs_;
@@ -713,6 +790,10 @@ LRESULT CALLBACK Surface::Proc(HWND h, UINT m, WPARAM w, LPARAM l)
     if (mouse && m != WM_MOUSEHWHEEL) {
         int inset = self->InsetPx();
         int x = GET_X_LPARAM(l) - inset, y = GET_Y_LPARAM(l) - inset;
+        if (self->desktopLayer_) {
+            x -= self->window_.left - self->nativeWindow_.left;
+            y -= self->window_.top - self->nativeWindow_.top;
+        }
         bool outside = x < 0 || y < 0 || x >= self->rect_.right - self->rect_.left || y >= self->rect_.bottom - self->rect_.top;
         if (outside && (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)) {
             if (self->onDismiss)
@@ -754,6 +835,35 @@ void Surface::Place(RECT rect)
     scale_ = PopupScale(rect);
     int inset = InsetPx();
     window_ = RECT{rect.left - inset, rect.top - inset, rect.right + inset, rect.bottom + inset};
+    ApplyPlacement();
+}
+
+void Surface::ApplyPlacement()
+{
+    if (desktopLayer_) {
+        MONITORINFO monitor{sizeof(monitor)};
+        GetMonitorInfoW(MonitorFromRect(&rect_, MONITOR_DEFAULTTONEAREST), &monitor);
+        if (!EqualRect(&nativeWindow_, &monitor.rcMonitor)) {
+            nativeWindow_ = monitor.rcMonitor;
+            SetWindowPos(hwnd_, nullptr, nativeWindow_.left, nativeWindow_.top,
+                         nativeWindow_.right - nativeWindow_.left, nativeWindow_.bottom - nativeWindow_.top, SWP_NOACTIVATE | SWP_NOZORDER);
+            inputRegion_ = {};
+        }
+        // The host has no full-screen bitmap. Its region admits only the
+        // widget and shadow; include the previous frame while it is in flight.
+        RECT region = window_;
+        if (!IsRectEmpty(&presentedWindow_))
+            UnionRect(&region, &region, &presentedWindow_);
+        OffsetRect(&region, -nativeWindow_.left, -nativeWindow_.top);
+        if (!EqualRect(&region, &inputRegion_)) {
+            HRGN shape = CreateRectRgn(region.left, region.top, region.right, region.bottom);
+            if (SetWindowRgn(hwnd_, shape, FALSE))
+                inputRegion_ = region; // Windows owns the region after success
+            else
+                DeleteObject(shape);
+        }
+        return;
+    }
     SetWindowPos(hwnd_, desktopLayer_ ? nullptr : HWND_TOPMOST, window_.left, window_.top, window_.right - window_.left, window_.bottom - window_.top,
                  SWP_NOACTIVATE | (desktopLayer_ ? SWP_NOZORDER : 0));
 }
@@ -785,7 +895,9 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
         ++pop_;
         popOpen_ = true;
         if (EnsureDevice())
-            PopVisual(shared_->dcomp.get(), visual_.get(), true, float(anchor.x - window_.left), float(anchor.y - window_.top));
+            PopVisual(shared_->dcomp.get(), visual_.get(), true,
+                      float(anchor.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
+                      float(anchor.y - (desktopLayer_ ? nativeWindow_.top : window_.top)));
     } else {
         popOpen_ = true;
         EnsureDevice();
@@ -796,14 +908,38 @@ void Surface::Show(RECT rect, bool activate, POINT anchor, bool pop)
 
 void Surface::Move(RECT rect)
 {
+    // Keep each desktop content frame paired with its glass geometry.
+    // Input can replace the next request
+    // while the current one is in flight, without waiting on the UI thread.
+    if (desktopLayer_ && visible_ && glassReady_ && presentPending_) {
+        nextResize_ = rect;
+        frameWanted_ = true;
+        return;
+    }
     if (EqualRect(&rect, &rect_))
         return;
     bool resized = rect.right - rect.left != rect_.right - rect_.left || rect.bottom - rect.top != rect_.bottom - rect_.top;
     Place(rect);
     if (visible_) {
-        if (resized) // a move alone keeps the content: the window carries it
-            Invalidate();
         PublishPanel();
+        if (resized || desktopLayer_) // desktop translation travels with the pixel buffer
+            Invalidate();
+    }
+}
+
+void Surface::ReserveResize(D2D1_SIZE_F sizeDip)
+{
+    const bool release = sizeDip.width == 0 && sizeDip.height == 0;
+    releaseResize_ = release && (presentPending_ || nextResize_.has_value());
+    if (releaseResize_)
+        return; // first finish the final geometry frame, then return its spare buffers
+    if (resizeReserve_.width == sizeDip.width && resizeReserve_.height == sizeDip.height)
+        return;
+    resizeReserve_ = sizeDip;
+    presentPending_ = false;
+    if (visible_) {
+        PublishPanel();
+        Invalidate();
     }
 }
 
@@ -813,6 +949,9 @@ void Surface::Hide(bool animate)
         return;
     visible_ = false;
     presentPending_ = false;
+    presentedWindow_ = {};
+    nextResize_.reset();
+    releaseResize_ = false;
     shapesAnimating_ = false;
     burst_ = Burst{}; // time spent hidden is not an animation gap
     if (!animate || !visual_ || !shared_) {
@@ -822,7 +961,9 @@ void Surface::Hide(bool animate)
     hiding_ = true;
     ++pop_;
     popOpen_ = false;
-    PopVisual(shared_->dcomp.get(), visual_.get(), false, float(anchor_.x - window_.left), float(anchor_.y - window_.top));
+    PopVisual(shared_->dcomp.get(), visual_.get(), false,
+              float(anchor_.x - (desktopLayer_ ? nativeWindow_.left : window_.left)),
+              float(anchor_.y - (desktopLayer_ ? nativeWindow_.top : window_.top)));
     PublishPanel();
     SetTimer(hwnd_, kHideTimer, kHideMs, nullptr);
 }
@@ -865,6 +1006,9 @@ void Surface::Invalidate()
 void Surface::ResetDevice()
 {
     presentPending_ = false;
+    presentedWindow_ = {};
+    nextResize_.reset();
+    releaseResize_ = false;
     d2d_ = nullptr;
     if (target_)
         target_->SetRoot(nullptr);
@@ -873,6 +1017,9 @@ void Surface::ResetDevice()
     backTarget_ = nullptr;
     swap_ = nullptr;
     brush_ = nullptr;
+    calloutMask_ = nullptr;
+    roundedImageBrush_ = nullptr;
+    roundedMask_ = nullptr;
     bitmaps_.clear();
     bufW_ = bufH_ = 0;
     if (shared_)
@@ -887,7 +1034,8 @@ bool Surface::EnsureDevice()
     shared_ = SharedDevice();
     if (!shared_)
         return false;
-    int w = std::max(1, int(window_.right - window_.left)), h = std::max(1, int(window_.bottom - window_.top));
+    const auto size = BufferSize();
+    int w = int(size.width), h = int(size.height);
     DXGI_SWAP_CHAIN_DESC1 desc{};
     desc.Width = UINT(w);
     desc.Height = UINT(h);
@@ -922,7 +1070,8 @@ void Surface::Paint()
     }
     if (!visible_ || !EnsureDevice())
         return;
-    int w = std::max(1, int(window_.right - window_.left)), h = std::max(1, int(window_.bottom - window_.top));
+    const auto size = BufferSize();
+    int w = int(size.width), h = int(size.height);
     if (w != bufW_ || h != bufH_) {
         d2d_->SetTarget(nullptr);
         backTarget_ = nullptr;
@@ -1012,6 +1161,17 @@ void Surface::Present()
 {
     if (!visible_ || !presentPending_ || !swap_)
         return;
+    if (desktopLayer_) {
+        ApplyPlacement();
+        const DXGI_MATRIX_3X2_F matrix{1, 0, 0, 1, float(window_.left - nativeWindow_.left), float(window_.top - nativeWindow_.top)};
+        if (FAILED(swap_.as<IDXGISwapChain2>()->SetMatrixTransform(&matrix))) {
+            ResetDevice();
+            return;
+        }
+        // One composed frame later the region can forget the previous bounds.
+        frameWanted_ |= !EqualRect(&presentedWindow_, &window_);
+        presentedWindow_ = window_;
+    }
     presentPending_ = false;
     HRESULT hr = swap_->Present(0, 0);
     if (FAILED(hr)) {
@@ -1041,6 +1201,13 @@ void Surface::Present()
         }
         burst_ = Burst{};
     }
+    if (nextResize_) {
+        RECT next = *nextResize_;
+        nextResize_.reset();
+        Move(next);
+    }
+    if (releaseResize_ && !presentPending_ && !nextResize_)
+        ReserveResize(D2D1::SizeF());
     if (frameWanted_ && visible_)
         FramePump::Get().Want(hwnd_);
 }

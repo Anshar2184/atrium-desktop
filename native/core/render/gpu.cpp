@@ -30,7 +30,7 @@ Gpu Create(const winrt::com_ptr<IDXGIFactory2>& factory, const winrt::com_ptr<ID
 
 // The adapter that really scans out `monitor`, from the display configuration.
 // On hybrid laptops DXGI may list the output under the discrete GPU the process
-// was placed on, while the integrated GPU drives the panel (VERIFICATION 1.10).
+// was placed on, while the integrated GPU drives the panel.
 bool ScanoutAdapter(HMONITOR monitor, LUID& luid)
 {
     MONITORINFOEXW mi{};

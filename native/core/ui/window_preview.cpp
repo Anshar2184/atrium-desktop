@@ -54,18 +54,14 @@ void WindowPreview::DropThumbs()
         }
 }
 
-void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, const IconImage& icon)
+void WindowPreview::SetWindows(const std::vector<HWND>& windows)
 {
-    KillTimer(surface_.Hwnd(), kLeaveTimer);
-    const bool visible = surface_.Visible();
-    const bool same = visible && key == key_;
-    key_ = key;
-    anchor_ = anchor;
-    icon_ = icon;
+    const HWND hovered = hover_ >= 0 && size_t(hover_) < cards_.size() ? cards_[size_t(hover_)].window : nullptr;
+    const HWND pressed = pressed_ >= 0 && size_t(pressed_) < cards_.size() ? cards_[size_t(pressed_)].window : nullptr;
     // Keep the cards (and their thumbnails) of windows still there, in the group's order.
     std::vector<Card> next;
     for (HWND h : windows) {
-        if (!IsWindow(h))
+        if (!IsWindow(h) || !IsWindowVisible(h))
             continue;
         auto old = std::find_if(cards_.begin(), cards_.end(), [&](const Card& c) { return c.window == h; });
         Card c;
@@ -79,6 +75,14 @@ void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windo
     }
     DropThumbs();
     cards_ = std::move(next);
+    auto indexOf = [&](HWND window) {
+        auto item = std::find_if(cards_.begin(), cards_.end(), [&](const Card& c) { return c.window == window; });
+        return item != cards_.end() ? int(item - cards_.begin()) : -1;
+    };
+    hover_ = indexOf(hovered);
+    pressed_ = indexOf(pressed);
+    if (hover_ < 0)
+        overClose_ = false;
     if (cards_.empty()) {
         Close();
         return;
@@ -101,6 +105,19 @@ void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windo
             c.sourceRect.bottom = std::min<LONG>(c.sourceRect.bottom, c.source.cy);
         }
     }
+}
+
+void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windows, POINT anchor, const IconImage& icon)
+{
+    KillTimer(surface_.Hwnd(), kLeaveTimer);
+    const bool visible = surface_.Visible();
+    const bool same = visible && key == key_;
+    key_ = key;
+    anchor_ = anchor;
+    icon_ = icon;
+    SetWindows(windows);
+    if (cards_.empty())
+        return;
     if (!same) {
         hover_ = pressed_ = -1;
         // Reusing the open surface does not send onReady again. Keep its fade
@@ -111,6 +128,20 @@ void WindowPreview::Show(const std::wstring& key, const std::vector<HWND>& windo
     Place();
     if (!same)
         Log(L"preview: %zu window(s) of %s", cards_.size(), key_.c_str());
+}
+
+void WindowPreview::Refresh(const std::vector<TaskItem>& items)
+{
+    if (!surface_.Visible())
+        return;
+    auto item = std::find_if(items.begin(), items.end(), [&](const TaskItem& task) { return task.key == key_; });
+    if (item == items.end()) {
+        Close();
+        return;
+    }
+    SetWindows(item->windows);
+    if (!cards_.empty())
+        Place();
 }
 
 void WindowPreview::Layout(float scale, float maxWidthDip)
@@ -174,6 +205,8 @@ void WindowPreview::Close()
     DropThumbs();
     cards_.clear();
     key_.clear();
+    hover_ = pressed_ = -1;
+    overClose_ = false;
     inside_ = false;
     if (surface_.Visible())
         surface_.Hide();
@@ -323,9 +356,10 @@ bool WindowPreview::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         HWND target = cards_[size_t(i)].window;
         if (m == WM_MBUTTONUP || inClose(i)) {
-            // Close that window; the card goes when the window does (the bar reports the change).
-            TaskModel::CloseWindow(target);
-            Log(L"preview: close a window of %s", key_.c_str());
+            // Queue the same command as a native close button. The task model
+            // retires the card only after the window actually closes or hides.
+            if (TaskModel::CloseWindow(target))
+                Log(L"preview: requested window close for %s (%p)", key_.c_str(), target);
             return true;
         }
         Close();

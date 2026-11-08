@@ -1,5 +1,5 @@
 // D3D11 device on the adapter that drives a given monitor. Rendering there
-// avoids cross-adapter copies on hybrid laptops (D02, VERIFICATION 1.13).
+// avoids cross-adapter copies on hybrid laptops (D02).
 #pragma once
 
 #include <d3d11_4.h>
