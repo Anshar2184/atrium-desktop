@@ -60,7 +60,7 @@ private:
     void PaintCast(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void Link(Canvas& c, const Theme& t, const std::wstring& id, const std::wstring& label, float left, float right, float y, int align);
     void PaintSlider(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& id, const std::wstring& title, const std::wstring& glyph,
-                     int value, bool dim, const std::wstring& right, D2D1_RECT_F& track);
+                     int value, bool dim, const std::wstring& right, D2D1_RECT_F& track, bool enabled = true);
     float PaintHeader(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& title, bool on, const std::wstring& toggleId);
     void Switch(Canvas& c, const Theme& t, D2D1_RECT_F r, bool on, float hv);
     bool Message(UINT m, WPARAM w, LPARAM l, LRESULT& result);
@@ -96,7 +96,9 @@ private:
     int brightness_ = -2; // -1: not adjustable (no built-in screen), -2: not read yet
     // The display's slider: read, or (before the first reading) a laptop's built-in screen, so the
     // first opening is laid out at once instead of the sound's slider moving down when WMI answers.
-    bool HasBrightness() const { return brightness_ >= 0 || (brightness_ == -2 && status_.battery); }
+    // The display's slider is always there; greyed out where the screen's brightness cannot be set
+    // (most desktop monitors) or is not read yet.
+    bool CanSetBrightness() const { return brightness_ >= 0; }
     std::vector<WifiNetwork> networks_;
     bool scanning_ = false, scanned_ = false;
     unsigned scanGen_ = 0, acceptedGen_ = 0;

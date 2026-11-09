@@ -261,6 +261,7 @@ internal sealed class CoreClient : IDisposable
             {
                 if (run.GetValue("Atrium") is string owner && !string.Equals(owner, command, StringComparison.OrdinalIgnoreCase))
                     throw new IOException("该开机启动项属于另一位置的 Atrium");
+                RemoveLogonTask(exe);
                 run.DeleteValue("Atrium", throwOnMissingValue: false);
             }
         }
@@ -269,6 +270,30 @@ internal sealed class CoreClient : IDisposable
             return $"设置已保存，但未能修改 Windows 开机启动：{e.Message}。请重新切换开机启动后再保存。";
         }
         return null;
+    }
+
+    // The core starts from a Task Scheduler logon task (shell/logon_task.cpp); it registers it
+    // itself, from the Run entry written above, when it next starts.
+    private static void RemoveLogonTask(string exe)
+    {
+        var name = "Atrium Startup-" + System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
+        try
+        {
+            dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
+            service.Connect();
+            dynamic folder = service.GetFolder("\\");
+            dynamic task;
+            try { task = folder.GetTask(name); }
+            catch (COMException e) when (e.HResult == unchecked((int)0x80070002)) { return; } // no task
+            string command = ((string)task.Definition.Actions.Item(1).Path).Trim('"');
+            if (!string.Equals(command, exe, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("该开机启动项属于另一位置的 Atrium");
+            folder.DeleteTask(name, 0);
+        }
+        catch (COMException e)
+        {
+            throw new IOException(e.Message, e);
+        }
     }
 
     public void Dispose()

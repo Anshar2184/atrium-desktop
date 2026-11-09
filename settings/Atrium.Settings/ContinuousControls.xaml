@@ -677,11 +677,14 @@
             </VisualStateManager.VisualStateGroups>
             <Grid x:Name="LayoutRoot" Visibility="Collapsed">
                 <Rectangle x:Name="SmokeLayerBackground" Fill="{ThemeResource ContentDialogSmokeFill}" />
-                <Border x:Name="BackgroundElement" local:ContinuousCorners.Enabled="True" local:ContinuousCorners.ClipChildren="True" Background="{TemplateBinding Background}" FlowDirection="{TemplateBinding FlowDirection}" BorderThickness="{TemplateBinding BorderThickness}" BorderBrush="{TemplateBinding BorderBrush}" BackgroundSizing="InnerBorderEdge" CornerRadius="{TemplateBinding CornerRadius}" MinWidth="{ThemeResource ContentDialogMinWidth}" MaxWidth="{ThemeResource ContentDialogMaxWidth}" MinHeight="{ThemeResource ContentDialogMinHeight}" MaxHeight="{ThemeResource ContentDialogMaxHeight}" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                <Border x:Name="BackgroundElement" local:ContinuousCorners.Enabled="True" Background="{TemplateBinding Background}" FlowDirection="{TemplateBinding FlowDirection}" BorderThickness="{TemplateBinding BorderThickness}" BorderBrush="{TemplateBinding BorderBrush}" BackgroundSizing="InnerBorderEdge" CornerRadius="{TemplateBinding CornerRadius}" MinWidth="{ThemeResource ContentDialogMinWidth}" MaxWidth="{ThemeResource ContentDialogMaxWidth}" MinHeight="{ThemeResource ContentDialogMinHeight}" MaxHeight="{ThemeResource ContentDialogMaxHeight}" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
                     <Border.RenderTransform>
                         <ScaleTransform x:Name="ScaleTransform" />
                     </Border.RenderTransform>
-                    <local:ContinuousSurface x:Name="DialogSpace" CornerRadius="{ThemeResource OverlayCornerRadius}">
+                    <!-- The clip is here, not on BackgroundElement: taking the composition visual of the
+                         scaled, centred element moves its hit area off what is drawn (the dialog
+                         stopped taking clicks). -->
+                    <local:ContinuousSurface x:Name="DialogSpace" local:ContinuousCorners.ClipChildren="True" CornerRadius="{ThemeResource OverlayCornerRadius}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />

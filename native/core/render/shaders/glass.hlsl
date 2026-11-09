@@ -191,9 +191,13 @@ float4 PS(VSOut i) : SV_Target
     float ds = Dist(px - float2(0, Inset * 0.25));
     float shadowA = Shadow * exp(-max(ds, 0) / max(Inset * 0.35, 1)) * step(0, d);
 
+    // The implicit edge distance is exact only near the outline: where a corner
+    // meets a straight side, deep inside, it jumps by hundreds of px between
+    // neighbours, and fwidth would leave a half-covered line there. Past 2 px in
+    // the shape is plainly covered.
     float edgeDistance = ShapeDistance(px, true);
     float aa = max(fwidth(edgeDistance), 1e-3);
-    float cov = saturate(0.5 - edgeDistance / aa);
+    float cov = d < -2 ? 1 : saturate(0.5 - edgeDistance / aa);
     float keep = saturate(1 - Fade);
     shadowA *= keep;
     if (cov <= 0)

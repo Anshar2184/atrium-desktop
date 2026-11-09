@@ -139,15 +139,53 @@ internal static partial class WidgetFaces
             case "battery":
             {
                 double cx = w / 2, cy = h / 2 - 12, R = 44;
-                var (fill, charging, low) = BarFace.Battery();
                 Arc(c, cx, cy, R, -90, 360, p.Track, 9, false);
+                if (!BarFace.HasBattery())
+                {
+                    // A desktop: the ring full, a plug, plugged in (PaintBattery).
+                    Arc(c, cx, cy, R, -90, 360, p.Green, 9, false);
+                    Glyph(c, "\uE83E", cx - 22, cy - 22, cx + 22, cy + 22, 22, p.Text);
+                    Text(c, "已接通电源", 0, cy + R + 12, w, cy + R + 34, 13, p.Text, 2, 1, p);
+                    break;
+                }
+                var (fill, charging, low) = BarFace.Battery();
                 Color level = low ? p.Red : p.Green;
                 Arc(c, cx, cy, R, -90, 360 * fill, level, 9, true);
-                Glyph(c, "", cx - 22, cy - 22, cx + 22, cy + 22, 24, p.Text);
+                Glyph(c, "\uE7F8", cx - 22, cy - 22, cx + 22, cy + 22, 24, p.Text);
                 string n = $"{Math.Round(fill * 100)}%";
                 double tw = TextWidth(n, 19, "TitleFont"), bolt = charging ? 16 : 0, x0 = (w - tw - bolt) / 2;
-                if (charging) Glyph(c, "", x0 - 2, cy + R + 10, x0 + bolt, cy + R + 36, 13, level);
+                if (charging) Glyph(c, "\uE945", x0 - 2, cy + R + 10, x0 + bolt, cy + R + 36, 13, level);
                 Text(c, n, x0 + bolt, cy + R + 10, x0 + bolt + tw + 4, cy + R + 36, 19, p.Text, 2, 0, p);
+                break;
+            }
+            case "bluetooth":
+            {
+                // PaintBluetooth, with examples: the gallery does not read the devices.
+                (string Glyph, string Name, int Pct)[] d = { ("\uE7F6", "耳机", 82), ("\uE765", "键盘", 64), ("\uE962", "鼠标", 18), ("\uE7FC", "手柄", 45) };
+                Color Col(int v) => v <= 20 ? p.Red : p.Green;
+                if (size == "small")
+                {
+                    double cw = (w - 2 * Pad) / 2, ch = (h - 2 * Pad) / 2, R = 21;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        double cx = Pad + cw * (i % 2 + 0.5), cy = Pad + ch * (i / 2) + 26;
+                        Arc(c, cx, cy, R, -90, 360, p.Track, 5, false);
+                        Arc(c, cx, cy, R, -90, 360 * d[i].Pct / 100.0, Col(d[i].Pct), 5, true);
+                        Glyph(c, d[i].Glyph, cx - R, cy - R, cx + R, cy + R, 15, p.Text);
+                        Text(c, $"{d[i].Pct}%", cx - cw / 2, cy + R + 4, cx + cw / 2, cy + R + 20, 11.5, p.Text, 2, 1, p);
+                    }
+                    break;
+                }
+                double rowH = (h - 2 * Pad) / 4;
+                for (int i = 0; i < 4; i++)
+                {
+                    double mid = Pad + rowH * i + rowH / 2;
+                    Glyph(c, d[i].Glyph, Pad, mid - 12, Pad + 26, mid + 12, 16, p.Text);
+                    Text(c, d[i].Name, Pad + 34, mid - 10, w - Pad - 112, mid + 10, 13, p.Text, 2, 0, p);
+                    Fill(c, w - Pad - 106, mid - 3, w - Pad - 50, mid + 3, 3, p.Track);
+                    Fill(c, w - Pad - 106, mid - 3, w - Pad - 106 + Math.Max(6, 56 * d[i].Pct / 100.0), mid + 3, 3, Col(d[i].Pct));
+                    Text(c, $"{d[i].Pct}%", w - Pad - 46, mid - 10, w - Pad, mid + 10, 13, p.Text, 2, 2, p);
+                }
                 break;
             }
             case "system":

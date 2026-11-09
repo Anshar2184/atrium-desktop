@@ -46,7 +46,7 @@
 | `stageAutoHide` | bool | | false | 悬停弹出：台前调度平时隐藏，指针碰到那一侧的屏幕边缘时才滑出；默认常驻（窗口挡住时让开） |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37） |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |
-| `startOnLogin` | bool | | true | 当前用户开机自启；仅在正式安装归属变化或用户切换此值时写 Windows 开机项；开发构建不修改该项 |
+| `startOnLogin` | bool | | true | 当前用户开机自启：任务计划程序里当前用户的登录任务 `Atrium Startup-<SID>`（登录时随会话启动，不在 Explorer 的 Run 项队列里排队）；注册失败时退回 HKCU 的 Run 项。正式安装每次启动时，若此值为开且 Run 项没有在任务管理器里被关闭，就把旧版本的 Run 项换成登录任务；开发构建不修改开机项 |
 | `pins` | array | | 见下 | 固定的应用，按顺序显示 |
 
 `pins` 的每一项：`{"name": "显示名", "path": ".lnk / .exe 路径，可空", "args": "附加参数，可空", "aumid": "AppUserModelID，可空", "multipleWindows": false}`。`multipleWindows` 可省略，浏览器与 Windows 文件管理器默认允许新窗口，聊天、音乐及其他应用默认打开已有页面；中键与“打开新窗口”遵循此设置。浏览器仅按常用程序文件名识别（Chrome、Edge、Firefox、Brave、Opera、Vivaldi、Chromium），不扫描协议注册或按显示名推断。主窗口关闭到后台时，通过应用自己的托盘入口恢复，不强制显示隐藏窗口。识别同一应用时 `aumid` 优先，其次匹配启动器与实际程序；多个固定项共用的程序路径不作模糊归组。设置文件里**没有** `pins` 键时（首次运行），Core 导入用户当前 Windows 任务栏的固定项（`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`），`get` 返回的 `current` / `saved` 中包含导入结果；保存后写入文件，之后不再导入。

@@ -40,6 +40,8 @@ public sealed partial class MainWindow
         new("battery", "small", "电池", "电量圆环", "系统"),
         new("system", "small", "系统监视", "CPU、内存与磁盘", "系统"),
         new("system", "medium", "系统监视", "三个圆环", "系统"),
+        new("bluetooth", "small", "蓝牙设备", "四个设备的电量", "系统"),
+        new("bluetooth", "medium", "蓝牙设备", "名称与电量", "系统"),
     };
 
     private readonly Dictionary<string, FrameworkElement> _widgetSections = new();

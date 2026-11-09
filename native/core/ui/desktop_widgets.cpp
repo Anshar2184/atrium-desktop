@@ -41,6 +41,7 @@ constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1;  // lParam Widget*: removed once i
 constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2; // a burst of window events, one restack
 constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;   // lParam PhotoRead*: a photo was read
 constexpr UINT WM_WIDGET_WEATHER = WM_APP + 4; // a new forecast (WeatherSource::Latest)
+constexpr UINT WM_WIDGET_BLUETOOTH = WM_APP + 5; // the Bluetooth batteries changed (BluetoothBatteries::Latest)
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
 
@@ -50,7 +51,8 @@ struct KindName {
 };
 const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},     {WidgetKind::Calendar, L"calendar"},   {WidgetKind::Battery, L"battery"},
                            {WidgetKind::Digital, L"digital"}, {WidgetKind::System, L"system"},       {WidgetKind::Notes, L"notes"},
-                           {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"},  {WidgetKind::Weather, L"weather"}};
+                           {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"},  {WidgetKind::Weather, L"weather"},
+                           {WidgetKind::Bluetooth, L"bluetooth"}};
 
 const wchar_t* NameOf(WidgetKind k)
 {
@@ -259,6 +261,7 @@ DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
     world_.lunar = &lunar_;
     weather_ = std::make_unique<WeatherSource>(host_, WM_WIDGET_WEATHER);
     world_.weather = weather_->Latest(); // the last one, until the first fetch
+    bluetooth_ = std::make_unique<BluetoothBatteries>(host_, WM_WIDGET_BLUETOOTH);
 }
 
 void DesktopWidgets::SetMaterial(WidgetMaterial material)
@@ -311,6 +314,7 @@ void DesktopWidgets::SetEnabled(bool on)
         KillTimer(host_, kTickTimer);
         KillTimer(host_, kSafetyTimer);
         weather_->SetActive(false);
+        bluetooth_->SetActive(false);
         KillTimer(host_, kCaretTimer);
         if (KillTimer(host_, kSaveTimer))
             Save(); // typing not saved yet
@@ -804,9 +808,13 @@ void DesktopWidgets::Restack()
     if (!found)
         above = nullptr; // no desktop window: keep them at the bottom of the windows
     HWND after = found ? (above ? above : HWND_TOP) : HWND_BOTTOM;
-    // Show-desktop and startup can put Progman/WorkerW above an application.
-    // Never use that temporary desktop position to jump over the application.
-    if (scan.lowest)
+    // Show-desktop and startup can put Progman/WorkerW above an application. Show-desktop
+    // (Win+D) also gives the desktop the focus: the widgets come up with it, and stay up
+    // while one of them or the bar is clicked. Startup's temporary position is not used
+    // to jump over the application.
+    HWND fg = GetForegroundWindow();
+    const bool desktopInFront = fg && (IsDesktopWindow(fg) || IsOurs(fg));
+    if (scan.lowest && !desktopInFront)
         for (HWND below = found ? h : nullptr; below; below = GetWindow(below, GW_HWNDNEXT))
             if (below == scan.lowest) {
                 after = scan.lowest;
@@ -892,6 +900,13 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 if (wd->kind == WidgetKind::Weather && wd->surface)
                     wd->surface->Invalidate();
             return 0;
+        case WM_WIDGET_BLUETOOTH:
+            self->world_.bluetooth = self->bluetooth_->Latest();
+            self->world_.bluetoothRead = self->bluetooth_->Read();
+            for (auto& wd : self->widgets_)
+                if (wd->kind == WidgetKind::Bluetooth && wd->surface)
+                    wd->surface->Invalidate();
+            return 0;
         case WM_TIMECHANGE:
             self->world_.city = LocalCity();
             self->Tick();
@@ -915,6 +930,8 @@ void DesktopWidgets::Tick()
     ULONGLONG now = GetTickCount64();
     // The forecast is fetched while a weather widget is on the desktop.
     weather_->SetActive(std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Weather; }));
+    // The Bluetooth batteries are read while a Bluetooth widget is.
+    bluetooth_->SetActive(std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Bluetooth; }));
     for (auto& w : widgets_) {
         if (!w->surface)
             continue;
@@ -1187,6 +1204,9 @@ void DesktopWidgets::Activate(Widget& w)
         break;
     case WidgetKind::System:
         open = L"taskmgr.exe";
+        break;
+    case WidgetKind::Bluetooth:
+        open = L"ms-settings:bluetooth"; // Bluetooth & devices: each device with its battery
         break;
     case WidgetKind::Photos:
         if (w.content.photo.empty())

@@ -668,8 +668,19 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
             d2d->DrawText(glyph, 1, f, D2D1::RectF(cx - h / 2, cy - h / 2, cx + h / 2, cy + h / 2), brush);
         }
     };
-    symbol(st.muted || st.volume == 0 ? L"\uE74F" : st.volume < 34 ? L"\uE993" : st.volume < 67 ? L"\uE994" : L"\uE995", speaker);
+    const wchar_t* volumeGlyph = st.muted || st.volume == 0 ? L"\uE74F" : st.volume < 34 ? L"\uE993" : st.volume < 67 ? L"\uE994" : L"\uE995";
+    symbol(volumeGlyph, speaker);
     symbol(L"\uE706", sm.brightMix);
+
+    // No battery (a desktop): the ring is the volume, so its gap holds a small speaker where a
+    // laptop's bolt would be (gone while the brightness shows).
+    const float gapSpeaker = !st.battery && st.audio ? 1 - sm.brightMix : 0.f;
+    if (gapSpeaker > 0.003f)
+        if (IDWriteTextFormat* f = Format(h * 0.22f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+            brush->SetColor(fade(ink, gapSpeaker));
+            const float gy = cy + rad;
+            d2d->DrawText(volumeGlyph, 1, f, D2D1::RectF(cx - h / 4, gy - h / 4, cx + h / 4, gy + h / 4), brush);
+        }
 }
 
 // The start entry: the Windows logo, redrawn as four panes with Windows 11's

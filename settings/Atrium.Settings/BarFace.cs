@@ -113,6 +113,9 @@ internal sealed class BarFace
         return (p.Percent / 100.0, charging, !charging && p.Percent <= 20);
     }
 
+    // A computer without a battery (a desktop): the ring is the volume, with a speaker in its gap.
+    public static bool HasBattery() => GetSystemPowerStatus(out var p) && (p.BatteryFlag & 128) == 0 && p.Percent <= 100;
+
     // Lays everything out for layout L (hero DIP), seen at `zoom` from origin (ox, oy).
     public void Layout(MainWindow.BarGeometry L, bool darkInk, int shownApps, int runningIndex, double magnify, double zoom, double ox, double oy,
                        (double Fill, bool Charging, bool Low) battery)
@@ -232,7 +235,7 @@ internal sealed class BarFace
         if (L.StatusX >= 0)
         {
             var (x, y, size) = Item(L.StatusX);
-            _status.Update(size, inkColor, battery.Fill, battery.Charging, battery.Low, 3);
+            _status.Update(size, inkColor, battery.Fill, battery.Charging, battery.Low, 3, !HasBattery());
             Canvas.SetLeft(_status, x);
             Canvas.SetTop(_status, y);
         }
@@ -266,11 +269,14 @@ internal sealed class BarFace
 }
 
 // The status ring (BarPainter::DrawStatus) in an h x h square: a ring open by 64 degrees at the
-// bottom, filled clockwise from the gap's left end, a bolt in the gap while charging, and in the
+// bottom, filled clockwise from the gap's left end, a bolt in the gap while charging (a speaker
+// where there is no battery, the ring then the volume), and in the
 // middle the iPhone's Wi-Fi fan (wifi_glyph.cpp): a wedge and two arcs, as many lit as the signal.
 internal sealed class StatusGlyph : Canvas
 {
     private readonly Path _track = Stroke(), _level = Stroke(), _bolt = new() { IsHitTestVisible = false };
+    private readonly TextBlock _speaker = new() { IsHitTestVisible = false, FontFamily = new FontFamily("Segoe Fluent Icons"), Text = "\uE994",
+                                                  TextAlignment = TextAlignment.Center };
     private readonly Path _wedge = new() { IsHitTestVisible = false, StrokeLineJoin = PenLineJoin.Round };
     private readonly Path _arc1 = Stroke(), _arc2 = Stroke();
 
@@ -278,6 +284,7 @@ internal sealed class StatusGlyph : Canvas
     {
         IsHitTestVisible = false;
         foreach (var p in new[] { _track, _level, _bolt, _wedge, _arc1, _arc2 }) Children.Add(p);
+        Children.Add(_speaker);
     }
 
     private static Path Stroke() => new() { IsHitTestVisible = false, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
@@ -294,7 +301,7 @@ internal sealed class StatusGlyph : Canvas
 
     private static Color Fade(Color c, double a) => Color.FromArgb((byte)Math.Round(c.A * a), c.R, c.G, c.B);
 
-    public void Update(double h, Color ink, double fill, bool charging, bool low, int lit)
+    public void Update(double h, Color ink, double fill, bool charging, bool low, int lit, bool desktop = false)
     {
         Width = Height = h;
         double cx = h / 2, cy = h / 2;
@@ -319,6 +326,19 @@ internal sealed class StatusGlyph : Canvas
                 f.Segments.Add(new LineSegment { Point = new Point(cx + pts[i].X * 0.17 * h, cy + (0.44 + pts[i].Y * 0.26) * h) });
             _bolt.Data = new PathGeometry { Figures = { f } };
             _bolt.Fill = new SolidColorBrush(ink);
+        }
+
+        // A desktop's speaker, in the gap (BarPainter::DrawStatus): 22 % of the square, centred on the ring's bottom.
+        _speaker.Visibility = desktop && !charging ? Visibility.Visible : Visibility.Collapsed;
+        if (desktop)
+        {
+            _speaker.FontSize = Math.Max(1, h * 0.22);
+            _speaker.Foreground = new SolidColorBrush(ink);
+            _speaker.Width = h / 2;
+            _speaker.LineHeight = h / 2;
+            _speaker.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+            Canvas.SetLeft(_speaker, cx - h / 4);
+            Canvas.SetTop(_speaker, cy + rad - h / 4);
         }
 
         // The fan: `size` = 60 % of the square, radius 62 % of that; its point half a radius below the centre.

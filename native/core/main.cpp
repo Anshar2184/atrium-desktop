@@ -41,6 +41,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace {
 
@@ -780,7 +781,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         break;
     case WM_ATRIUM_ADD_WIDGET:
-        return w <= WPARAM(WidgetKind::Weather) && l >= 0 && l <= LPARAM(WidgetSize::Large) &&
+        return w <= WPARAM(WidgetKind::Bluetooth) && l >= 0 && l <= LPARAM(WidgetSize::Large) &&
                g_app.widgetsOn && g_app.widgets->Add(WidgetKind(w), WidgetSize(l)) ? 1 : 0;
     case WM_ATRIUM_SETTINGS:
         ApplySettings(g_app.server->Current());
@@ -887,8 +888,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ChangeWindowMessageFilterEx(g_app.host, g_app.taskbarCreated, MSGFLT_ALLOW, nullptr);
 
     Settings settings = LoadSettings();
-    if (!registeredHere && IsRegisteredApplication(ExeDir()) && !SetStartOnLogin(settings.startOnLogin))
-        Log(L"startup: could not update the Windows logon entry");
+    // Also on every start while it is on: an update from a version that started from the
+    // Run key moves to the logon task, unless that entry was turned off in Task Manager.
+    // Off this thread: Task Scheduler is slow while the session is starting.
+    if (IsRegisteredApplication(ExeDir()) && (!registeredHere || (settings.startOnLogin && !StartupTurnedOff())))
+        std::thread([on = settings.startOnLogin] {
+            if (!SetStartOnLogin(on))
+                Log(L"startup: could not update the Windows logon entry");
+        }).detach();
     if (!settings.pins) {
         // First run: start from the user's Windows taskbar pins (saved on the next save).
         settings.pins = TaskModel::ImportWindowsPins();

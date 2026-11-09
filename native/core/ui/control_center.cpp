@@ -95,7 +95,7 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
     ReadRadios(false); // the brightness (WMI is slow) before the first opening
 }
 
-float ControlCenter::MainHeight() const { return kTopH + kGap + kStageH + kGap + kSliderH + (HasBrightness() ? kGap + kSliderH : 0); }
+float ControlCenter::MainHeight() const { return kTopH + kGap + kStageH + kGap + kSliderH + kGap + kSliderH; }
 
 float ControlCenter::PageHeight(Page page) const
 {
@@ -129,10 +129,8 @@ std::vector<ShapeDip> ControlCenter::MainShapes() const
     s.push_back({D2D1::RectF(colW + kGap, (kTopH - kGap) / 2 + kGap, kW, kTopH), modR});
     s.push_back({D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH), modR});
     float y = kTopH + kGap + kStageH + kGap;
-    if (HasBrightness()) {
-        s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
-        y += kSliderH + kGap;
-    }
+    s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
+    y += kSliderH + kGap;
     s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
     return s;
 }
@@ -462,11 +460,8 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
     const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
     const D2D1_RECT_F stage = D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH);
     float y = stage.bottom + kGap;
-    D2D1_RECT_F bright{};
-    if (HasBrightness()) {
-        bright = D2D1::RectF(0, y, kW, y + kSliderH);
-        y = bright.bottom + kGap;
-    }
+    const D2D1_RECT_F bright = D2D1::RectF(0, y, kW, y + kSliderH);
+    y = bright.bottom + kGap;
     const D2D1_RECT_F sound = D2D1::RectF(0, y, kW, y + kSliderH);
     const float modR = std::min(radius_, 22.f);
     if (c.panel)
@@ -566,17 +561,26 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
                D2D1::RectF(cx + 28, cy, stage.right - kPad, cy + 18), 11.5f, t.subtext);
         hits_.push_back({stage, L"stage"});
     }
-    if (HasBrightness())
-        PaintSlider(c, t, bright, L"bright", L"显示器", L"\uE706", std::max(brightness_, 0), false,
-                    brightness_ >= 0 ? std::to_wstring(brightness_) + L"%" : std::wstring(), brightTrack_);
+    PaintSlider(c, t, bright, L"bright", L"显示器", L"\uE706", std::max(brightness_, 0), false,
+                CanSetBrightness() ? std::to_wstring(brightness_) + L"%" : brightness_ == -1 ? L"不支持调节" : std::wstring(), brightTrack_,
+                CanSetBrightness());
     std::wstring level = !status_.audio ? L"没有播放设备" : status_.muted ? L"静音" : std::to_wstring(status_.volume) + L"%";
     const wchar_t* g = !status_.audio || status_.muted ? L"\uE74F" : status_.volume < 34 ? L"\uE993" : status_.volume < 67 ? L"\uE994" : L"\uE995";
     PaintSlider(c, t, sound, L"slider", L"声音", g, status_.audio ? status_.volume : 0, status_.muted, level, volumeTrack_);
 }
 
 void ControlCenter::PaintSlider(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& id, const std::wstring& title, const std::wstring& glyph,
-                                int value, bool dim, const std::wstring& right, D2D1_RECT_F& track)
+                                int value, bool dim, const std::wstring& right, D2D1_RECT_F& track, bool enabled)
 {
+    if (!enabled) { // greyed out: the title and the empty track faint, the symbol at its start, nothing to press
+        c.Text(title, D2D1::RectF(card.left + kPad, card.top + 8, card.right - 130, card.top + 28), 12.5f, Alpha(t.text, 0.4f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(right, D2D1::RectF(card.right - 130, card.top + 8, card.right - kPad, card.top + 28), 11.5f, Alpha(t.text, 0.4f), DWRITE_FONT_WEIGHT_NORMAL, 2);
+        track = D2D1::RectF(card.left + kPad, card.top + 34, card.right - kPad, card.top + 58);
+        const float th = track.bottom - track.top;
+        c.Fill(track, th / 2, Alpha(t.text, 0.08f));
+        c.Glyph(glyph, D2D1::RectF(track.left + 2, track.top, track.left + th + 2, track.bottom), 11, Alpha(t.text, 0.35f));
+        return;
+    }
     c.Text(title, D2D1::RectF(card.left + kPad, card.top + 8, card.right - 130, card.top + 28), 12.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     // The sound opens its page (the output device, each app) from the chevron or the title.
     const bool more = id == L"slider";
@@ -1376,7 +1380,7 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             return true;
         }
         pressed_ = HitAt(pt);
-        if ((pressed_ == L"slider" && status_.audio) || pressed_ == L"bright" || pressed_.rfind(L"app:", 0) == 0) {
+        if ((pressed_ == L"slider" && status_.audio) || (pressed_ == L"bright" && CanSetBrightness()) || pressed_.rfind(L"app:", 0) == 0) {
             dragging_ = pressed_;
             SetCapture(surface_.Hwnd());
             SetSliderAt(dragging_, float(pt.x) / surface_.Scale());

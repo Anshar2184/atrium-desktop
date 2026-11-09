@@ -87,5 +87,7 @@ bool SaveSettings(const Settings& s, std::wstring* warning = nullptr);
 bool IsDevelopmentBuild();
 // The current user's Windows logon entry, pointing at this core executable.
 bool SetStartOnLogin(bool enabled);
+// The Run entry turned off in Task Manager's startup apps.
+bool StartupTurnedOff();
 
 } // namespace atrium

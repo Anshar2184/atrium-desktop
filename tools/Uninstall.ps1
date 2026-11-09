@@ -49,6 +49,11 @@ try {
             }
         }
     }
+    $taskName = 'Atrium Startup-' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task -and $task.Actions[0].Execute.Trim('"') -eq $coreExe) {
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false
+    }
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $startup = (Get-ItemProperty -LiteralPath $runKey -Name Atrium -ErrorAction SilentlyContinue).Atrium
     if ($startup -eq ('"' + $coreExe + '"') -or $startup -eq ('"' + (Join-Path $installRoot 'Atrium.Core.exe') + '"')) {

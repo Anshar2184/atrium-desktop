@@ -341,6 +341,62 @@ void PaintSystem(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p,
     }
 }
 
+// Bluetooth devices' batteries (macOS's Batteries widget): small, four rings, each the device's
+// symbol over its level; medium, four rows of symbol, name, bar and level. Red at 20 % or less.
+const wchar_t* BluetoothGlyph(BluetoothKind k)
+{
+    switch (k) {
+    case BluetoothKind::Headset: return L"\uE7F6";
+    case BluetoothKind::Gamepad: return L"\uE7FC";
+    case BluetoothKind::Keyboard: return L"\uE765";
+    case BluetoothKind::Mouse: return L"\uE962";
+    case BluetoothKind::Pen: return L"\uEDC6";
+    case BluetoothKind::Phone: return L"\uE8EA";
+    default: return L"\uE702";
+    }
+}
+
+void PaintBluetooth(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float W, float H)
+{
+    const auto& devices = w.bluetooth;
+    const size_t n = std::min<size_t>(devices.size(), 4);
+    auto colour = [&](int pct) { return pct <= 20 ? p.red : p.green; };
+    if (w.bluetoothRead && n == 0) {
+        c.Glyph(L"\uE702", D2D1::RectF(0, H / 2 - 40, W, H / 2 - 4), 26, p.sub);
+        c.Text(L"没有已连接的设备", D2D1::RectF(kPad, H / 2 + 4, W - kPad, H / 2 + 24), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        return;
+    }
+    if (size == WidgetSize::Small) {
+        const float cw = (W - 2 * kPad) / 2, ch = (H - 2 * kPad) / 2, R = 21;
+        for (size_t i = 0; i < 4; ++i) {
+            const float cx = kPad + cw * (float(i % 2) + 0.5f), cy = kPad + ch * float(i / 2) + 26;
+            c.Arc(cx, cy, R, -90, 270, p.track, 5);
+            if (i >= n)
+                continue;
+            const int pct = std::clamp(devices[i].percent, 0, 100);
+            if (pct > 0)
+                c.Arc(cx, cy, R, -90, -90 + 360.f * float(pct) / 100.f, colour(pct), 5);
+            c.Glyph(BluetoothGlyph(devices[i].kind), D2D1::RectF(cx - R, cy - R, cx + R, cy + R), 15, p.text);
+            c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(cx - cw / 2, cy + R + 4, cx + cw / 2, cy + R + 20), 11.5f, p.text,
+                   DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        }
+        return;
+    }
+    const float rowH = (H - 2 * kPad) / 4;
+    for (size_t i = 0; i < n; ++i) {
+        const float y = kPad + rowH * float(i), mid = y + rowH / 2;
+        const int pct = std::clamp(devices[i].percent, 0, 100);
+        c.Glyph(BluetoothGlyph(devices[i].kind), D2D1::RectF(kPad, mid - 12, kPad + 26, mid + 12), 16, p.text);
+        c.Text(devices[i].name, D2D1::RectF(kPad + 34, mid - 10, W - kPad - 112, mid + 10), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        const D2D1_RECT_F track = D2D1::RectF(W - kPad - 106, mid - 3, W - kPad - 50, mid + 3);
+        c.Fill(track, 3, p.track);
+        if (pct > 0)
+            c.Fill(D2D1::RectF(track.left, track.top, track.left + std::max(6.f, (track.right - track.left) * float(pct) / 100.f), track.bottom), 3,
+                   colour(pct));
+        c.Text(std::to_wstring(pct) + L"%", D2D1::RectF(W - kPad - 46, mid - 10, W - kPad, mid + 10), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+    }
+}
+
 // A note: its title, then the text; while editing, the caret, and the text
 // scrolled up when the caret goes below the card.
 void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float W, float H, std::vector<WidgetHit>& hits)
@@ -726,6 +782,8 @@ bool WidgetSupports(WidgetKind kind, WidgetSize size)
     switch (kind) {
     case WidgetKind::Battery:
         return size == WidgetSize::Small;
+    case WidgetKind::Bluetooth:
+        return size != WidgetSize::Large;
     case WidgetKind::Clock:
     case WidgetKind::Digital:
     case WidgetKind::System:
@@ -768,6 +826,9 @@ void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial mat
         break;
     case WidgetKind::Weather:
         PaintWeather(c, size, world, p, W, H);
+        break;
+    case WidgetKind::Bluetooth:
+        PaintBluetooth(c, size, world, p, W, H);
         break;
     }
 }
