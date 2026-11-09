@@ -276,6 +276,41 @@ void Canvas::Circle(float cx, float cy, float radius, D2D1_COLOR_F c)
     d2d_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx * scale, cy * scale), radius * scale, radius * scale), Brush(c));
 }
 
+void Canvas::Gradient(D2D1_RECT_F r, float radius, D2D1_COLOR_F a, D2D1_COLOR_F b, bool vertical)
+{
+    a.a *= alpha_;
+    b.a *= alpha_;
+    const D2D1_RECT_F p = Px(r);
+    D2D1_GRADIENT_STOP stops[] = {{0, a}, {1, b}};
+    winrt::com_ptr<ID2D1GradientStopCollection> collection;
+    winrt::com_ptr<ID2D1LinearGradientBrush> brush;
+    if (FAILED(d2d_->CreateGradientStopCollection(stops, 2, collection.put())) ||
+        FAILED(d2d_->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(D2D1::Point2F(p.left, p.top), vertical ? D2D1::Point2F(p.left, p.bottom) : D2D1::Point2F(p.right, p.top)),
+            collection.get(), brush.put())))
+        return;
+    if (radius > 0)
+        FillContinuousRect(d2d_, p, radius * scale, brush.get());
+    else
+        d2d_->FillRectangle(p, brush.get());
+}
+
+void Canvas::Crescent(float cx, float cy, float radius, float dx, float dy, float cut, D2D1_COLOR_F c)
+{
+    winrt::com_ptr<ID2D1Factory> f;
+    d2d_->GetFactory(f.put());
+    winrt::com_ptr<ID2D1EllipseGeometry> disc, bite;
+    winrt::com_ptr<ID2D1PathGeometry> path;
+    winrt::com_ptr<ID2D1GeometrySink> sink;
+    if (FAILED(f->CreateEllipseGeometry(D2D1::Ellipse(D2D1::Point2F(cx * scale, cy * scale), radius * scale, radius * scale), disc.put())) ||
+        FAILED(f->CreateEllipseGeometry(D2D1::Ellipse(D2D1::Point2F((cx + dx) * scale, (cy + dy) * scale), cut * scale, cut * scale), bite.put())) ||
+        FAILED(f->CreatePathGeometry(path.put())) || FAILED(path->Open(sink.put())))
+        return;
+    disc->CombineWithGeometry(bite.get(), D2D1_COMBINE_MODE_EXCLUDE, nullptr, sink.get());
+    sink->Close();
+    d2d_->FillGeometry(path.get(), Brush(c));
+}
+
 void Canvas::Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLOR_F c, float width)
 {
     if (a1 - a0 < 0.5f)
@@ -748,6 +783,35 @@ void Surface::PublishPanel()
     p.rippleY = rippleY_;
     p.rippleMs = rippleMs_;
     host_->SetPanel(p);
+}
+
+void Surface::SetGlassless(bool on)
+{
+    if (on == glassless_)
+        return;
+    if (on) {
+        // Withdraw the glass layer while it is still published, then paint without waiting for it.
+        const bool visible = visible_, hiding = hiding_;
+        visible_ = hiding_ = false;
+        PublishPanel();
+        visible_ = visible;
+        hiding_ = hiding;
+        glassless_ = true;
+        glassPending_ = false;
+        glassReady_ = true;
+        KillTimer(hwnd_, kGlassWaitTimer);
+        Invalidate();
+        return;
+    }
+    glassless_ = false;
+    if (!visible_)
+        return;
+    // As on Show: the content waits a little for its glass, then a plain panel stands in.
+    glassReady_ = false;
+    shownMs_ = ClockMs();
+    SetTimer(hwnd_, kGlassWaitTimer, UINT(kGlassWaitMs) + 20, nullptr);
+    PublishPanel();
+    Invalidate();
 }
 
 void Surface::Ripple(float x, float y)

@@ -100,6 +100,10 @@ public:
     // A line with round ends (a clock's hand).
     void Capsule(float x0, float y0, float x1, float y1, D2D1_COLOR_F c, float width);
     void Circle(float cx, float cy, float radius, D2D1_COLOR_F c);
+    // A rounded rectangle filled from `a` to `b`, top to bottom (or left to right).
+    void Gradient(D2D1_RECT_F r, float radius, D2D1_COLOR_F a, D2D1_COLOR_F b, bool vertical = true);
+    // A crescent: the disc (cx, cy, radius) less the disc of `cut` moved by (dx, dy).
+    void Crescent(float cx, float cy, float radius, float dx, float dy, float cut, D2D1_COLOR_F c);
     // A circular arc with round ends, clockwise from a0 to a1 (degrees from the right, y down).
     void Arc(float cx, float cy, float radius, float a0, float a1, D2D1_COLOR_F c, float width);
     // Text in `r`; align: 0 left, 1 centre, 2 right. One line, trimmed with an ellipsis unless wrap.
@@ -185,8 +189,8 @@ public:
     // Corner radius of the glass shape (DIP), matching the bar's.
     void SetRadius(float dip);
     // No glass at all: the content alone, transparent where nothing is drawn (Stage Manager's
-    // strip). Before the first Show.
-    void SetGlassless(bool on) { glassless_ = on; }
+    // strip, a widget with its own opaque face). May change while shown: the glass layer goes or comes.
+    void SetGlassless(bool on);
     // Separate pieces of glass (content DIP), back to front; empty: the whole
     // content with the radius. Published to the glass when they change.
     void SetShapes(const std::vector<ShapeDip>& shapes, bool animating = false);

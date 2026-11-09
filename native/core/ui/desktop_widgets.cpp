@@ -40,6 +40,7 @@ constexpr const wchar_t* kHostClass = L"AtriumWidgetsHost";
 constexpr UINT WM_WIDGET_REMOVE = WM_APP + 1;  // lParam Widget*: removed once its own message is done
 constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2; // a burst of window events, one restack
 constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;   // lParam PhotoRead*: a photo was read
+constexpr UINT WM_WIDGET_WEATHER = WM_APP + 4; // a new forecast (WeatherSource::Latest)
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
 
@@ -49,7 +50,7 @@ struct KindName {
 };
 const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},     {WidgetKind::Calendar, L"calendar"},   {WidgetKind::Battery, L"battery"},
                            {WidgetKind::Digital, L"digital"}, {WidgetKind::System, L"system"},       {WidgetKind::Notes, L"notes"},
-                           {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"}};
+                           {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"},  {WidgetKind::Weather, L"weather"}};
 
 const wchar_t* NameOf(WidgetKind k)
 {
@@ -256,6 +257,20 @@ DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
     SetWindowLongPtrW(host_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     world_.city = LocalCity();
     world_.lunar = &lunar_;
+    weather_ = std::make_unique<WeatherSource>(host_, WM_WIDGET_WEATHER);
+    world_.weather = weather_->Latest(); // the last one, until the first fetch
+}
+
+void DesktopWidgets::SetMaterial(WidgetMaterial material)
+{
+    if (material == material_)
+        return;
+    material_ = material;
+    for (auto& w : widgets_)
+        if (w->surface) {
+            w->surface->SetGlassless(material_ == WidgetMaterial::Color);
+            w->surface->Invalidate();
+        }
 }
 
 DesktopWidgets::~DesktopWidgets()
@@ -295,6 +310,7 @@ void DesktopWidgets::SetEnabled(bool on)
         }
         KillTimer(host_, kTickTimer);
         KillTimer(host_, kSafetyTimer);
+        weather_->SetActive(false);
         KillTimer(host_, kCaretTimer);
         if (KillTimer(host_, kSaveTimer))
             Save(); // typing not saved yet
@@ -528,6 +544,7 @@ void DesktopWidgets::Build()
         // Notes and reminders take the keyboard: their windows can be activated.
         w.surface = std::make_unique<Surface>(instance_, L"Atrium Widget", Editable(w.kind), 14.f, true);
         w.surface->SetRadius(kWidgetRadius);
+        w.surface->SetGlassless(material_ == WidgetMaterial::Color); // its own face, no glass under it
         w.surface->paint = [this, &w](Canvas& c) { Paint(w, c); };
         w.surface->message = [this, &w](UINT m, WPARAM wp2, LPARAM lp, LRESULT& r) { return Message(w, m, wp2, lp, r); };
         Place(w, false);
@@ -869,6 +886,12 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             wd->surface->Invalidate();
             return 0;
         }
+        case WM_WIDGET_WEATHER:
+            self->world_.weather = self->weather_->Latest();
+            for (auto& wd : self->widgets_)
+                if (wd->kind == WidgetKind::Weather && wd->surface)
+                    wd->surface->Invalidate();
+            return 0;
         case WM_TIMECHANGE:
             self->world_.city = LocalCity();
             self->Tick();
@@ -890,6 +913,8 @@ void DesktopWidgets::Tick()
     if (sample)
         SampleSystem();
     ULONGLONG now = GetTickCount64();
+    // The forecast is fetched while a weather widget is on the desktop.
+    weather_->SetActive(std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Weather; }));
     for (auto& w : widgets_) {
         if (!w->surface)
             continue;
@@ -1169,6 +1194,11 @@ void DesktopWidgets::Activate(Widget& w)
         else
             open = w.content.photo;
         break;
+    case WidgetKind::Weather:
+        // Windows' weather app, else its web page.
+        if (INT_PTR(ShellExecuteW(nullptr, L"open", L"msnweather:", nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
+            open = L"https://www.msn.cn/zh-cn/weather/forecast";
+        break;
     default:
         break;
     }
@@ -1442,6 +1472,32 @@ void DesktopWidgets::Menu(Widget& w)
 
 // ---- painting ------------------------------------------------------------------
 
+// Without glass there is no glass shadow: a soft one of its own in the margin, a little lower
+// than the face, as under macOS's widgets. Only around the face (it is opaque, and already drawn).
+void DesktopWidgets::PaintShadow(Canvas& c, D2D1_RECT_F face)
+{
+    ID2D1DeviceContext* d2d = c.D2D();
+    winrt::com_ptr<ID2D1Factory> factory;
+    d2d->GetFactory(factory.put());
+    winrt::com_ptr<ID2D1RectangleGeometry> outer;
+    winrt::com_ptr<ID2D1RoundedRectangleGeometry> inner;
+    winrt::com_ptr<ID2D1PathGeometry> ring;
+    winrt::com_ptr<ID2D1GeometrySink> sink;
+    const D2D1_RECT_F px = c.Px(face);
+    const float r = kWidgetRadius * c.scale, room = 14 * c.scale;
+    if (FAILED(factory->CreateRectangleGeometry(D2D1::RectF(px.left - room, px.top - room, px.right + room, px.bottom + room), outer.put())) ||
+        FAILED(factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(px, r, r), inner.put())) || FAILED(factory->CreatePathGeometry(ring.put())) ||
+        FAILED(ring->Open(sink.put())) || FAILED(outer->CombineWithGeometry(inner.get(), D2D1_COMBINE_MODE_EXCLUDE, nullptr, sink.get())) ||
+        FAILED(sink->Close()))
+        return;
+    d2d->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), ring.get()), nullptr);
+    for (int i = 9; i >= 1; --i) {
+        const float d = float(i);
+        c.Fill(D2D1::RectF(face.left - d, face.top - d + 2, face.right + d, face.bottom + d + 2), kWidgetRadius + d, D2D1::ColorF(0, 0, 0, 0.018f));
+    }
+    d2d->PopLayer();
+}
+
 void DesktopWidgets::Paint(Widget& w, Canvas& c)
 {
     RECT rect = w.surface->Rect();
@@ -1450,12 +1506,12 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
     // Preserve each size's layout. Only its viewport grows or shrinks, so a
     // large face is revealed without squeezing its columns into a small one.
     c.Clip(bounds);
-    if (c.panel)
+    if (c.panel && material_ != WidgetMaterial::Color)
         c.Fill(bounds, 0, c.theme.panel);
     GetLocalTime(&world_.now);
     if (w.kind == WidgetKind::Reminders)
         w.content.scroll = std::clamp(w.content.scroll, 0.f, ReminderScrollMax(w.content, w.size));
-    PaintWidget(c, w.kind, w.size, w.content, world_, w.hits);
+    PaintWidget(c, w.kind, w.size, material_, w.content, world_, w.hits);
     if ((w.hover || w.resizing) && !w.dragging && Resizable(w.kind)) {
         // Both corners use the same quiet arc; either can be dragged to resize.
         const float r = kWidgetRadius, h = height;
@@ -1464,6 +1520,8 @@ void DesktopWidgets::Paint(Widget& w, Canvas& c)
     }
     c.Unclip();
     c.MaskRounded(bounds, kWidgetRadius);
+    if (material_ == WidgetMaterial::Color)
+        PaintShadow(c, bounds);
     if (w.content.editing)
         PlaceImeWindow(w);
 }

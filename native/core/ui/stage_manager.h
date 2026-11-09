@@ -167,6 +167,7 @@ private:
     double revealStart_ = 0;
     bool peek_ = false;                // shown over the stage because the pointer asked
     ULONGLONG edgeSince_ = 0, leftAt_ = 0;
+    bool onDesktop_ = false;           // the desktop was in front at the last look
     bool covered_ = false;
     ULONGLONG coveredAt_ = 0;
 };

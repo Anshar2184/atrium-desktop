@@ -8,6 +8,7 @@
 #include <wincodec.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <winrt/Windows.Foundation.Collections.h>
 
 #include <algorithm>
 #include <cmath>
@@ -162,7 +163,20 @@ void DesktopBackdrop::Update(const std::wstring& mode)
                     RECT r{};
                     GetWindowRect(desktop_, &r);
                     origin_ = POINT{r.left, r.top};
+                    // Where this frame differs from the last one; all of it when Windows cannot say.
+                    RECT dirty{r.left, r.top, r.left + size_.Width, r.top + size_.Height};
+                    try {
+                        auto regions = latest.DirtyRegions();
+                        if (regions.Size() > 0) {
+                            dirty = RECT{LONG_MAX, LONG_MAX, LONG_MIN, LONG_MIN};
+                            for (const auto& d : regions)
+                                dirty = RECT{std::min(dirty.left, LONG(r.left + d.X)), std::min(dirty.top, LONG(r.top + d.Y)),
+                                             std::max(dirty.right, LONG(r.left + d.X + d.Width)), std::max(dirty.bottom, LONG(r.top + d.Y + d.Height))};
+                        }
+                    } catch (const winrt::hresult_error&) {
+                    }
                     Store(tex.get());
+                    Changed(dirty);
                 }
                 latest.Close();
             }
@@ -186,7 +200,29 @@ void DesktopBackdrop::Update(const std::wstring& mode)
         gpu_.context->UpdateSubresource(texture_.get(), 0, nullptr, pic->pixels.data(), UINT(pic->width * 4), 0);
         origin_ = pic->origin;
         ++version_;
+        Changed(RECT{LONG_MIN / 2, LONG_MIN / 2, LONG_MAX / 2, LONG_MAX / 2}); // a new wallpaper: everywhere
     }
+}
+
+void DesktopBackdrop::Changed(const RECT& rect)
+{
+    changes_.push_back({version_, rect});
+    if (changes_.size() > 32)
+        changes_.erase(changes_.begin());
+}
+
+bool DesktopBackdrop::ChangedSince(unsigned version, const RECT& area) const
+{
+    if (version == version_)
+        return false;
+    // Pictures older than what is kept: assume they changed it.
+    if (changes_.empty() || changes_.front().version > version + 1)
+        return true;
+    RECT overlap;
+    for (const Change& c : changes_)
+        if (c.version > version && IntersectRect(&overlap, &c.rect, &area))
+            return true;
+    return false;
 }
 
 bool DesktopBackdrop::StartCapture()

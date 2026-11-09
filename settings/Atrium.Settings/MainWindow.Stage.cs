@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
@@ -7,6 +8,7 @@ using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Media.Media3D;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
@@ -42,8 +44,10 @@ public sealed partial class MainWindow
     private readonly List<List<int>> _stageStrip = new() { new() { 1, 2 }, new() { 3 }, new() { 4 } };
     private readonly Dictionary<string, Grid> _stageCards = new();
     private readonly Dictionary<string, Visual> _stageTilts = new();
-    private readonly Dictionary<int, ImageSource> _stageShots = new(); // the windows, drawn once
-    private bool _stageShooting;
+    // The apps' windows and icons as pictures (assets/stage, made by --export-stage-art from the
+    // elements below): one image instead of a hundred elements, with an exact outline for its shadow.
+    private readonly Dictionary<string, BitmapImage> _stageArt = new();
+    private Task? _stageArtLoading;
     private int _stageResize;
     private Grid? _stageCenter, _stageBar;
     private Canvas? _stageLayer; // the strip: slides out of the edge as a whole
@@ -69,39 +73,26 @@ public sealed partial class MainWindow
         if (id == _stageResize && _page == 5) ShowStagePreview(false);
     }
 
-    // Each app's window as a picture: one image instead of a hundred elements per window. Drawn once
-    // (twice the size it is drawn at most), off the preview's visible part; the preview is laid out
-    // again with them.
-    private async void StageShootWindows()
+    private static string StageArtPath(string name) => System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Stage", name + ".png");
+
+    // Read and decoded once, when the window opens: the page draws with them from its first frame.
+    private Task LoadStageArt() => _stageArtLoading ??= LoadAll();
+
+    private async Task LoadAll()
     {
-        if (_stageShooting || _stageShots.Count == StageApps.Length || StageCanvas.Parent is not Panel parent) return;
-        _stageShooting = true;
-        var host = new Canvas { IsHitTestVisible = false };
-        Canvas.SetLeft(host, -4000);
-        parent.Children.Insert(0, host);
-        try
-        {
-            for (int a = 0; a < StageApps.Length; a++)
+        for (int a = 0; a < StageApps.Length; a++)
+            foreach (string name in new[] { $"window-{a}", $"icon-{a}" })
             {
-                var live = StageWindowLive(StageApps[a], 640, 400, 16);
-                host.Children.Add(live);
-                live.UpdateLayout();
-                var shot = new Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap();
-                await shot.RenderAsync(live);
-                _stageShots[a] = shot;
-                host.Children.Remove(live);
+                try
+                {
+                    var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(StageArtPath(name));
+                    using var stream = await file.OpenReadAsync();
+                    var image = new BitmapImage();
+                    await image.SetSourceAsync(stream);
+                    _stageArt[name] = image;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or FileNotFoundException or System.Runtime.InteropServices.COMException) { }
             }
-        }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            _stageShots.Clear(); // the live windows stay
-        }
-        finally
-        {
-            parent.Children.Remove(host);
-            _stageShooting = false;
-        }
-        if (_page == 5 && _stageShots.Count == StageApps.Length) ShowStagePreview(false);
     }
 
     private async void OnStageReplay(object sender, RoutedEventArgs e)
@@ -143,7 +134,12 @@ public sealed partial class MainWindow
         StageCanvas.Children.Clear();
         _stageCards.Clear();
         _stageTilts.Clear();
-        StageShootWindows();
+        if (_stageArtLoading is not { IsCompleted: true })
+        {
+            // The first time, a moment before the pictures are decoded.
+            LoadStageArt().ContinueWith(_ => DispatcherQueue.TryEnqueue(() => { if (_page == 5) ShowStagePreview(animate); }), TaskScheduler.Default);
+            return;
+        }
         _stageBuilt = true;
 
         // The bar along the bottom, the apps on it.
@@ -372,9 +368,17 @@ public sealed partial class MainWindow
     {
         var grid = new Grid { Width = w, Height = h, IsHitTestVisible = false };
         var host = new Canvas { Width = w, Height = h };
-        var mask = new Rectangle { Width = w - 1, Height = h - 1, RadiusX = radius, RadiusY = radius, Fill = new SolidColorBrush(Colors.Black) };
         grid.Children.Add(host);
-        grid.Children.Add(mask);
+        // A picture casts the shadow of its own outline; anything else that of a rounded rectangle
+        // (under it, the same size, so none of it shows).
+        CompositionBrush mask;
+        if (content is Image image) mask = image.GetAlphaMask();
+        else
+        {
+            var shape = new Rectangle { Width = w, Height = h, RadiusX = radius, RadiusY = radius, Fill = new SolidColorBrush(Colors.Black), Opacity = 0.01 };
+            grid.Children.Add(shape);
+            mask = shape.GetAlphaMask();
+        }
         grid.Children.Add(content);
         var compositor = ElementCompositionPreview.GetElementVisual(host).Compositor;
         var shadow = compositor.CreateDropShadow();
@@ -382,7 +386,7 @@ public sealed partial class MainWindow
         shadow.Opacity = opacity;
         shadow.Color = Colors.Black;
         shadow.Offset = new Vector3(0.5f, drop + 0.5f, 0);
-        shadow.Mask = mask.GetAlphaMask();
+        shadow.Mask = mask;
         var sprite = compositor.CreateSpriteVisual();
         sprite.Size = new Vector2((float)w, (float)h);
         sprite.Shadow = shadow;
@@ -392,7 +396,14 @@ public sealed partial class MainWindow
 
     // ---- Icons: on a 64 x 64 grid, after the apps' own ----
 
-    private static FrameworkElement StageIcon(int app, double size)
+    private FrameworkElement StageIcon(int app, double size)
+    {
+        if (_stageArt.TryGetValue($"icon-{app}", out var shot))
+            return new Image { Source = shot, Width = size, Height = size, Stretch = Stretch.Fill, IsHitTestVisible = false };
+        return StageIconLive(app, size);
+    }
+
+    private static FrameworkElement StageIconLive(int app, double size)
     {
         var c = new Canvas { Width = 64, Height = 64 };
         void Put(UIElement e, double x, double y)
@@ -495,7 +506,7 @@ public sealed partial class MainWindow
     // the app shows.
     private FrameworkElement StageWindow(StageApp app, double w, double h, double radius)
     {
-        if (_stageShots.TryGetValue(Array.IndexOf(StageApps, app), out var shot))
+        if (_stageArt.TryGetValue($"window-{Array.IndexOf(StageApps, app)}", out var shot))
             return new Image { Source = shot, Width = w, Height = h, Stretch = Stretch.Fill, IsHitTestVisible = false };
         return StageWindowLive(app, w, h, radius);
     }
@@ -510,7 +521,7 @@ public sealed partial class MainWindow
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var titleBar = new Grid { Padding = new Thickness(9, 0, 10, 0), Background = new SolidColorBrush(app.Dark ? Rgb(0x2A2A2D) : Rgb(0xF6F6F8)) };
         var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        name.Children.Add(StageIcon(index, 14));
+        name.Children.Add(StageIconLive(index, 14));
         name.Children.Add(new TextBlock { Text = app.Name, FontSize = 10, Foreground = new SolidColorBrush(faint), IsTextScaleFactorEnabled = false, VerticalAlignment = VerticalAlignment.Center });
         titleBar.Children.Add(name);
         titleBar.Children.Add(new TextBlock
@@ -529,6 +540,12 @@ public sealed partial class MainWindow
         };
         return new Viewbox { Width = w, Height = h, Stretch = Stretch.Fill, Child = frame, IsHitTestVisible = false };
     }
+
+    private static TextBlock StageText(string text, double size) => new()
+    {
+        Text = text, FontSize = size, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Rgb(0x1C1C1E)),
+        IsTextScaleFactorEnabled = false,
+    };
 
     private static Border Bar(double w, double h, Color c, double r = 3) =>
         new() { Width = w, Height = h, CornerRadius = new CornerRadius(r), Background = new SolidColorBrush(c), HorizontalAlignment = HorizontalAlignment.Left };
@@ -549,13 +566,13 @@ public sealed partial class MainWindow
                 {
                     var row = new StackPanel { Spacing = 4, Padding = new Thickness(6, 5, 6, 5), CornerRadius = new CornerRadius(5),
                                                Background = new SolidColorBrush(i == 0 ? Rgb(0xFFE38A) : Colors.Transparent) };
-                    row.Children.Add(Bar(60 - 8 * (i % 2), 5, Rgb(0x3A3A3C, 200)));
+                    row.Children.Add(Bar(60 - 8 * (i % 2), 5, Rgb(0x8E8E93)));
                     row.Children.Add(Bar(44 + 6 * (i % 3), 4, Rgb(0xA0A0A5)));
                     list.Children.Add(row);
                 }
                 g.Children.Add(list);
                 var paper = new StackPanel { Spacing = 9, Padding = new Thickness(16, 12, 16, 0) };
-                paper.Children.Add(Bar(120, 9, Rgb(0x1C1C1E, 220), 4));
+                paper.Children.Add(StageText("周末计划", 13));
                 foreach (double lw in new[] { 0.95, 0.8, 0.9, 0.6, 0.85, 0.4 }) paper.Children.Add(Bar(176 * lw, 5, line));
                 Grid.SetColumn(paper, 1);
                 g.Children.Add(paper);
@@ -579,7 +596,7 @@ public sealed partial class MainWindow
                     uint[] avatars = { 0xFF9500, 0x34C759, 0xAF52DE, 0x5AC8FA };
                     row.Children.Add(new Ellipse { Width = 16, Height = 16, Fill = new SolidColorBrush(Rgb(avatars[i])) });
                     var text = new StackPanel { Spacing = 3 };
-                    text.Children.Add(Bar(52, 4, i == 0 ? Colors.White : Rgb(0x3A3A3C, 200)));
+                    text.Children.Add(Bar(52, 4, i == 0 ? Colors.White : Rgb(0x6E6E73)));
                     text.Children.Add(Bar(70, 3, i == 0 ? Color.FromArgb(170, 255, 255, 255) : Rgb(0xB0B0B5)));
                     Grid.SetColumn(text, 1);
                     row.Children.Add(text);
@@ -588,7 +605,7 @@ public sealed partial class MainWindow
                 Grid.SetColumn(mails, 1);
                 g.Children.Add(mails);
                 var read = new StackPanel { Spacing = 8, Padding = new Thickness(12, 10, 12, 0) };
-                read.Children.Add(Bar(90, 8, Rgb(0x1C1C1E, 220), 4));
+                read.Children.Add(StageText("季度总结", 11));
                 foreach (double lw in new[] { 0.9, 0.95, 0.7, 0.85, 0.5 }) read.Children.Add(Bar(128 * lw, 4, line));
                 Grid.SetColumn(read, 2);
                 g.Children.Add(read);

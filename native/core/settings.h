@@ -47,6 +47,9 @@ struct Settings {
     bool notifyListener = true;      // Windows notifications as Atrium cards (UserNotificationListener)
     bool notifyFeishu = true;        // Feishu messages as Atrium cards (its own popup, read through UI Automation)
     bool notifyWeChat = true;        // WeChat messages as Atrium cards (its chat list, read through UI Automation)
+    // Three independent modules: the bar (with its popups and Atrium's notification cards), the
+    // desktop widgets and Stage Manager. Any of them may run alone.
+    bool bar = true;                 // the glass bar; off: Windows' own taskbar and banners stay in charge
     bool widgets = true;             // desktop widgets (their layout is widgets.json)
     bool widgetsOnRight = false;     // mirror the logical grid without rewriting widgets.json
     std::wstring widgetBackdrop = L"desktop"; // the widgets' glass: desktop (captured live, D38) | wallpaper (the files, least work)
@@ -54,6 +57,9 @@ struct Settings {
     bool stageManager = false;
     bool stageOnRight = false;       // the strip's side; left by default (the widgets take the other side)
     bool stageAutoHide = false;      // the strip only comes out while the pointer rests on its edge of the screen
+    // The widgets' material: glass (the bar's, its ink adapting) | dusk (the glass dimmed, white ink;
+    // macOS's dimmed desktop widgets) | color (their own opaque faces, as macOS's full-colour widgets).
+    std::wstring widgetMaterial = L"glass";
     // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
     bool hideTaskbar = false;        // the system taskbar is hidden while Atrium runs
     bool hideBanners = false;        // Do Not Disturb: no system banners, the notifications still become cards

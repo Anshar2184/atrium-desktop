@@ -49,12 +49,14 @@ internal sealed class BarSettings
     public bool NotifyListener { get; set; } = true;   // Windows notifications as Atrium cards
     public bool NotifyFeishu { get; set; } = true;     // Feishu messages as Atrium cards (its own popup, read only)
     public bool NotifyWeChat { get; set; } = true;     // WeChat messages as Atrium cards (its chat list, read only)
+    public bool Bar { get; set; } = true;              // the glass bar module (off: Windows' taskbar and banners)
     public bool Widgets { get; set; } = true;          // desktop widgets (their layout is the core's widgets.json)
     public bool WidgetsOnRight { get; set; }
     public string WidgetBackdrop { get; set; } = "desktop"; // desktop (captured live) | wallpaper (the files, least work)
     public bool StageManager { get; set; }             // the app in front on the stage, the others in a strip at the side
     public bool StageOnRight { get; set; }             // the strip's side; left by default (the widgets take the other side)
     public bool StageAutoHide { get; set; }            // the strip only comes out while the pointer rests on its edge
+    public string WidgetMaterial { get; set; } = "glass"; // glass (the bar's) | dusk (dimmed glass, white ink) | color (their own faces)
     public bool HideTaskbar { get; set; }              // the system taskbar is hidden while Atrium runs
     public bool HideBanners { get; set; }              // Do Not Disturb: no system banners, notifications still become cards
     public bool StartOnLogin { get; set; } = true;
@@ -121,12 +123,14 @@ internal sealed class BarSettings
             ["notifyListener"] = NotifyListener,
             ["notifyWeChat"] = NotifyWeChat,
             ["notifyFeishu"] = NotifyFeishu,
+            ["bar"] = Bar,
             ["widgets"] = Widgets,
             ["widgetsOnRight"] = WidgetsOnRight,
             ["widgetBackdrop"] = WidgetBackdrop,
             ["stageManager"] = StageManager,
             ["stageOnRight"] = StageOnRight,
             ["stageAutoHide"] = StageAutoHide,
+            ["widgetMaterial"] = WidgetMaterial,
             ["hideTaskbar"] = HideTaskbar,
             ["hideBanners"] = HideBanners,
             ["startOnLogin"] = StartOnLogin,
@@ -183,6 +187,7 @@ internal sealed class BarSettings
         s.NotifyListener = v1 ? f.NotifyListener : Flag("notifyListener", f.NotifyListener);
         s.NotifyWeChat = Flag("notifyWeChat", f.NotifyWeChat);
         s.NotifyFeishu = Flag("notifyFeishu", f.NotifyFeishu);
+        s.Bar = Flag("bar", f.Bar);
         s.Widgets = Flag("widgets", f.Widgets);
         s.WidgetsOnRight = Flag("widgetsOnRight", f.WidgetsOnRight);
         s.WidgetBackdrop = o?["widgetBackdrop"] is JsonValue wb && wb.TryGetValue(out string? wbs) && wbs != null
@@ -191,6 +196,8 @@ internal sealed class BarSettings
         s.StageManager = Flag("stageManager", f.StageManager);
         s.StageOnRight = Flag("stageOnRight", f.StageOnRight);
         s.StageAutoHide = Flag("stageAutoHide", f.StageAutoHide);
+        s.WidgetMaterial = o?["widgetMaterial"] is JsonValue wm && wm.TryGetValue(out string? wms) && wms is "dusk" or "color" or "glass"
+            ? wms : f.WidgetMaterial;
         s.HideTaskbar = Flag("hideTaskbar", f.HideTaskbar);
         s.HideBanners = Flag("hideBanners", f.HideBanners);
         s.StartOnLogin = Flag("startOnLogin", f.StartOnLogin);
@@ -220,9 +227,9 @@ internal sealed class BarSettings
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
         ShowTray == o.ShowTray && ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications &&
         ShowRunning == o.ShowRunning && TextColor == o.TextColor && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
-        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Widgets == o.Widgets &&
+        NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
-        StageAutoHide == o.StageAutoHide &&
+        StageAutoHide == o.StageAutoHide && WidgetMaterial == o.WidgetMaterial &&
         HideTaskbar == o.HideTaskbar && HideBanners == o.HideBanners &&
         StartOnLogin == o.StartOnLogin &&
         (Pins == o.Pins || (Pins != null && o.Pins != null && Pins.SequenceEqual(o.Pins)));

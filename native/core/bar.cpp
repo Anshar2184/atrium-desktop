@@ -1689,7 +1689,15 @@ bool Bar::RenderSession()
                 // Again once the glass is on screen if its ink was never measured: the
                 // first copy (before any present) is not compared, and a still desktop
                 // would leave a widget with the default ink over any wallpaper.
+                // A new picture of the desktop only counts where it changed under this glass (the
+                // backdrop it copies: the window, the refraction margin, rounded out to 64 px).
+                RECT around = p.window;
+                InflateRect(&around, 128, 128);
                 bool fresh = ps.desktopVersion != desktop.Version();
+                if (fresh && r.HasBackdrop() && ps.grid.w != 0 && !changed && !desktop.ChangedSince(ps.desktopVersion, around)) {
+                    ps.desktopVersion = desktop.Version();
+                    fresh = false;
+                }
                 // Consume the latest desktop frame on the same render loop as the bar.
                 if (pic && (changed || fresh || !r.HasBackdrop() || ps.grid.w == 0)) {
                     r.UpdateBackdrop(pic, p.window.left - desktop.Origin().x, p.window.top - desktop.Origin().y);

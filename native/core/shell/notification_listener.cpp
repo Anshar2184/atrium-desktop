@@ -29,6 +29,20 @@ const wchar_t* AccessName(wunm::UserNotificationListenerAccessStatus s)
     }
 }
 
+// A toast's lines (title, then the body), each poll: senders update a toast in place. Reading its
+// app (AppInfo, DisplayInfo: the app's resources) costs far more, so only a toast to post does.
+std::wstring TextOf(const wun::UserNotification& un)
+{
+    std::wstring all;
+    try {
+        if (auto binding = un.Notification().Visual().GetBinding(wun::KnownNotificationBindings::ToastGeneric()))
+            for (const auto& text : binding.GetTextElements())
+                all += std::wstring(text.Text()) + L"\x1f";
+    } catch (...) {
+    }
+    return all;
+}
+
 Notice ToNotice(const wun::UserNotification& un)
 {
     Notice n;
@@ -109,12 +123,12 @@ void NotificationListener::Run()
                     auto list = listener.GetNotificationsAsync(wun::NotificationKinds::Toast).get();
                     std::map<uint32_t, size_t> now;
                     for (const auto& un : list) {
-                        Notice n = ToNotice(un);
-                        size_t hash = std::hash<std::wstring>{}(n.app + L"\x1f" + n.title + L"\x1f" + n.body);
+                        size_t hash = std::hash<std::wstring>{}(TextOf(un));
                         now[un.Id()] = hash;
                         auto old = seen.find(un.Id());
                         if (first || (old != seen.end() && old->second == hash))
                             continue;
+                        Notice n = ToNotice(un);
                         std::wstring app = n.app; // the UI thread owns the notice once posted
                         auto* p = new Notice(std::move(n));
                         if (!PostMessageW(notify_, msg_, 0, reinterpret_cast<LPARAM>(p)))

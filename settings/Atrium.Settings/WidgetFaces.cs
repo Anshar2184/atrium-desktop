@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -11,10 +12,10 @@ using Path = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace Atrium.Settings;
 
-// A widget's face as the core paints it (native/core/ui/widget_faces.cpp): in the glass's ink, with
+// A widget's face as the core paints it (native/core/ui/widget_faces.cpp): in its material's ink, with
 // macOS's few accents (orange second hand and notes, green / red battery, blue calendar), in widget
 // DIP (small 164 x 164, medium 344 x 164, large 344 x 344). The glass itself is rendered under it.
-internal static class WidgetFaces
+internal static partial class WidgetFaces
 {
     private const double Pad = 14; // kPad
     public static readonly Color Red = Color.FromArgb(255, 0xFF, 0x45, 0x3A), Orange = Color.FromArgb(255, 0xFF, 0x9F, 0x0A),
@@ -23,19 +24,43 @@ internal static class WidgetFaces
     private static readonly string[] WeekShort = { "一", "二", "三", "四", "五", "六", "日" };
     private static readonly string[] Months = { "一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月" };
 
-    // GlassPal: the glass's inks (Theme::For) and the accents.
-    private sealed record Pal(Color Text, Color Sub, Color Faint, Color Face, Color Track, Color Halo, bool Dark)
-    {
-        public static readonly Color Red = WidgetFaces.Red, Orange = WidgetFaces.Orange, Green = WidgetFaces.Green, Blue = WidgetFaces.Blue;
+    // What the weather's symbols are drawn over (widget_faces.cpp, Ink).
+    private enum Ink { Light, Dark, Mono }
 
+    // GlassPal / DuskPal / PaperPal: the inks and the accents of a material.
+    private sealed record Pal(Color Text, Color Sub, Color Faint, Color Face, Color Track, Color Halo, bool Dark,
+                              Color Red, Color Orange, Color Green, Color Blue, Color OnAccent, Color NightFace, Ink Icon)
+    {
+        private static Color White(double a) => Color.FromArgb((byte)Math.Round(255 * a), 255, 255, 255);
+
+        // The glass's inks (Theme::For) and macOS's dark-mode accents.
         public static Pal For(bool dark)
         {
             Color ink = dark ? Color.FromArgb(255, 0x11, 0x13, 0x17) : Color.FromArgb(255, 255, 255, 255);
             Color A(double a) => Color.FromArgb((byte)Math.Round(255 * a), ink.R, ink.G, ink.B);
             double text = dark ? 0.92 : 0.96;
             return new Pal(A(text), A(dark ? 0.66 : 0.76), A(dark ? 0.46 : 0.56), A(text * 0.10), A(text * 0.18),
-                           dark ? Color.FromArgb(89, 255, 255, 255) : Color.FromArgb(82, 0, 0, 0), dark);
+                           dark ? Color.FromArgb(89, 255, 255, 255) : Color.FromArgb(82, 0, 0, 0), dark,
+                           WidgetFaces.Red, WidgetFaces.Orange, WidgetFaces.Green, WidgetFaces.Blue, White(0.98), Color.FromArgb(107, 0, 0, 0),
+                           dark ? Ink.Dark : Ink.Light);
         }
+
+        // Dusk: white only, the accents too; a disc's ink is dark.
+        public static Pal Dusk() =>
+            new(White(0.96), White(0.72), White(0.50), White(0.12), White(0.22), Color.FromArgb(128, 0, 0, 0), false,
+                White(0.96), White(0.96), White(0.96), White(0.96), Color.FromArgb(235, 0x1C, 0x1C, 0x1E), Color.FromArgb(82, 0, 0, 0), Ink.Mono);
+
+        // Color on a white face: dark ink, macOS's light-mode accents, no halo.
+        public static Pal Paper()
+        {
+            Color A(double a) => Color.FromArgb((byte)Math.Round(255 * a), 0x1D, 0x1D, 0x1F);
+            return new Pal(A(0.94), A(0.58), A(0.36), A(0.05), A(0.10), Colors.Transparent, true,
+                           Color.FromArgb(255, 0xFF, 0x3B, 0x30), Color.FromArgb(255, 0xFF, 0x95, 0x00), Color.FromArgb(255, 0x34, 0xC7, 0x59),
+                           Color.FromArgb(255, 0x00, 0x7A, 0xFF), White(0.98), Color.FromArgb(255, 0x1C, 0x1C, 0x1E), Ink.Dark);
+        }
+
+        // Color on the weather's sky: the light glass ink without its halo.
+        public static Pal Sky() => For(false) with { Halo = Colors.Transparent };
     }
 
     public static (double W, double H) Size(string size) => size switch
@@ -45,11 +70,19 @@ internal static class WidgetFaces
         _ => (344, 164),
     };
 
-    public static FrameworkElement Face(string kind, string size, bool darkInk, Brush? photo = null)
+    // material: glass (the glass's ink: darkInk), dusk (a dark veil, white only) or color (an opaque face).
+    public static FrameworkElement Face(string kind, string size, bool darkInk, Brush? photo = null, string material = "glass")
     {
         var (w, h) = Size(size);
         var c = new Canvas { Width = w, Height = h, IsHitTestVisible = false };
-        var p = Pal.For(darkInk);
+        var p = material switch
+        {
+            "dusk" => Pal.Dusk(),
+            "color" => kind == "weather" ? Pal.Sky() : Pal.Paper(),
+            _ => Pal.For(darkInk),
+        };
+        if (material == "dusk") c.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 22, RadiusY = 22, Fill = new SolidColorBrush(Color.FromArgb(56, 0, 0, 0)) });
+        else if (material == "color") c.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 22, RadiusY = 22, Fill = kind == "weather" ? SkyBrush() : new SolidColorBrush(Colors.White) });
         var now = DateTime.Now;
         switch (kind)
         {
@@ -65,7 +98,7 @@ internal static class WidgetFaces
                     var t = now.AddHours(cities[i].Offset);
                     bool night = t.Hour < 6 || t.Hour >= 18;
                     double cx = Pad + colW * (i + 0.5), cy = (h - 2 * R - 42) / 2 + R - 2;
-                    Color face = night ? Color.FromArgb(107, 0, 0, 0) : p.Face, ink = night ? Color.FromArgb(245, 255, 255, 255) : p.Text;
+                    Color face = night ? p.NightFace : p.Face, ink = night ? Color.FromArgb(245, 255, 255, 255) : p.Text;
                     ClockFace(c, cx, cy, R, t, face, ink, false, null, ink, p);
                     Text(c, cities[i].Name, cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26, 12.5, p.Text, 2, 1, p);
                     int dd = t.Date.CompareTo(now.Date);
@@ -82,7 +115,7 @@ internal static class WidgetFaces
                 double fit = TextWidth("00:00", 50, "TitleFont");
                 double timeW = leftW - 1;
                 Text(c, now.ToString("H:mm"), Pad, Pad + 22, Pad + leftW, Pad + 84, fit > timeW ? 50 * timeW / fit : 50, p.Text, 2, 1, p);
-                Text(c, WeekLong[Weekday(now)], Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 13, Pal.Blue, 2, 0, p);
+                Text(c, WeekLong[Weekday(now)], Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 13, p.Blue, 2, 0, p);
                 Text(c, $"{now.Month}月{now.Day}日", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 13, p.Text, 0, 0, p);
                 if (size == "small") break;
                 double x0 = Pad + leftW + 8, rowH = (h - 2 * Pad) / 3;
@@ -108,7 +141,7 @@ internal static class WidgetFaces
                 double cx = w / 2, cy = h / 2 - 12, R = 44;
                 var (fill, charging, low) = BarFace.Battery();
                 Arc(c, cx, cy, R, -90, 360, p.Track, 9, false);
-                Color level = low ? Pal.Red : Pal.Green;
+                Color level = low ? p.Red : p.Green;
                 Arc(c, cx, cy, R, -90, 360 * fill, level, 9, true);
                 Glyph(c, "", cx - 22, cy - 22, cx + 22, cy + 22, 24, p.Text);
                 string n = $"{Math.Round(fill * 100)}%";
@@ -120,7 +153,7 @@ internal static class WidgetFaces
             case "system":
             {
                 (string Name, double V, string Detail)[] g = { ("CPU", 0.23, "处理器"), ("内存", 0.58, "9.2 / 16 GB"), ("磁盘", 0.74, "214 GB 可用") };
-                Color Col(double v) => v >= 0.9 ? Pal.Red : v >= 0.7 ? Pal.Orange : Pal.Green;
+                Color Col(double v) => v >= 0.9 ? p.Red : v >= 0.7 ? p.Orange : p.Green;
                 if (size == "small")
                 {
                     Text(c, "系统", Pad + 2, Pad - 2, w - Pad, Pad + 16, 12.5, p.Sub, 2, 0, p);
@@ -148,15 +181,15 @@ internal static class WidgetFaces
                 break;
             }
             case "notes":
-                Text(c, "备忘录", Pad + 2, Pad - 2, w - Pad, Pad + 18, 13.5, Pal.Orange, 2, 0, p);
+                Text(c, "备忘录", Pad + 2, Pad - 2, w - Pad, Pad + 18, 13.5, p.Orange, 2, 0, p);
                 Paragraph(c, size == "small" ? "周五前交设计评审\n换上新的壁纸" : "周五前交设计评审\n换上新的壁纸\n试试磨砂预设",
                           Pad + 2, Pad + 24, w - Pad - 2, h - Pad, 13.5, p.Text, p);
                 break;
             case "reminders":
             {
                 (string Text, bool Done)[] items = { ("给桌面拍一组截图", false), ("整理本周的会议记录", false), ("订周末的电影票", true) };
-                Text(c, "提醒事项", Pad + 2, Pad - 2, w - Pad - 40, Pad + 18, 13.5, Pal.Orange, 2, 0, p);
-                Text(c, "2", w - Pad - 48, Pad - 6, w - Pad - 2, Pad + 22, 22, Pal.Orange, 2, 2, p);
+                Text(c, "提醒事项", Pad + 2, Pad - 2, w - Pad - 40, Pad + 18, 13.5, p.Orange, 2, 0, p);
+                Text(c, "2", w - Pad - 48, Pad - 6, w - Pad - 2, Pad + 22, 22, p.Orange, 2, 2, p);
                 const double RowH = 27, Top = Pad + 28;
                 int slots = Math.Max(1, (int)((h - Pad - Top) / RowH));
                 int shown = 0;
@@ -166,8 +199,8 @@ internal static class WidgetFaces
                     double y = Top + RowH * shown, cx = Pad + 9, cy = y + RowH / 2;
                     if (it.Done)
                     {
-                        Circle(c, cx, cy, 8, Pal.Orange);
-                        Circle(c, cx, cy, 3.2, Color.FromArgb(250, 255, 255, 255));
+                        Circle(c, cx, cy, 8, p.Orange);
+                        Circle(c, cx, cy, 3.2, p.OnAccent);
                     }
                     else Arc(c, cx, cy, 7.4, -90, 360, p.Sub, 1.5, false);
                     Text(c, it.Text, Pad + 26, y, w - Pad, y + RowH, 13.5, it.Done ? p.Sub : p.Text, 0, 0, p);
@@ -185,6 +218,9 @@ internal static class WidgetFaces
             case "photos":
                 c.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 22, RadiusY = 22, Fill = photo });
                 break;
+            case "weather":
+                Weather(c, size, w, h, p);
+                break;
         }
         return c;
     }
@@ -197,6 +233,7 @@ internal static class WidgetFaces
         "digital" => DateTime.Now.Ticks / TimeSpan.TicksPerMinute,
         "calendar" => DateTime.Today.Ticks,
         "battery" => BatteryStamp(),
+        "weather" => WeatherStamp(),
         _ => 0,
     };
 
@@ -266,7 +303,7 @@ internal static class WidgetFaces
         int lead = (Weekday(firstDay) - first + 7) % 7, days = DateTime.DaysInMonth(now.Year, now.Month);
         if (size == "large")
         {
-            Text(c, Months[now.Month - 1], Pad + 4, Pad, w / 2, Pad + 22, 16, Pal.Blue, 2, 0, p);
+            Text(c, Months[now.Month - 1], Pad + 4, Pad, w / 2, Pad + 22, 16, p.Blue, 2, 0, p);
             Text(c, $"{now.Year}年 · 农历{LunarMonthDay(now)}", w / 2 - 40, Pad, w - Pad - 4, Pad + 22, 11.5, p.Sub, 0, 2, p);
             double gx = Pad, cw = (w - 2 * Pad) / 7, y = Pad + 28;
             for (int i = 0; i < 7; i++) Text(c, WeekShort[(first + i) % 7], gx + i * cw, y, gx + (i + 1) * cw, y + 16, 10.5, p.Sub, 2, 1, p);
@@ -278,23 +315,23 @@ internal static class WidgetFaces
                 int cell = lead + d - 1;
                 double x0 = gx + (cell % 7) * cw, y0 = y + (cell / 7) * rh, cx = x0 + cw / 2;
                 bool today = d == now.Day, weekend = (first + cell % 7) % 7 >= 5;
-                if (today) Fill(c, cx - 18, y0 + 1, cx + 18, y0 + rh - 1, 10, Pal.Blue);
-                Color ink = today ? Color.FromArgb(250, 255, 255, 255) : weekend ? p.Sub : p.Text;
+                if (today) Fill(c, cx - 18, y0 + 1, cx + 18, y0 + rh - 1, 10, p.Blue);
+                Color ink = today ? p.OnAccent : weekend ? p.Sub : p.Text;
                 Text(c, d.ToString(), x0, y0, x0 + cw, y0 + rh * 0.56, 14, ink, 2, 1, p, halo: !today);
                 string label = DayLabel(new DateTime(now.Year, now.Month, d), out bool festival);
-                Text(c, label, x0, y0 + rh * 0.48, x0 + cw, y0 + rh - 5, 9, today ? Color.FromArgb(212, 255, 255, 255) : festival ? Pal.Blue : p.Sub, 0, 1, p, halo: !today);
+                Text(c, label, x0, y0 + rh * 0.48, x0 + cw, y0 + rh - 5, 9, today ? A(p.OnAccent, 0.85) : festival ? p.Blue : p.Sub, 0, 1, p, halo: !today);
             }
             return;
         }
         double leftW = size == "small" ? w - 2 * Pad : 126;
-        Text(c, WeekLong[Weekday(now)], Pad + 2, Pad, Pad + leftW, Pad + 20, 14, Pal.Blue, 2, 0, p);
+        Text(c, WeekLong[Weekday(now)], Pad + 2, Pad, Pad + leftW, Pad + 20, 14, p.Blue, 2, 0, p);
         Text(c, now.Day.ToString(), Pad, Pad + 16, Pad + leftW, Pad + 80, 54, p.Text, 0, 0, p);
         string todayLabel = DayLabel(now, out bool fest);
         Text(c, "农历" + LunarMonthDay(now), Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 12.5, p.Text, 2, 0, p);
-        Text(c, fest ? todayLabel : $"{now.Year}年{Months[now.Month - 1]}", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 12, fest ? Pal.Blue : p.Sub, 0, 0, p);
+        Text(c, fest ? todayLabel : $"{now.Year}年{Months[now.Month - 1]}", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 12, fest ? p.Blue : p.Sub, 0, 0, p);
         if (size == "small") return;
         double gx2 = Pad + leftW + 6, gw = w - Pad - gx2, cw2 = gw / 7;
-        Text(c, Months[now.Month - 1], gx2 + 4, Pad - 1, gx2 + gw, Pad + 17, 12.5, Pal.Blue, 2, 0, p);
+        Text(c, Months[now.Month - 1], gx2 + 4, Pad - 1, gx2 + gw, Pad + 17, 12.5, p.Blue, 2, 0, p);
         double yy = Pad + 20;
         for (int i = 0; i < 7; i++) Text(c, WeekShort[(first + i) % 7], gx2 + i * cw2, yy, gx2 + (i + 1) * cw2, yy + 14, 9.5, p.Sub, 2, 1, p);
         yy += 16;
@@ -305,9 +342,9 @@ internal static class WidgetFaces
             int cell = lead + d - 1;
             double x0 = gx2 + (cell % 7) * cw2, y0 = yy + (cell / 7) * rh2, cx = x0 + cw2 / 2, cy = y0 + rh2 / 2;
             bool today = d == now.Day, weekend = (first + cell % 7) % 7 >= 5;
-            if (today) Circle(c, cx, cy, rh2 / 2 + 0.5, Pal.Blue);
+            if (today) Circle(c, cx, cy, rh2 / 2 + 0.5, p.Blue);
             Text(c, d.ToString(), x0, cy - rh2 / 2, x0 + cw2, cy + rh2 / 2, 10.5,
-                 today ? Color.FromArgb(250, 255, 255, 255) : weekend ? p.Sub : p.Text, 2, 1, p, halo: !today);
+                 today ? p.OnAccent : weekend ? p.Sub : p.Text, 2, 1, p, halo: !today);
         }
     }
 
@@ -342,8 +379,8 @@ internal static class WidgetFaces
         Hand(min * 6, R * 0.80, Math.Max(2.5, R * 0.075));
         Circle(c, cx, cy, Math.Max(2.2, R * 0.055), ink);
         double sa = (sec * 6 - 90) * Math.PI / 180;
-        Line(c, cx - Math.Cos(sa) * R * 0.18, cy - Math.Sin(sa) * R * 0.18, cx + Math.Cos(sa) * R * 0.86, cy + Math.Sin(sa) * R * 0.86, Pal.Orange, Math.Max(1, R * 0.02));
-        Circle(c, cx, cy, Math.Max(1.8, R * 0.04), Pal.Orange);
+        Line(c, cx - Math.Cos(sa) * R * 0.18, cy - Math.Sin(sa) * R * 0.18, cx + Math.Cos(sa) * R * 0.86, cy + Math.Sin(sa) * R * 0.86, p.Orange, Math.Max(1, R * 0.02));
+        Circle(c, cx, cy, Math.Max(1.8, R * 0.04), p.Orange);
     }
 
     // ---- Drawing helpers (Canvas in surface.cpp) ----

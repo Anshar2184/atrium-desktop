@@ -42,6 +42,10 @@ public:
     POINT Origin() const { return origin_; }
     // Bumped with every new picture.
     unsigned Version() const { return version_; }
+    // Whether a picture after `version` changed anything in `area` (screen px). The capture
+    // reports where each frame changed (Windows 11 24H2 and later; else the whole desktop), so a
+    // widget's glass is not drawn again for a change elsewhere on the desktop.
+    bool ChangedSince(unsigned version, const RECT& area) const;
 
 private:
     bool StartCapture();
@@ -57,6 +61,12 @@ private:
     winrt::com_ptr<ID3D11Texture2D> texture_;
     POINT origin_{};
     unsigned version_ = 0;
+    struct Change {
+        unsigned version;
+        RECT rect; // screen px
+    };
+    std::vector<Change> changes_; // the last few pictures' changed areas, oldest first
+    void Changed(const RECT& rect); // records the picture just stored as version_
 
     // The desktop window's capture.
     HWND desktop_ = nullptr;

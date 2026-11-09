@@ -16,30 +16,55 @@ namespace Atrium.Settings;
 // picture of it on a piece of glass over the specimen photo; a click puts one on the desktop.
 public sealed partial class MainWindow
 {
-    private sealed record WidgetChoice(string Kind, string Size, string Name, string Note);
+    private sealed record WidgetChoice(string Kind, string Size, string Name, string Note, string Category);
+
+    // The gallery's groups, in order; a segmented control above shows all of them or one.
+    private static readonly string[] WidgetCategoryNames = { "时钟", "天气", "日历", "效率", "照片", "系统" };
 
     private static readonly WidgetChoice[] WidgetChoices =
     {
-        new("clock", "small", "时钟", "本地时间的表盘"),
-        new("clock", "medium", "世界时钟", "四座城市的表盘"),
-        new("digital", "small", "数字时钟", "时间、星期与日期"),
-        new("digital", "medium", "数字时钟", "再加三座城市"),
-        new("calendar", "small", "日历", "今天与农历"),
-        new("calendar", "medium", "日历", "再加一个月历"),
-        new("calendar", "large", "农历月历", "每天下面写农历或节日"),
-        new("battery", "small", "电池", "电量圆环"),
-        new("system", "small", "系统监视", "CPU、内存与磁盘"),
-        new("system", "medium", "系统监视", "三个圆环"),
-        new("notes", "small", "备忘录", "点按即可输入"),
-        new("reminders", "medium", "提醒事项", "勾选完成的事"),
-        new("photos", "small", "照片", "「图片」文件夹里的一张"),
-        new("photos", "medium", "照片", "每 10 分钟换一张"),
+        new("clock", "small", "时钟", "本地时间的表盘", "时钟"),
+        new("clock", "medium", "世界时钟", "四座城市的表盘", "时钟"),
+        new("digital", "small", "数字时钟", "时间、星期与日期", "时钟"),
+        new("digital", "medium", "数字时钟", "再加三座城市", "时钟"),
+        new("weather", "small", "天气", "气温与天气", "天气"),
+        new("weather", "medium", "天气", "再加逐小时预报", "天气"),
+        new("weather", "large", "天气", "再加五天预报", "天气"),
+        new("calendar", "small", "日历", "今天与农历", "日历"),
+        new("calendar", "medium", "日历", "再加一个月历", "日历"),
+        new("calendar", "large", "农历月历", "每天下面写农历或节日", "日历"),
+        new("notes", "small", "备忘录", "点按即可输入", "效率"),
+        new("reminders", "medium", "提醒事项", "勾选完成的事", "效率"),
+        new("photos", "small", "照片", "「图片」文件夹里的一张", "照片"),
+        new("photos", "medium", "照片", "每 10 分钟换一张", "照片"),
+        new("battery", "small", "电池", "电量圆环", "系统"),
+        new("system", "small", "系统监视", "CPU、内存与磁盘", "系统"),
+        new("system", "medium", "系统监视", "三个圆环", "系统"),
     };
 
+    private readonly Dictionary<string, FrameworkElement> _widgetSections = new();
+
+    // Each group under its name; the control above narrows the gallery to one group.
     private void BuildWidgetGallery()
     {
-        foreach (var choice in WidgetChoices)
-            WidgetGallery.Children.Add(GalleryCard(choice));
+        foreach (string category in WidgetCategoryNames)
+        {
+            var grid = new ResponsiveGrid { MinCellWidth = 180, Gap = 12 };
+            foreach (var choice in WidgetChoices.Where(c => c.Category == category))
+                grid.Children.Add(GalleryCard(choice));
+            var section = new StackPanel { Spacing = 8 };
+            section.Children.Add(new TextBlock { Text = category, Style = (Style)Application.Current.Resources["RowTitleStyle"], Margin = new Thickness(4, 0, 0, 0) });
+            section.Children.Add(grid);
+            _widgetSections[category] = section;
+            WidgetGallery.Children.Add(section);
+        }
+    }
+
+    private void OnWidgetCategoryChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton { Tag: string category }) return;
+        foreach (var (name, section) in _widgetSections)
+            section.Visibility = category == "全部" || category == name ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // The gallery only adds while the widgets are on.
@@ -56,6 +81,7 @@ public sealed partial class MainWindow
     {
         public bool? DarkInk;
         public long Stamp;
+        public string? Material;
     }
 
     private readonly List<GalleryPreview> _galleryStages = new();
@@ -103,7 +129,7 @@ public sealed partial class MainWindow
     // The gallery again when the picture or the material changed since it was drawn.
     private void RefreshGallery()
     {
-        if (_galleryMaterial != null && _galleryMaterial.SameMaterial(_current) && _galleryGen == Photo.Generation) return;
+        if (_galleryMaterial != null && _galleryMaterial.SameMaterial(_current) && _galleryMaterial.WidgetMaterial == _current.WidgetMaterial && _galleryGen == Photo.Generation) return;
         foreach (var preview in _galleryStages) RenderGalleryCard(preview);
     }
 
@@ -125,12 +151,14 @@ public sealed partial class MainWindow
             viewport.Height = sh;
             bool dark = frame.Lumas[0] > 0.5f;
             long stamp = WidgetFaces.Stamp(c.Kind);
-            if (preview.DarkInk != dark || preview.Stamp != stamp)
+            string material = _current.WidgetMaterial;
+            if (preview.DarkInk != dark || preview.Stamp != stamp || preview.Material != material)
             {
-                face.Child = WidgetFaces.Face(c.Kind, c.Size, dark, PhotoBrush());
+                face.Child = WidgetFaces.Face(c.Kind, c.Size, dark, PhotoBrush(), material);
                 ContinuousCorners.Install(face);
                 preview.DarkInk = dark;
                 preview.Stamp = stamp;
+                preview.Material = material;
             }
             face.Width = tile.W;
             face.Height = tile.H;
@@ -146,7 +174,7 @@ public sealed partial class MainWindow
     // photo is kept alive after the batch.
     private sealed record TileJob(object Target, int Id, double W, double H, double K, double Rs,
                                   IReadOnlyList<GlassTile> Tiles, GlassTile? Bar, BarSettings Material,
-                                  Lazy<Photo> Photo, Action<TileFrame> Done, bool Overlays);
+                                  Lazy<Photo> Photo, Action<TileFrame> Done, bool Overlays, bool Scaled);
     private readonly object _tileLock = new();
     private readonly Dictionary<object, TileJob> _pendingTiles = new();
     private bool _tilesBusy, _tilesStopped;
@@ -190,14 +218,14 @@ public sealed partial class MainWindow
     }
 
     private void PostTiles(object target, double w, double h, double k, IReadOnlyList<GlassTile> tiles, GlassTile? bar,
-                           Action<TileFrame> done, bool overlays = false)
+                           Action<TileFrame> done, bool overlays = false, bool scaled = false)
     {
         double rs = Math.Clamp(Content.XamlRoot?.RasterizationScale ?? 1, 1, 2);
         int mine = _tileRequests[target] = (_tileRequests.TryGetValue(target, out int n) ? n : 0) + 1;
         lock (_tileLock)
         {
             if (_tilesStopped) return;
-            _pendingTiles[target] = new TileJob(target, mine, w, h, k, rs, tiles, bar, _current.Clone(), Photo.Capture(), done, overlays);
+            _pendingTiles[target] = new TileJob(target, mine, w, h, k, rs, tiles, bar, _current.Clone(), Photo.Capture(), done, overlays, scaled);
             if (_tilesBusy) return;
             _tilesBusy = true;
         }
@@ -240,8 +268,9 @@ public sealed partial class MainWindow
                         TileFrame frame;
                         if (job.Overlays)
                         {
-                            var cards = GlassRenderer.CardOverlays(bg, job.Material, job.Rs, job.Tiles);
-                            frame = new TileFrame(Array.Empty<byte>(), pw, ph, job.Rs, cards.Select(c => c.Luma).ToArray(), cards);
+                            // Scaled: the widget map, whose picture comes along (its cards move over it).
+                            var cards = GlassRenderer.CardOverlays(bg, job.Material, job.Rs, job.Tiles, job.Scaled ? job.K : 0);
+                            frame = new TileFrame(job.Scaled ? bg.Base : Array.Empty<byte>(), pw, ph, job.Rs, cards.Select(c => c.Luma).ToArray(), cards);
                         }
                         else
                         {

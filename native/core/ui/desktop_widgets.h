@@ -31,6 +31,7 @@ public:
     void SetOnRight(bool onRight);
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor);
+    void SetMaterial(WidgetMaterial material);
     // Adds a widget in the first free place; false when there is no room.
     bool Add(WidgetKind kind, WidgetSize size);
     // The same by name ("clock", "medium"; the settings app's gallery).
@@ -78,6 +79,7 @@ private:
     void Menu(Widget& w);
     void Activate(Widget& w);
     void Paint(Widget& w, Canvas& c);
+    static void PaintShadow(Canvas& c, D2D1_RECT_F face);
     // Notes and reminders: a click starts typing, keys edit, losing the focus ends it.
     void Click(Widget& w, POINT content);
     void StartEdit(Widget& w, int item);
@@ -101,6 +103,8 @@ private:
     // file, with their notes, until a larger screen shows them again.
     std::vector<std::wstring> unplaced_;
     WidgetWorld world_;
+    WidgetMaterial material_ = WidgetMaterial::Glass;
+    std::unique_ptr<WeatherSource> weather_;
     ChineseCalendar lunar_;
     int lastMinute_ = -1;
     uint64_t cpuIdle_ = 0, cpuTotal_ = 0; // the last GetSystemTimes

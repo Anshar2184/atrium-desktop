@@ -83,9 +83,11 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
     o.SetNamedValue(L"notifyWeChat", json::JsonValue::CreateBooleanValue(notifyWeChat));
     o.SetNamedValue(L"notifyFeishu", json::JsonValue::CreateBooleanValue(notifyFeishu));
+    o.SetNamedValue(L"bar", json::JsonValue::CreateBooleanValue(bar));
     o.SetNamedValue(L"widgets", json::JsonValue::CreateBooleanValue(widgets));
     o.SetNamedValue(L"widgetsOnRight", json::JsonValue::CreateBooleanValue(widgetsOnRight));
     o.SetNamedValue(L"widgetBackdrop", json::JsonValue::CreateStringValue(widgetBackdrop));
+    o.SetNamedValue(L"widgetMaterial", json::JsonValue::CreateStringValue(widgetMaterial));
     o.SetNamedValue(L"stageManager", json::JsonValue::CreateBooleanValue(stageManager));
     o.SetNamedValue(L"stageOnRight", json::JsonValue::CreateBooleanValue(stageOnRight));
     o.SetNamedValue(L"stageAutoHide", json::JsonValue::CreateBooleanValue(stageAutoHide));
@@ -158,6 +160,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
         flag(L"notifyListener", s.notifyListener);
     flag(L"notifyWeChat", s.notifyWeChat);
     flag(L"notifyFeishu", s.notifyFeishu);
+    flag(L"bar", s.bar);
     flag(L"widgets", s.widgets);
     flag(L"widgetsOnRight", s.widgetsOnRight);
     flag(L"stageManager", s.stageManager);
@@ -168,6 +171,10 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"startOnLogin", s.startOnLogin);
     if (o.HasKey(L"widgetBackdrop") && o.GetNamedValue(L"widgetBackdrop").ValueType() == json::JsonValueType::String)
         s.widgetBackdrop = std::wstring(o.GetNamedString(L"widgetBackdrop")) == L"wallpaper" ? L"wallpaper" : L"desktop";
+    if (o.HasKey(L"widgetMaterial") && o.GetNamedValue(L"widgetMaterial").ValueType() == json::JsonValueType::String) {
+        const std::wstring m(o.GetNamedString(L"widgetMaterial"));
+        s.widgetMaterial = m == L"dusk" || m == L"color" ? m : L"glass";
+    }
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
         s.textColor = std::wstring(o.GetNamedString(L"textColor"));
     if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {

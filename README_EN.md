@@ -27,6 +27,7 @@
 
 The Windows desktop is several generations of design stacked on top of each other: the taskbar, the tray, the start menu, notifications and quick settings each have their own corners, type sizes and animations. Atrium redraws the whole layer you look at every day, and every part of it follows the same rules:
 
+- **Three independent modules.** The taskbar, the desktop widgets and Stage Manager each turn on and off on their own, so you can use just one of them. With the taskbar off, Windows' own taskbar and notification banners work as usual, and the widgets and Stage Manager are unaffected. The three switches are on their pages in the settings app and in the menu of Atrium's tray icon.
 - **One material.** The bar, every popup, every context menu, every notification card and every widget use the same shader with the same parameters. Change the transparency once and the whole desktop follows.
 - **One motion system.** Popups move on springs; whatever follows the pointer approaches it exponentially. Every animation can be interrupted, and none depends on the frame rate.
 - **One typeface.** All text is set in three weights of MiSans, figures are always tabular, and small type on glass is set one weight heavier.
@@ -102,8 +103,8 @@ The widgets are the desktop's second layer of glass. Their design follows the de
     <td valign="top">On hover, the lower corner facing the middle of the screen shows an arc-shaped grip that follows the corner's curve: 6 inside the radius, 3.5 wide, in the secondary ink. While dragging, the size whose corner is nearest the pointer wins (the threshold is halfway between one cell and two), and the widget slides to it at once; the top edge and the outer edge stay where they are.</td>
   </tr>
   <tr>
-    <td valign="top"><b>Restrained colour</b></td>
-    <td valign="top">Widgets are always clear glass, with the ink the glass picks per region. Only a few colours remain: the clock's orange second hand, the battery ring's green and red, the calendar's accent, and the world clock's dark faces at night.</td>
+    <td valign="top"><b>Three materials</b></td>
+    <td valign="top">Chosen on the Widgets page of the settings app. <b>Follow the taskbar</b>: clear glass, with the ink the glass picks per region and only a few colours (the clock's orange second hand, the battery ring's green and red, the calendar's accent). <b>Dusk</b>: the same glass under a translucent black veil, with all text and symbols in white, after macOS's dimmed desktop widgets. <b>Colour</b>: no glass at all, opaque white faces with macOS's light-mode accents; the weather widget shows a sky that follows the weather.</td>
   </tr>
   <tr>
     <td valign="top"><b>Stacking</b></td>
@@ -111,7 +112,7 @@ The widgets are the desktop's second layer of glass. Their design follows the de
   </tr>
   <tr>
     <td valign="top"><b>Content</b></td>
-    <td valign="top">Clock (and world clock), digital clock, calendar (the large one has the lunar day under every date), battery, system monitor (CPU, memory, disk), notes (type straight into them, with IME support), reminders, and photos (upright by EXIF, centre-cropped, a new one every 10 minutes).</td>
+    <td valign="top">Clock (and world clock), digital clock, calendar (the large one has the lunar day under every date), battery, system monitor (CPU, memory, disk), notes (type straight into them, with IME support), reminders, photos (upright by EXIF, centre-cropped, a new one every 10 minutes), and weather (after macOS's: the small one the temperature and the sky, the medium one adds the next hours with sunrise and sunset, the large one five days with their temperature spans; from Open-Meteo, for where Windows' location service puts the computer or, when it is off, where the network connection is, asked past the system proxy).</td>
   </tr>
   <tr>
     <td valign="top"><b>Power</b></td>

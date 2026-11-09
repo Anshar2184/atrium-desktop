@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -64,7 +65,7 @@ constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
     kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager,
-    kCmdWidgets, kCmdStage
+    kCmdWidgets, kCmdStage, kCmdWidgetsModule
 };
 
 struct App {
@@ -93,6 +94,7 @@ struct App {
     std::unique_ptr<WindowPreview> preview;
     std::unique_ptr<StageManager> stage;
     bool widgetsOn = false;
+    std::optional<bool> barOn; // the bar module, as last applied
     int brightness = -1; // the built-in screen's, from GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS
     HPOWERNOTIFY brightnessNotify = nullptr;
 };
@@ -320,6 +322,18 @@ void ToggleStart(RECT)
     g_app.notes->PanelsChanged();
 }
 
+// The bar module on or off (its menu, the tray icon's). Off, its popups close and Windows' own
+// taskbar and banners take over again (ApplySettings).
+void SetBarModule(bool on)
+{
+    g_app.server->Modify([on](Settings& s) { s.bar = on; });
+}
+
+void SetWidgetsModule(bool on)
+{
+    g_app.server->Modify([on](Settings& s) { s.widgets = on; });
+}
+
 // Stage Manager from the bar (its menu, the control centre); the widgets go to the other side.
 void SetStageManager(bool on)
 {
@@ -335,9 +349,12 @@ void ShowMenu(POINT pt)
     std::vector<MenuEntry> entries = {{L"外观设置…", kCmdSettings}, {}, {L"显示桌面", kCmdDesktop}, {L"任务管理器", kCmdTaskManager}};
     if (g_app.widgetsOn)
         entries.push_back({L"添加小组件…", kCmdWidgets});
+    // The three modules, each on its own.
+    entries.push_back({});
+    entries.push_back({L"任务栏", kCmdToggle, g_app.barOn.value_or(true)});
+    entries.push_back({L"桌面小组件", kCmdWidgetsModule, g_app.widgetsOn});
     entries.push_back({L"台前调度", kCmdStage, g_app.stage->Enabled()});
     entries.push_back({});
-    entries.push_back({g_app.bar->Visible() ? L"隐藏玻璃栏" : L"显示玻璃栏", kCmdToggle});
     entries.push_back({L"退出 Atrium", kCmdExit});
     g_app.menu->Open(std::move(entries), pt, MenuPlace::Above, [](int cmd) {
         switch (cmd) {
@@ -348,7 +365,10 @@ void ShowMenu(POINT pt)
             OpenSettings(L"widgets");
             break;
         case kCmdToggle:
-            g_app.bar->SetVisible(!g_app.bar->Visible());
+            SetBarModule(!g_app.barOn.value_or(true));
+            break;
+        case kCmdWidgetsModule:
+            SetWidgetsModule(!g_app.widgetsOn);
             break;
         case kCmdDesktop:
             SendWinShortcut('D');
@@ -457,21 +477,37 @@ void ApplySettings(const Settings& s)
     g_app.start->SetBarHeight(float(s.height)); // its status capsule is shaped like the bar
     g_app.notes->SetRadius(radius);
     g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody);
-    if (s.notifyListener && !g_app.listener)
+    // Notification cards belong to the bar (its bell): without it, Windows shows its own banners.
+    if (s.bar && s.notifyListener && !g_app.listener)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
-    else if (!s.notifyListener && g_app.listener)
+    else if (!(s.bar && s.notifyListener) && g_app.listener)
         g_app.listener.reset();
-    if (s.notifyWeChat && !g_app.wechat)
+    if (s.bar && s.notifyWeChat && !g_app.wechat)
         g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE);
-    else if (!s.notifyWeChat && g_app.wechat)
+    else if (!(s.bar && s.notifyWeChat) && g_app.wechat)
         g_app.wechat.reset();
-    if (s.notifyFeishu && !g_app.feishu)
+    if (s.bar && s.notifyFeishu && !g_app.feishu)
         g_app.feishu = std::make_unique<FeishuSource>(g_app.host, WM_NOTICE);
-    else if (!s.notifyFeishu && g_app.feishu)
+    else if (!(s.bar && s.notifyFeishu) && g_app.feishu)
         g_app.feishu.reset();
     g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
     g_app.tasks->SetShowRunning(s.showRunning);
     g_app.bar->Apply(s);
+    if (g_app.barOn != s.bar) {
+        g_app.barOn = s.bar;
+        if (!s.bar) {
+            // The bar's popups go with it.
+            g_app.start->Close(false);
+            g_app.trayPanel->Close();
+            g_app.control->Close();
+            g_app.calendar->Close();
+            if (g_app.notes->CenterVisible())
+                g_app.notes->ToggleCenter();
+        }
+        // The bar's windows go, its render thread stays: it draws the widgets' and menus' glass.
+        g_app.bar->SetVisible(s.bar);
+        Log(L"modules: bar %s", s.bar ? L"on" : L"off");
+    }
     // Widgets live on the bar's monitor, where its capture gives them glass.
     RECT bar = g_app.bar->BarRect();
     g_app.widgets->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
@@ -482,11 +518,13 @@ void ApplySettings(const Settings& s)
     g_app.stage->SetAutoHide(s.stageAutoHide);
     g_app.stage->SetEnabled(s.stageManager);
     g_app.control->SetStage(s.stageManager, s.stageOnRight);
+    g_app.widgets->SetMaterial(s.widgetMaterial == L"dusk" ? WidgetMaterial::Dusk : s.widgetMaterial == L"color" ? WidgetMaterial::Color : WidgetMaterial::Glass);
     g_app.widgets->SetEnabled(s.widgets);
     g_app.widgetsOn = s.widgets;
     if (g_app.chrome) {
-        g_app.chrome->SetTaskbarHidden(s.hideTaskbar);
-        g_app.chrome->SetBannersHidden(s.hideBanners);
+        // Without the bar, Windows' own taskbar and banners are never hidden.
+        g_app.chrome->SetTaskbarHidden(s.bar && s.hideTaskbar);
+        g_app.chrome->SetBannersHidden(s.bar && s.hideBanners);
     }
 }
 
@@ -639,7 +677,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_NOTICE:
         if (auto* n = reinterpret_cast<Notice*>(l)) {
             // Only from sources still turned on (a notice may arrive just after).
-            bool on = n->source == L"atrium" ? true : n->source == L"wechat" ? bool(g_app.wechat)
+            bool on = n->source == L"atrium" ? g_app.barOn.value_or(true) : n->source == L"wechat" ? bool(g_app.wechat)
                        : n->source == L"feishu" ? bool(g_app.feishu) : bool(g_app.listener);
             if (g_app.notes && on)
                 g_app.notes->Post(*n);
@@ -742,7 +780,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         break;
     case WM_ATRIUM_ADD_WIDGET:
-        return w <= WPARAM(WidgetKind::Photos) && l >= 0 && l <= LPARAM(WidgetSize::Large) &&
+        return w <= WPARAM(WidgetKind::Weather) && l >= 0 && l <= LPARAM(WidgetSize::Large) &&
                g_app.widgetsOn && g_app.widgets->Add(WidgetKind(w), WidgetSize(l)) ? 1 : 0;
     case WM_ATRIUM_SETTINGS:
         ApplySettings(g_app.server->Current());

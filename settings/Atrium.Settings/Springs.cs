@@ -113,6 +113,19 @@ public sealed class SegmentTrack : Grid
         _pill.RenderTransform = _move;
         Children.Add(_pill); // before the XAML children: it sits behind them
         Loaded += (_, _) => Setup();
+        // A choice made while the track was hidden (not laid out) could not be measured: the outline
+        // goes to it once the track is laid out or comes into view.
+        SizeChanged += (_, _) => Sync();
+        EffectiveViewportChanged += (_, _) => Sync();
+    }
+
+    private void Sync()
+    {
+        if (!_ready || _ticking) return;
+        var on = Children.OfType<RadioButton>().FirstOrDefault(r => r.IsChecked == true);
+        if (on == null || on.ActualWidth <= 0) return;
+        double x = on.TransformToVisual(this).TransformPoint(default).X - Padding.Left;
+        if (on != _at || Math.Abs(x - _x) > 0.5 || Math.Abs(on.ActualWidth - _w) > 0.5 || _pill.Opacity < 0.5) MoveTo(on, false);
     }
 
     private void Setup()

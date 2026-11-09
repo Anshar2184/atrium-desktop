@@ -85,10 +85,10 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Ellipse x:Name="StatusDot" Width="8" Height="8" VerticalAlignment="Center" />
-                    <TextBlock x:Name="StatusTitle" Grid.Column="1" Text="Atrium 任务栏" FontSize="13"
+                    <TextBlock x:Name="StatusTitle" Grid.Column="1" Text="Atrium" FontSize="13"
                                FontFamily="{StaticResource EmphasisFont}" VerticalAlignment="Center" />
                     <ToggleSwitch x:Name="CoreSwitch" Grid.Column="2" Style="{StaticResource SwitchStyle}"
-                                  AutomationProperties.Name="Atrium 任务栏" Toggled="OnCoreToggled" IsEnabled="False" />
+                                  AutomationProperties.Name="Atrium" Toggled="OnCoreToggled" IsEnabled="False" />
                 </Grid>
                 <TextBlock x:Name="StatusMessage" Style="{StaticResource FootnoteStyle}" Margin="16,0,0,0" />
             </StackPanel>
@@ -318,8 +318,19 @@
                             <TextBlock x:Name="WidgetMapCaption" Style="{StaticResource FootnoteStyle}" Margin="4,0,0,0" />
                         </StackPanel>
                         <StackPanel>
-                            <TextBlock Text="添加小组件" Style="{StaticResource SectionStyle}" />
-                            <local:ResponsiveGrid x:Name="WidgetGallery" MinCellWidth="180" Gap="12" />
+                            <Grid>
+                                <TextBlock Text="添加小组件" Style="{StaticResource SectionStyle}" />
+                                <local:SegmentTrack x:Name="WidgetCategories" HorizontalAlignment="Right" Margin="0,0,0,8">
+                                    <RadioButton GroupName="widgetcategory" Content="全部" Tag="全部" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" IsChecked="True" />
+                                    <RadioButton GroupName="widgetcategory" Content="时钟" Tag="时钟" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="天气" Tag="天气" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="日历" Tag="日历" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="效率" Tag="效率" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="照片" Tag="照片" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
+                                    <RadioButton GroupName="widgetcategory" Content="系统" Tag="系统" Style="{StaticResource SegmentStyle}" Checked="OnWidgetCategoryChecked" />
+                                </local:SegmentTrack>
+                            </Grid>
+                            <StackPanel x:Name="WidgetGallery" Spacing="18" />
                             <TextBlock x:Name="WidgetHint" Style="{StaticResource FootnoteStyle}" Margin="4,10,0,0"
                                        Text="点按添加到桌面" />
                         </StackPanel>
@@ -463,6 +474,11 @@
                         <!-- Dock: what the bar shows, the icons, place and motion -->
                         <StackPanel x:Name="SideDock" Style="{StaticResource InspectorPageStyle}" Visibility="Collapsed">
                             <StackPanel>
+                                <TextBlock Text="模块" Style="{StaticResource SectionStyle}" />
+                                <local:ToggleTile x:Name="BarSwitch" Title="Atrium 任务栏" SwitchName="Atrium 任务栏" Toggled="OnBarToggled" Flat="True"
+                                                  Note="关闭后用回 Windows 自己的任务栏和通知横幅；小组件和台前调度不受影响。" />
+                            </StackPanel>
+                            <StackPanel x:Name="DockContent">
                                 <TextBlock Text="栏上显示" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="TraySwitch" Title="系统托盘" SwitchName="显示系统托盘" Toggled="OnBarContentToggled" Flat="True" />
                                 <local:ToggleTile x:Name="StatusSwitch" Title="状态栏" SwitchName="显示状态栏" Toggled="OnBarContentToggled" Flat="True" />
@@ -480,7 +496,7 @@
                                         </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>
-                            <StackPanel>
+                            <StackPanel x:Name="DockLayout">
                                 <Grid>
                                     <TextBlock Text="图标与位置" Style="{StaticResource SectionStyle}" />
                                     <Button Style="{StaticResource ResetButtonStyle}" Tag="dock" Click="OnGroupReset" AutomationProperties.Name="恢复图标与位置的默认值" />
@@ -565,6 +581,14 @@
                                     <local:SegmentTrack>
                                             <RadioButton x:Name="WidgetsLeft" GroupName="widgetside" Content="左侧" Tag="left" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
                                             <RadioButton x:Name="WidgetsRight" GroupName="widgetside" Content="右侧" Tag="right" Style="{StaticResource SegmentStyle}" Checked="OnWidgetAlignmentChecked" />
+                                        </local:SegmentTrack>
+                                </StackPanel>
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="材质" Style="{StaticResource RowTitleStyle}" />
+                                    <local:SegmentTrack>
+                                            <RadioButton x:Name="MaterialGlass" GroupName="widgetmaterial" Content="跟随任务栏" Tag="glass" Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
+                                            <RadioButton x:Name="MaterialDusk" GroupName="widgetmaterial" Content="暮色" Tag="dusk" Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
+                                            <RadioButton x:Name="MaterialColor" GroupName="widgetmaterial" Content="原色" Tag="color" Style="{StaticResource SegmentStyle}" Checked="OnWidgetMaterialChecked" />
                                         </local:SegmentTrack>
                                 </StackPanel>
                                 <StackPanel Style="{StaticResource FlatRowStyle}">

@@ -5,6 +5,7 @@
 
 #include "shell/lunar.h"
 #include "shell/system_status.h"
+#include "shell/weather.h"
 #include "shell/task_model.h"
 #include "ui/surface.h"
 
@@ -14,8 +15,12 @@
 
 namespace atrium {
 
-enum class WidgetKind { Clock, Calendar, Battery, Digital, System, Notes, Reminders, Photos };
+enum class WidgetKind { Clock, Calendar, Battery, Digital, System, Notes, Reminders, Photos, Weather };
 enum class WidgetSize { Small, Medium, Large };
+// Glass: the bar's clear glass, its ink adapting to what shows through. Dusk: the same glass
+// dimmed by a dark veil, everything on it white (macOS's dimmed desktop widgets). Color: each
+// widget's own opaque face, white or (weather) its sky, as macOS's full-colour widgets.
+enum class WidgetMaterial { Glass, Dusk, Color };
 
 // macOS's grid: a small widget is a square, a medium one two squares wide, a
 // large one two by two (DIP).
@@ -54,6 +59,7 @@ struct WidgetWorld {
     SystemStatus status;
     float cpu = 0, memory = 0, disk = 0; // in use, 0..1
     double memoryGb = 0, memoryTotalGb = 0, diskFreeGb = 0;
+    Weather weather; // the forecast (weather.ok false: none yet)
 };
 
 // Places in a widget that respond to the pointer (content DIP): "toggle:<i>"
@@ -67,6 +73,7 @@ struct WidgetHit {
 constexpr float kReminderTop = 42, kReminderRow = 27, kReminderBottom = 14;
 float ReminderScrollMax(const WidgetContent& content, WidgetSize size);
 
-void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, const WidgetContent& content, const WidgetWorld& world, std::vector<WidgetHit>& hits);
+// Paints the content over the widget's glass (the face and the ink of `material` included).
+void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial material, const WidgetContent& content, const WidgetWorld& world, std::vector<WidgetHit>& hits);
 
 } // namespace atrium

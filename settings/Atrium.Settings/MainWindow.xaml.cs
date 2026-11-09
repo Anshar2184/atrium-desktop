@@ -88,6 +88,10 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         RootGrid.Loaded += (_, _) => ContinuousCorners.Install(RootGrid);
+        RootGrid.Loaded += (_, _) => LoadStageArt(); // the Stage Manager page's pictures, ready before it opens
+#if ATRIUM_DEVELOPMENT
+        RootGrid.Loaded += (_, _) => ExportStageArtIfAsked();
+#endif
         ExtendsContentIntoTitleBar = true;
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         SetTitleBar(AppTitleBar);
@@ -704,6 +708,8 @@ public sealed partial class MainWindow : Window
         ListenerSwitch.IsOn = _current.NotifyListener;
         WeChatSwitch.IsOn = _current.NotifyWeChat;
         FeishuSwitch.IsOn = _current.NotifyFeishu;
+        BarSwitch.IsOn = _current.Bar;
+        UpdateBarModule();
         WidgetsSwitch.IsOn = _current.Widgets;
         (_current.WidgetsOnRight ? WidgetsRight : WidgetsLeft).IsChecked = true;
         HideTaskbarSwitch.IsOn = _current.HideTaskbar;
@@ -711,6 +717,7 @@ public sealed partial class MainWindow : Window
         (_current.StageOnRight ? StageRight : StageLeft).IsChecked = true;
         (_current.StageAutoHide ? StageAutoHide : StageAlways).IsChecked = true;
         (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
+        (_current.WidgetMaterial switch { "dusk" => MaterialDusk, "color" => MaterialColor, _ => MaterialGlass }).IsChecked = true;
         HideBannersSwitch.IsOn = _current.HideBanners;
         StartupSwitch.IsOn = _current.StartOnLogin;
         (_current.TextColor switch { "light" => TextLight, "dark" => TextDark, _ => TextAuto }).IsChecked = true;
@@ -841,12 +848,39 @@ public sealed partial class MainWindow : Window
         Changed();
     }
 
+    // The bar module: off, its own options and the notification cards have nothing to act on.
+    private void OnBarToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.Bar = BarSwitch.IsOn;
+        UpdateBarModule();
+        Changed();
+    }
+
+    private void UpdateBarModule()
+    {
+        foreach (var part in new FrameworkElement[] { DockContent, DockLayout, SideNotify })
+        {
+            part.Opacity = _current.Bar ? 1 : 0.45;
+            part.IsHitTestVisible = _current.Bar;
+        }
+    }
+
     private void OnWidgetsToggled(object sender, RoutedEventArgs e)
     {
         UpdateGallery();
         if (_loading) return;
         _current.Widgets = WidgetsSwitch.IsOn;
         Changed();
+    }
+
+    // The widgets' material: the map and the gallery show it at once, the core with the preview.
+    private void OnWidgetMaterialChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || sender is not RadioButton { Tag: string tag } || tag == _current.WidgetMaterial) return;
+        _current.WidgetMaterial = tag;
+        Changed();
+        if (_page == 4) { ShowWidgetMap(); RefreshGallery(); }
     }
 
     private void OnWidgetBackdropChecked(object sender, RoutedEventArgs e)

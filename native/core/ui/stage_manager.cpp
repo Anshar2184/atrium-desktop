@@ -274,7 +274,7 @@ void StageManager::Stage(const Set& keys, bool add, HWND front, bool activate, c
         recent_.insert(recent_.begin(), others.begin(), others.end());
         stage_.clear();
         if (!others.empty())
-            Log(L"stage: %s on the stage, %zu set(s) to the strip", keys.front().c_str(), others.size());
+            Log(L"stage: %s on the stage, %zu set(s) to the strip", keys.empty() ? L"the desktop" : keys.front().c_str(), others.size());
     } else {
         Log(L"stage: %s joins the stage", keys.front().c_str());
     }
@@ -853,6 +853,18 @@ bool StageManager::Covered()
 // and goes once the pointer has left it.
 void StageManager::Watch()
 {
+    // A click on the desktop clears the stage: its windows go to the strip together, as one set.
+    if (enabled_) {
+        HWND fg = GetForegroundWindow();
+        wchar_t cls[16] = {};
+        const bool desktop = fg && GetClassNameW(fg, cls, 16) && (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"));
+        if (desktop && !onDesktop_ && !stage_.empty()) {
+            pending_.clear();
+            Stage(Set{}, false, nullptr, false);
+            Rebuild();
+        }
+        onDesktop_ = desktop;
+    }
     if (!enabled_ || entries_.empty()) {
         peek_ = false;
         edgeSince_ = 0;
@@ -951,7 +963,12 @@ std::shared_ptr<const WindowPicture> StageManager::PictureOf(HWND window, const 
     if (!p) {
         const float s = PopupScale(WorkArea());
         const int w = int(std::lround(kBoxW * s)), h = int(std::lround(kBoxW * s / 1.6f));
-        p = std::make_shared<const WindowPicture>(PlaceholderPicture(tasks_.Icon(app, int(std::lround(52 * s))), w, h, AppsDark()));
+        // The largest icon the app has, up to 52 DIP.
+        IconImage icon;
+        for (int px : {int(std::lround(52 * s)), 64, 48, 32})
+            if (!(icon = tasks_.Icon(app, px)).empty())
+                break;
+        p = std::make_shared<const WindowPicture>(PlaceholderPicture(icon, w, h, AppsDark()));
     }
     return p;
 }

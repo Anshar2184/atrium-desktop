@@ -99,13 +99,15 @@ internal sealed record GlassOverlay(int Width, int Height, byte[] Pixels, float 
 internal static class GlassRenderer
 {
     // Each moving card owns transparent glass and its shadow, without pixels from the card in front.
-    public static GlassOverlay[] CardOverlays(Backdrop bg, BarSettings material, double rs, IReadOnlyList<GlassTile> tiles)
+    // scale > 0: tiles of a scaled-down desktop (the widget map), the glass scaled with them as DrawTiles does.
+    public static GlassOverlay[] CardOverlays(Backdrop bg, BarSettings material, double rs, IReadOnlyList<GlassTile> tiles, double scale = 0)
     {
         var result = new GlassOverlay[tiles.Count];
         for (int i = 0; i < tiles.Count; i++)
         {
             var t = tiles[i];
-            var spec = GlassSpec.For(material, rs) with { Radius = (float)(t.Radius * rs), Rim = 0.12f };
+            var spec = scale > 0 ? GlassSpec.For(material, scale * rs) with { Radius = (float)(t.Radius * rs) }
+                                 : GlassSpec.For(material, rs) with { Radius = (float)(t.Radius * rs), Rim = 0.12f };
             int inset = (int)spec.Inset, w = (int)Math.Round(t.W * rs), h = (int)Math.Round(t.H * rs);
             int pw = w + 2 * inset, ph = h + 2 * inset;
             var px = new byte[pw * ph * 4];

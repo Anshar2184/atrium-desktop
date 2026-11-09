@@ -36,9 +36,11 @@
 | `notifyListener` | bool | | true | 通过 UserNotificationListener 把 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅） |
 | `notifyWeChat` | bool | | true | 实验：读取微信窗口的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片 |
 | `notifyFeishu` | bool | | true | 读取飞书自己的消息弹窗里的文字（UI 自动化，只读），同时显示为 Atrium 卡片 |
+| `bar` | bool | | true | 玻璃任务栏模块：关闭时栏的窗口隐藏，开始菜单、托盘、控制中心、日历与通知中心随之关闭，通知来源停止接收（Windows 自己的横幅照常出现），`hideTaskbar` 与 `hideBanners` 不再生效；渲染线程继续为小组件与菜单绘制玻璃。与 `widgets`、`stageManager` 互不依赖 |
 | `widgets` | bool | | true | 桌面小组件；布局由 Core 存于 `widgets.json`（D35） |
 | `widgetsOnRight` | bool | | false | 小组件逻辑网格从右侧排布；切换时镜像现有列，不改写 `widgets.json` |
 | `widgetBackdrop` | string | `desktop` / `wallpaper` | `desktop` | 小组件玻璃的背景：实时抓取桌面窗口，或直接读取壁纸图片（省电）；都不含上层窗口（D38） |
+| `widgetMaterial` | string | `glass` / `dusk` / `color` | `glass` | 小组件的材质：任务栏的玻璃（墨色随玻璃变化）；暮色（同一块玻璃压上 22% 的黑，文字与图标全白，单色）；原色（不渲染玻璃，不透明的白底与浅色模式强调色，天气小组件为随天气变化的天空渐变） |
 | `stageManager` | bool | | false | 台前调度：前台应用留在屏幕中间，其他应用的窗口先在后台拍下画面，再最小化（不激活），画面斜立在屏幕一侧；打开时桌面小组件排到台前调度的另一侧（Core 从栏上打开时同时写入 `widgetsOnRight`）；关闭或 Core 退出时全部恢复。Core 把收起的窗口记在 `%LOCALAPPDATA%\Atrium\stage.json`（窗口句柄、应用键与分组），异常退出后再次启动时接回仍处于最小化的窗口 |
 | `stageOnRight` | bool | | false | 台前调度的窗口放在屏幕右侧；默认左侧 |
 | `stageAutoHide` | bool | | false | 悬停弹出：台前调度平时隐藏，指针碰到那一侧的屏幕边缘时才滑出；默认常驻（窗口挡住时让开） |

@@ -284,7 +284,161 @@ public sealed partial class MainWindow
         if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.5) ShowWidgetMap();
     }
 
-    private readonly List<(string Kind, string Size, bool Dark, long Stamp, Viewbox View)> _mapFaces = new();
+    // A widget on the map: where it is in the core's grid, its card (its glass and its face), and
+    // what the face was drawn for.
+    private sealed class MapCard
+    {
+        public required (string Kind, string Size, int Col, int Row) Cell;
+        public required Grid View;
+        public required Image Glass;
+        public required Viewbox Face;
+        public GlassTile Tile;
+        public bool Dark;
+        public long Stamp;
+        public string Material = "";
+    }
+
+    private readonly List<MapCard> _mapCards = new();
+    private Image? _mapBar;
+    private bool _mapShown; // the first layout appears as it is; later changes animate
+
+    // The new layout against the shown one: the same widget in the same place stays; one of the same
+    // kind elsewhere (moved, resized) glides there; the others pop in or shrink away, as on the desktop.
+    private void PlaceMapCards(List<GlassTile> tiles, List<(string Kind, string Size)> faces, List<(string Kind, string Size, int Col, int Row)> cells,
+                               TileFrame frame, double pad)
+    {
+        var old = new List<MapCard>(_mapCards);
+        var next = new MapCard?[tiles.Count];
+        for (int i = 0; i < tiles.Count; i++)
+            if (old.FirstOrDefault(c => c.Cell == cells[i]) is { } same) { next[i] = same; old.Remove(same); }
+        var moved = new HashSet<MapCard>();
+        for (int i = 0; i < tiles.Count; i++)
+        {
+            if (next[i] != null) continue;
+            var cell = cells[i];
+            var other = old.Where(c => c.Cell.Kind == cell.Kind)
+                           .OrderBy(c => Math.Abs(c.Cell.Col - cell.Col) + Math.Abs(c.Cell.Row - cell.Row)).FirstOrDefault();
+            if (other == null) continue;
+            next[i] = other;
+            old.Remove(other);
+            moved.Add(other);
+        }
+        foreach (var gone in old) MapCardLeave(gone);
+        _mapCards.Clear();
+        for (int i = 0; i < tiles.Count; i++)
+        {
+            var t = tiles[i];
+            var (kind, size) = faces[i];
+            var card = next[i];
+            bool added = card == null;
+            if (card == null)
+            {
+                var glass = new Image { Stretch = Stretch.Fill };
+                var face = new Viewbox { Stretch = Stretch.Fill };
+                card = new MapCard { Cell = cells[i], View = new Grid { IsHitTestVisible = false, Children = { glass, face } }, Glass = glass, Face = face };
+                WidgetMap.Children.Insert(Math.Min(i, WidgetMap.Children.Count), card.View);
+            }
+            var before = card.Tile;
+            card.Cell = cells[i];
+            bool dark = frame.Lumas[i] > 0.5f;
+            long stamp = WidgetFaces.Stamp(kind);
+            string material = _current.WidgetMaterial;
+            if (added || moved.Contains(card) || card.Dark != dark || card.Stamp != stamp || card.Material != material)
+            {
+                card.Face.Child = WidgetFaces.Face(kind, size, dark, PhotoBrush(), material);
+                ContinuousCorners.Install(card.Face);
+                card.Dark = dark;
+                card.Stamp = stamp;
+                card.Material = material;
+            }
+            card.Glass.Source = frame.Overlay(i);
+            card.Tile = t;
+            card.View.Width = t.W + 2 * pad;
+            card.View.Height = t.H + 2 * pad;
+            card.Face.Width = t.W;
+            card.Face.Height = t.H;
+            card.Face.Margin = new Thickness(pad);
+            card.Face.HorizontalAlignment = HorizontalAlignment.Left;
+            card.Face.VerticalAlignment = VerticalAlignment.Top;
+            Canvas.SetLeft(card.View, t.X - pad);
+            Canvas.SetTop(card.View, t.Y - pad);
+            if (_mapShown && added) MapCardPop(card.View);
+            else if (_mapShown && moved.Contains(card)) MapCardGlide(card.View, before, t, pad);
+            _mapCards.Add(card);
+        }
+        _mapShown = true;
+    }
+
+    // A new widget: the pop of a popup (PopVisual), growing from its middle.
+    private static void MapCardPop(FrameworkElement view)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(view);
+        var compositor = visual.Compositor;
+        visual.CenterPoint = new Vector3((float)view.Width / 2, (float)view.Height / 2, 0);
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.Duration = TimeSpan.FromSeconds(0.6);
+        scale.InsertKeyFrame(0, new Vector3(0.8f, 0.8f, 1));
+        NotificationFrames(compositor, 0.6, PopSample, (time, value, ease) =>
+            scale.InsertKeyFrame(time, new Vector3((float)(0.8 + 0.2 * value), (float)(0.8 + 0.2 * value), 1), ease));
+        scale.InsertKeyFrame(1, Vector3.One);
+        visual.StartAnimation("Scale", scale);
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.Duration = TimeSpan.FromSeconds(0.2);
+        fade.InsertKeyFrame(0, 0);
+        fade.InsertKeyFrame(1, 1, compositor.CreateCubicBezierEasingFunction(new Vector2(1f / 3, 1), new Vector2(2f / 3, 1)));
+        visual.StartAnimation("Opacity", fade);
+    }
+
+    // A removed widget shrinks and fades, then its card goes.
+    private void MapCardLeave(MapCard card)
+    {
+        var view = card.View;
+        var visual = ElementCompositionPreview.GetElementVisual(view);
+        var compositor = visual.Compositor;
+        visual.CenterPoint = new Vector3((float)view.Width / 2, (float)view.Height / 2, 0);
+        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.4f, 0), new Vector2(1, 1));
+        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.Duration = TimeSpan.FromSeconds(0.22);
+        scale.InsertKeyFrame(1, new Vector3(0.8f, 0.8f, 1), ease);
+        visual.StartAnimation("Scale", scale);
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.Duration = TimeSpan.FromSeconds(0.22);
+        fade.InsertKeyFrame(1, 0, ease);
+        visual.StartAnimation("Opacity", fade);
+        batch.End();
+        batch.Completed += (_, _) => WidgetMap.Children.Remove(view);
+    }
+
+    // A moved or resized widget glides from where it was: its card is laid out at the new place and
+    // size, then moved and scaled back to the old one, and springs to rest.
+    private static void MapCardGlide(FrameworkElement view, GlassTile from, GlassTile to, double pad)
+    {
+        if (from.W <= 0 || to.W <= 0) return;
+        ElementCompositionPreview.SetIsTranslationEnabled(view, true);
+        var visual = ElementCompositionPreview.GetElementVisual(view);
+        var compositor = visual.Compositor;
+        visual.CenterPoint = new Vector3((float)pad, (float)pad, 0); // the widget's corner, not the shadow's
+        var dx = (float)(from.X - to.X);
+        var dy = (float)(from.Y - to.Y);
+        var sx = (float)(from.W / to.W);
+        var sy = (float)(from.H / to.H);
+        var move = compositor.CreateVector3KeyFrameAnimation();
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        move.Duration = scale.Duration = TimeSpan.FromSeconds(0.6);
+        move.InsertKeyFrame(0, new Vector3(dx, dy, 0));
+        scale.InsertKeyFrame(0, new Vector3(sx, sy, 1));
+        NotificationFrames(compositor, 0.6, PopSample, (time, value, ease) =>
+        {
+            float rest = (float)(1 - value);
+            move.InsertKeyFrame(time, new Vector3(dx * rest, dy * rest, 0), ease);
+            scale.InsertKeyFrame(time, new Vector3(1 + (sx - 1) * rest, 1 + (sy - 1) * rest, 1), ease);
+        });
+        move.InsertKeyFrame(1, Vector3.Zero);
+        scale.InsertKeyFrame(1, Vector3.One);
+        visual.StartAnimation("Translation", move);
+        visual.StartAnimation("Scale", scale);
+    }
 
     private void ShowWidgetMap()
     {
@@ -315,6 +469,7 @@ public sealed partial class MainWindow
         // The tiles where the core puts them, then the bar at the bottom for scale; all glass.
         var tiles = new List<GlassTile>();
         var faces = new List<(string Kind, string Size)>();
+        var cells = new List<(string Kind, string Size, int Col, int Row)>();
         foreach (var (kind, size, col, row) in ReadWidgets())
         {
             int wc = size == "small" ? 1 : 2, wr = size == "large" ? 2 : 1;
@@ -326,46 +481,33 @@ public sealed partial class MainWindow
             double top = WMargin + row * (WCell + WGap);
             tiles.Add(new GlassTile(left * k, top * kh, w * k, h * kh, 22 * Math.Min(k, kh)));
             faces.Add((kind, size));
+            cells.Add((kind, size, col, row));
         }
         double barW = 560 * k, barH = Math.Max(4, _current.Height * kh);
         var bar = new GlassTile((stageW - barW) / 2, WidgetStage.Height - barH - Math.Max(2, _current.Margin * kh), barW, barH, barH / 2);
         int shown = tiles.Count;
-        double stageH = WidgetStage.Height;
+        double stageH = WidgetStage.Height, kk = Math.Min(k, kh);
         int photoGeneration = Photo.Generation;
-        PostTiles(WidgetMap, stageW, stageH, Math.Min(k, kh), tiles, bar, frame =>
+        var placed = new List<(string Kind, string Size, int Col, int Row)>(cells);
+        // Each widget carries its own piece of glass, so that it can come, go and move over the picture.
+        PostTiles(WidgetMap, stageW, stageH, kk, tiles.Append(bar).ToArray(), null, frame =>
         {
             frame.Apply(WidgetStage);
             // Match the bitmap's completed viewport during subsequent resizes.
             WidgetMap.Width = stageW;
             WidgetMap.Height = stageH;
             WidgetMap.Clip = new RectangleGeometry { Rect = new Rect(0, 0, stageW, stageH) };
-            while (_mapFaces.Count > tiles.Count)
-            {
-                WidgetMap.Children.Remove(_mapFaces[^1].View);
-                _mapFaces.RemoveAt(_mapFaces.Count - 1);
-            }
-            for (int i = 0; i < tiles.Count; i++)
-            {
-                var t = tiles[i];
-                var (kind, size) = faces[i];
-                bool dark = frame.Lumas[i] > 0.5f;
-                long stamp = WidgetFaces.Stamp(kind);
-                bool added = i == _mapFaces.Count;
-                var face = added ? new Viewbox { Stretch = Stretch.Fill } : _mapFaces[i].View;
-                if (added || _mapFaces[i].Kind != kind || _mapFaces[i].Size != size || _mapFaces[i].Dark != dark || _mapFaces[i].Stamp != stamp)
-                {
-                    face.Child = WidgetFaces.Face(kind, size, dark, PhotoBrush());
-                    ContinuousCorners.Install(face);
-                }
-                if (added) { WidgetMap.Children.Insert(i, face); _mapFaces.Add((kind, size, dark, stamp, face)); }
-                else _mapFaces[i] = (kind, size, dark, stamp, face);
-                face.Width = t.W;
-                face.Height = t.H;
-                Canvas.SetLeft(face, t.X);
-                Canvas.SetTop(face, t.Y);
-            }
+            double pad = Math.Round(GlassSpec.InsetDip * kk * frame.Rs) / frame.Rs;
+            PlaceMapCards(tiles, faces, placed, frame, pad);
+            _mapBar ??= new Image { Stretch = Stretch.Fill, IsHitTestVisible = false };
+            if (_mapBar.Parent == null) WidgetMap.Children.Add(_mapBar);
+            _mapBar.Source = frame.Overlay(tiles.Count);
+            _mapBar.Width = bar.W + 2 * pad;
+            _mapBar.Height = bar.H + 2 * pad;
+            Canvas.SetLeft(_mapBar, bar.X - pad);
+            Canvas.SetTop(_mapBar, bar.Y - pad);
             Ready("widgets", photoGeneration);
-        });
+        }, overlays: true, scaled: true);
 
         WidgetMapCaption.Text = !_current.Widgets ? "桌面小组件已关闭"
             : shown == 0 ? "暂无小组件"

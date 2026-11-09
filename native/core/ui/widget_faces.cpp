@@ -11,15 +11,38 @@ namespace {
 D2D1_COLOR_F Rgba(uint32_t rgb, float a) { return D2D1::ColorF(rgb, a); }
 D2D1_COLOR_F Alpha(D2D1_COLOR_F c, float a) { return D2D1::ColorF(c.r, c.g, c.b, c.a * a); }
 
-// The colours of a widget: the glass's ink, and macOS's accents.
+// What the weather's symbols are drawn over: light ink (clear glass, a sky), dark ink (bright
+// glass: grey clouds, a gold moon), or the dimmed glass, where everything is white.
+enum class Ink { Light, Dark, Mono };
+
+// The colours of a widget: its ink, and macOS's accents.
 struct Pal {
     D2D1_COLOR_F text, sub, faint, face, red, orange, green, track, blue; // blue: the calendar's accent
+    D2D1_COLOR_F onAccent;  // ink on an accent's disc (today, a done reminder)
+    D2D1_COLOR_F nightFace; // the world clock's faces where it is night
+    Ink icon;
 };
 
 Pal GlassPal(const Theme& t)
 {
     return {t.text, t.subtext, t.faint, Alpha(t.text, 0.10f), Rgba(0xFF453A, 0.98f), Rgba(0xFF9F0A, 0.98f), Rgba(0x30D158, 0.98f),
-            Alpha(t.text, 0.18f), Rgba(0x0A84FF, 0.98f)};
+            Alpha(t.text, 0.18f), Rgba(0x0A84FF, 0.98f), Rgba(0xFFFFFF, 0.98f), Rgba(0x000000, 0.42f), t.light ? Ink::Dark : Ink::Light};
+}
+
+// Dusk: white only, the accents too (macOS's dimmed widgets are monochrome); a disc's ink is dark.
+Pal DuskPal()
+{
+    const D2D1_COLOR_F white = Rgba(0xFFFFFF, 0.96f);
+    return {white, Rgba(0xFFFFFF, 0.72f), Rgba(0xFFFFFF, 0.50f), Rgba(0xFFFFFF, 0.12f), white, white, white, Rgba(0xFFFFFF, 0.22f), white,
+            Rgba(0x1C1C1E, 0.92f), Rgba(0x000000, 0.32f), Ink::Mono};
+}
+
+// Color, on a white face: dark ink and macOS's light-mode accents.
+Pal PaperPal()
+{
+    const D2D1_COLOR_F ink = Rgba(0x1D1D1F, 0.94f);
+    return {ink, Rgba(0x1D1D1F, 0.58f), Rgba(0x1D1D1F, 0.36f), Rgba(0x1D1D1F, 0.05f), Rgba(0xFF3B30, 1), Rgba(0xFF9500, 1), Rgba(0x34C759, 1),
+            Rgba(0x1D1D1F, 0.10f), Rgba(0x007AFF, 1), Rgba(0xFFFFFF, 0.98f), Rgba(0x1C1C1E, 1), Ink::Dark};
 }
 
 const wchar_t* const kWeekLong[] = {L"星期一", L"星期二", L"星期三", L"星期四", L"星期五", L"星期六", L"星期日"};
@@ -140,7 +163,7 @@ void PaintClock(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, 
         SYSTEMTIME ct = CityTime(kCities[i], w.now, when);
         bool night = ct.wHour < 6 || ct.wHour >= 18;
         float cx = kPad + colW * (float(i) + 0.5f), cy = (H - 2 * R - 42) / 2 + R - 2;
-        D2D1_COLOR_F face = night ? Rgba(0x000000, 0.42f) : p.face, ink = night ? Rgba(0xFFFFFF, 0.96f) : p.text;
+        D2D1_COLOR_F face = night ? p.nightFace : p.face, ink = night ? Rgba(0xFFFFFF, 0.96f) : p.text;
         ClockFace(c, cx, cy, R, ct, p, face, ink, false, {}, ink);
         c.Text(kCities[i].name, D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 12.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         c.Text(when, D2D1::RectF(cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
@@ -205,12 +228,12 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
             bool today = d == now.wDay, weekend = (first + cell % 7) % 7 >= 5;
             if (today)
                 c.Fill(D2D1::RectF(cx - 18, y0 + 1, cx + 18, y0 + rh - 1), 10, p.blue);
-            D2D1_COLOR_F ink = today ? Rgba(0xFFFFFF, 0.98f) : weekend ? p.sub : p.text;
+            D2D1_COLOR_F ink = today ? p.onAccent : weekend ? p.sub : p.text;
             c.Text(std::to_wstring(d), D2D1::RectF(x0, y0, x0 + cw, y0 + rh * 0.56f), 14, ink, today ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_SEMI_BOLD,
                    1);
             bool festival = false;
             std::wstring label = w.lunar ? w.lunar->DayLabel(now.wYear, now.wMonth, WORD(d), &festival) : std::wstring();
-            c.Text(label, D2D1::RectF(x0, y0 + rh * 0.48f, x0 + cw, y0 + rh - 5), 9, today ? Alpha(Rgba(0xFFFFFF, 0.98f), 0.85f) : festival ? p.blue : p.sub,
+            c.Text(label, D2D1::RectF(x0, y0 + rh * 0.48f, x0 + cw, y0 + rh - 5), 9, today ? Alpha(p.onAccent, 0.85f) : festival ? p.blue : p.sub,
                    DWRITE_FONT_WEIGHT_NORMAL, 1);
         }
         return;
@@ -244,7 +267,7 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
         if (today)
             c.Circle(cx, cy, rh / 2 + 0.5f, p.blue);
         bool weekend = (first + cell % 7) % 7 >= 5;
-        D2D1_COLOR_F ink = today ? Rgba(0xFFFFFF, 0.98f) : weekend ? p.sub : p.text;
+        D2D1_COLOR_F ink = today ? p.onAccent : weekend ? p.sub : p.text;
         // MiSans centres its figures in the line box (ascent 1.044, descent 0.282, figures 0.76
         // high): the box centred on the disc centres the digits.
         c.Text(std::to_wstring(d), D2D1::RectF(x0, cy - rh / 2, x0 + cw, cy + rh / 2), 10.5f, ink,
@@ -371,7 +394,7 @@ void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, fl
         float cx = kPad + 9, cy = y + kReminderRow / 2;
         if (it.done) {
             c.Circle(cx, cy, 8, p.orange);
-            c.Circle(cx, cy, 3.2f, Rgba(0xFFFFFF, 0.98f));
+            c.Circle(cx, cy, 3.2f, p.onAccent);
         } else {
             c.Arc(cx, cy, 7.4f, -90, 270, p.sub, 1.5f);
         }
@@ -419,6 +442,278 @@ void PaintPhotos(Canvas& c, const WidgetContent& ph, const Pal& p, float W, floa
     c.Text(L"右键选择照片文件夹", D2D1::RectF(0, H / 2 + 20, W, H / 2 + 38), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
 }
 
+// ---- weather -------------------------------------------------------------------
+
+// What the sky does, for the icon and the widget's tint.
+enum class Sky { Clear, Partly, Cloudy, Fog, Rain, Snow, Storm };
+
+Sky SkyOf(int code)
+{
+    if (code <= 1)
+        return Sky::Clear;
+    if (code == 2)
+        return Sky::Partly;
+    if (code == 3)
+        return Sky::Cloudy;
+    if (code == 45 || code == 48)
+        return Sky::Fog;
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86)
+        return Sky::Snow;
+    if (code >= 95)
+        return Sky::Storm;
+    return Sky::Rain;
+}
+
+// The symbols' colours over each ink. White that is not the glass's ink stays white over bright
+// glass (InkAt only switches the theme's own ink).
+struct IconInk {
+    D2D1_COLOR_F sun, moon, cloud, grey, rain, arrow;
+};
+
+IconInk IconColors(Ink ink)
+{
+    switch (ink) {
+    case Ink::Dark:
+        return {Rgba(0xFFD60A, 1), Rgba(0xF5C451, 1), Rgba(0xA4ADB8, 1), Rgba(0x7D8794, 1), Rgba(0x64D2FF, 1), Rgba(0x6E7681, 1)};
+    case Ink::Mono:
+        return {Rgba(0xFFFFFF, 0.72f), Rgba(0xFFFFFF, 0.9f), Rgba(0xFFFFFF, 0.96f), Rgba(0xFFFFFF, 0.8f), Rgba(0xFFFFFF, 0.85f), Rgba(0xFFFFFF, 0.96f)};
+    default:
+        return {Rgba(0xFFD60A, 1), Rgba(0xF2F2F7, 1), Rgba(0xF7F8FA, 1), Rgba(0xD1D5DB, 1), Rgba(0x64D2FF, 1), Rgba(0xF2F5F9, 1)};
+    }
+}
+
+// A cloud filling (about) a box s wide, its middle at (cx, cy).
+void Cloud(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F ink)
+{
+    c.Fill(D2D1::RectF(cx - 0.42f * s, cy - 0.02f * s, cx + 0.42f * s, cy + 0.26f * s), 0.14f * s, ink);
+    c.Circle(cx - 0.17f * s, cy + 0.02f * s, 0.19f * s, ink);
+    c.Circle(cx + 0.08f * s, cy - 0.06f * s, 0.25f * s, ink);
+    c.Circle(cx + 0.29f * s, cy + 0.09f * s, 0.15f * s, ink);
+}
+
+void Sun(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F gold)
+{
+    constexpr float kDeg = 3.14159265f / 180.f;
+    c.Circle(cx, cy, 0.2f * s, gold);
+    for (int i = 0; i < 8; ++i) {
+        float a = float(i) * 45.f * kDeg;
+        c.Capsule(cx + std::cos(a) * 0.31f * s, cy + std::sin(a) * 0.31f * s, cx + std::cos(a) * 0.43f * s, cy + std::sin(a) * 0.43f * s, gold,
+                  std::max(1.f, 0.075f * s));
+    }
+}
+
+void Moon(Canvas& c, float cx, float cy, float s, D2D1_COLOR_F ink)
+{
+    c.Crescent(cx, cy, 0.3f * s, 0.17f * s, -0.12f * s, 0.25f * s, ink);
+}
+
+// macOS's weather symbols in their colours: a yellow sun, a pale moon, white clouds, blue rain
+// (IconColors: grey clouds over bright glass, all white on the dimmed glass).
+// event: 1 a sunrise, 2 a sunset (a half sun on the horizon, an arrow up or down).
+void WeatherIcon(Canvas& c, int code, bool day, float cx, float cy, float s, int event, Ink ink)
+{
+    const IconInk k = IconColors(ink);
+    if (event) {
+        c.Clip(D2D1::RectF(cx - s, cy - s, cx + s, cy + 0.12f * s));
+        Sun(c, cx, cy + 0.12f * s, s * 0.9f, k.sun);
+        c.Unclip();
+        c.Capsule(cx - 0.42f * s, cy + 0.2f * s, cx + 0.42f * s, cy + 0.2f * s, k.sun, std::max(1.f, 0.07f * s));
+        const float y0 = cy - 0.46f * s, y1 = cy - 0.2f * s, w = std::max(1.f, 0.07f * s);
+        c.Capsule(cx, y0, cx, y1, k.arrow, w);
+        float tip = event == 1 ? y0 : y1, back = event == 1 ? y0 + 0.1f * s : y1 - 0.1f * s;
+        c.Capsule(cx - 0.1f * s, back, cx, tip, k.arrow, w);
+        c.Capsule(cx + 0.1f * s, back, cx, tip, k.arrow, w);
+        return;
+    }
+    switch (SkyOf(code)) {
+    case Sky::Clear:
+        day ? Sun(c, cx, cy, s, k.sun) : Moon(c, cx, cy, s, k.moon);
+        break;
+    case Sky::Partly:
+        day ? Sun(c, cx - 0.16f * s, cy - 0.14f * s, s * 0.78f, k.sun) : Moon(c, cx - 0.14f * s, cy - 0.14f * s, s * 0.8f, k.moon);
+        Cloud(c, cx + 0.08f * s, cy + 0.06f * s, s * 0.82f, k.cloud);
+        break;
+    case Sky::Cloudy:
+        Cloud(c, cx, cy - 0.04f * s, s, k.cloud);
+        break;
+    case Sky::Fog:
+        for (int i = 0; i < 3; ++i) {
+            float y = cy - 0.2f * s + float(i) * 0.2f * s, inset = i == 1 ? 0.f : 0.08f * s;
+            c.Capsule(cx - 0.4f * s + inset, y, cx + 0.4f * s - inset, y, k.cloud, std::max(1.f, 0.09f * s));
+        }
+        break;
+    case Sky::Rain:
+    case Sky::Snow:
+    case Sky::Storm: {
+        const bool snow = SkyOf(code) == Sky::Snow, storm = SkyOf(code) == Sky::Storm;
+        Cloud(c, cx, cy - 0.16f * s, s, storm ? k.grey : k.cloud);
+        for (int i = 0; i < 3; ++i) {
+            float x = cx - 0.2f * s + float(i) * 0.2f * s, y = cy + 0.24f * s;
+            if (snow)
+                c.Circle(x, y + (i % 2 ? 0.08f : 0.f) * s, 0.055f * s, k.cloud);
+            else if (!storm || i != 1)
+                c.Capsule(x + 0.03f * s, y - 0.04f * s, x - 0.04f * s, y + 0.12f * s, k.rain, std::max(1.f, 0.07f * s));
+        }
+        if (storm) {
+            const D2D1_COLOR_F bolt = ink == Ink::Mono ? k.arrow : k.sun;
+            const float w = std::max(1.f, 0.08f * s);
+            c.Capsule(cx + 0.04f * s, cy + 0.08f * s, cx - 0.06f * s, cy + 0.26f * s, bolt, w);
+            c.Capsule(cx - 0.06f * s, cy + 0.26f * s, cx + 0.05f * s, cy + 0.26f * s, bolt, w);
+            c.Capsule(cx + 0.05f * s, cy + 0.26f * s, cx - 0.05f * s, cy + 0.44f * s, bolt, w);
+        }
+        break;
+    }
+    }
+}
+
+// The full-colour weather widget's sky, top and bottom: blue by day, navy by night, greyer
+// under clouds, rain and fog (as macOS's Weather).
+std::pair<uint32_t, uint32_t> SkyFace(const Weather& w)
+{
+    if (!w.ok)
+        return {0x2F7BD6, 0x63A9EA};
+    switch (SkyOf(w.code)) {
+    case Sky::Clear:
+    case Sky::Partly:
+        return w.day ? std::pair<uint32_t, uint32_t>{0x2F7BD6, 0x63A9EA} : std::pair<uint32_t, uint32_t>{0x0C1631, 0x2A3E68};
+    case Sky::Cloudy:
+    case Sky::Fog:
+        return w.day ? std::pair<uint32_t, uint32_t>{0x6A7E92, 0x98A8B8} : std::pair<uint32_t, uint32_t>{0x262F3C, 0x47525F};
+    case Sky::Snow:
+        return w.day ? std::pair<uint32_t, uint32_t>{0x7F95AC, 0xAFC0D0} : std::pair<uint32_t, uint32_t>{0x2B3646, 0x4C5868};
+    default: // rain, storms
+        return w.day ? std::pair<uint32_t, uint32_t>{0x4A5D70, 0x728699} : std::pair<uint32_t, uint32_t>{0x1D2530, 0x3A4552};
+    }
+}
+
+std::wstring Degrees(float t) { return std::to_wstring(int(std::lround(t))) + L"°"; }
+
+// A day's span of the week's temperatures: blue when cold, through green and yellow, orange when hot.
+D2D1_COLOR_F TempColor(float t)
+{
+    struct Stop {
+        float t;
+        uint32_t rgb;
+    };
+    const Stop stops[] = {{-5, 0x5AC8FA}, {8, 0x63E6BE}, {18, 0xFFD60A}, {28, 0xFF9F0A}, {36, 0xFF453A}};
+    if (t <= stops[0].t)
+        return Rgba(stops[0].rgb, 1);
+    for (size_t i = 1; i < std::size(stops); ++i)
+        if (t <= stops[i].t) {
+            float k = (t - stops[i - 1].t) / (stops[i].t - stops[i - 1].t);
+            D2D1_COLOR_F a = Rgba(stops[i - 1].rgb, 1), b = Rgba(stops[i].rgb, 1);
+            return D2D1::ColorF(a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k, 1);
+        }
+    return Rgba(stops[std::size(stops) - 1].rgb, 1);
+}
+
+// macOS's weather widget: the place, the temperature large, the sky and the day's high and low;
+// the medium one adds the next hours, the large one the next days with their spans.
+void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pal& p, float W, float H)
+{
+    const Weather& w = world.weather;
+    const D2D1_COLOR_F text = p.text, sub = p.sub, faint = p.track;
+    const Ink ink = p.icon;
+    const bool dark = ink == Ink::Dark;
+    const float pad = 16;
+    const std::wstring city = w.city.empty() ? (world.city.empty() ? L"天气" : world.city) : w.city;
+    c.Text(city, D2D1::RectF(pad, 12, W - pad - (size == WidgetSize::Small ? 0 : 120), 32), 14.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    if (!w.ok) {
+        c.Text(w.error.empty() ? L"正在获取天气…" : w.error, D2D1::RectF(pad, H / 2 - 10, W - pad, H / 2 + 10), 13, sub,
+               DWRITE_FONT_WEIGHT_SEMI_BOLD, size == WidgetSize::Small ? 0 : 1);
+        return;
+    }
+    c.Text(Degrees(w.temp), D2D1::RectF(pad - 2, 30, W / 2 + 40, 82), 44, text, DWRITE_FONT_WEIGHT_LIGHT);
+    const std::wstring range = L"最高 " + Degrees(w.hi) + L"  最低 " + Degrees(w.lo);
+    if (size == WidgetSize::Small) {
+        WeatherIcon(c, w.code, w.day, pad + 11, H - 62, 22, 0, ink);
+        c.Text(WeatherCondition(w.code), D2D1::RectF(pad, H - 48, W - pad, H - 30), 13, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(range, D2D1::RectF(pad, H - 30, W - pad, H - 12), 12, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        return;
+    }
+    // The sky and the day's span at the top right.
+    WeatherIcon(c, w.code, w.day, W - pad - 10, 24, 20, 0, ink);
+    c.Text(WeatherCondition(w.code), D2D1::RectF(W / 2, 40, W - pad, 58), 13, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+    c.Text(range, D2D1::RectF(W / 2 - 20, 58, W - pad, 76), 12.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+    // The next hours.
+    const float hy = size == WidgetSize::Large ? 92.f : 90.f, colW = (W - 2 * pad) / 6;
+    if (size == WidgetSize::Large)
+        c.Line(pad, hy - 6, W - pad, hy - 6, faint);
+    for (size_t i = 0; i < w.hours.size() && i < 6; ++i) {
+        const WeatherHour& h = w.hours[i];
+        float x0 = pad + colW * float(i), cx = x0 + colW / 2;
+        c.Text(h.label, D2D1::RectF(x0 - 4, hy, x0 + colW + 4, hy + 16), 11.5f, sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        WeatherIcon(c, h.code, h.day, cx, hy + 31, 22, h.event, ink);
+        c.Text(h.event ? (h.event == 1 ? L"日出" : L"日落") : Degrees(h.temp), D2D1::RectF(x0 - 4, hy + 46, x0 + colW + 4, hy + 64),
+               h.event ? 12.f : 13.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+    }
+    if (size != WidgetSize::Large)
+        return;
+    // The next days: each one's low, its span on the week's scale, its high.
+    const float top = hy + 76;
+    c.Line(pad, top - 6, W - pad, top - 6, faint);
+    const size_t n = std::min<size_t>(w.days.size(), 5);
+    float weekLo = 1e9f, weekHi = -1e9f;
+    for (size_t i = 0; i < n; ++i)
+        weekLo = std::min(weekLo, w.days[i].lo), weekHi = std::max(weekHi, w.days[i].hi);
+    const float rowH = (H - 12 - top) / float(std::max<size_t>(n, 1));
+    const float barL = 170, barR = W - pad - 44, span = std::max(1.f, weekHi - weekLo);
+    for (size_t i = 0; i < n; ++i) {
+        const WeatherDay& d = w.days[i];
+        float y = top + rowH * float(i), cy = y + rowH / 2;
+        c.Text(d.label, D2D1::RectF(pad, y, pad + 60, y + rowH), 14, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        WeatherIcon(c, d.code, true, pad + 84, cy, 22, 0, ink);
+        c.Text(Degrees(d.lo), D2D1::RectF(barL - 46, y, barL - 8, y + rowH), 14, sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+        c.Fill(D2D1::RectF(barL, cy - 2.5f, barR, cy + 2.5f), 2.5f, faint);
+        float x0 = barL + (barR - barL) * (d.lo - weekLo) / span, x1 = barL + (barR - barL) * (d.hi - weekLo) / span;
+        x1 = std::max(x1, x0 + 5);
+        if (ink == Ink::Mono)
+            c.Fill(D2D1::RectF(x0, cy - 2.5f, x1, cy + 2.5f), 2.5f, text);
+        else
+            c.Gradient(D2D1::RectF(x0, cy - 2.5f, x1, cy + 2.5f), 2.5f, TempColor(d.lo), TempColor(d.hi), false);
+        if (i == 0) {
+            // Today: where it is now on the span.
+            float x = barL + (barR - barL) * (std::clamp(w.temp, d.lo, d.hi) - weekLo) / span;
+            c.Circle(x, cy, 4.5f, dark ? Rgba(0xFFFFFF, 1) : Rgba(0x1C2333, 0.55f));
+            c.Circle(x, cy, 3.2f, dark ? Rgba(0x1C2333, 0.9f) : Rgba(0xFFFFFF, 1));
+        }
+        c.Text(Degrees(d.hi), D2D1::RectF(barR + 6, y, W - pad, y + rowH), 14, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+    }
+}
+
+// The material's face under the content and the ink over it. Faces cover the largest size: while
+// a widget resizes its viewport outgrows the size it lays out.
+Pal Face(Canvas& c, WidgetKind kind, WidgetMaterial material, const WidgetWorld& world, float H)
+{
+    if (material == WidgetMaterial::Glass)
+        return GlassPal(c.theme);
+    // One ink everywhere: the face, not the desktop, decides it.
+    c.ink = {};
+    const D2D1_RECT_F all = D2D1::RectF(0, 0, WidgetWidth(WidgetSize::Large), WidgetHeight(WidgetSize::Large));
+    if (material == WidgetMaterial::Dusk) {
+        c.theme = Theme::For(false);
+        c.theme.halo = Rgba(0x000000, 0.5f); // a deeper shadow under the white keeps it legible over bright glass
+        c.inkDark = 0;
+        c.Fill(all, 0, Rgba(0x000000, 0.22f)); // a light veil: the glass stays clear
+        return DuskPal();
+    }
+    c.halo = false; // an opaque face needs none
+    if (kind == WidgetKind::Weather) {
+        c.theme = Theme::For(false);
+        c.inkDark = 0;
+        auto [top, bottom] = SkyFace(world.weather);
+        c.Fill(all, 0, Rgba(bottom, 1));
+        c.Gradient(D2D1::RectF(0, 0, all.right, H), 0, Rgba(top, 1), Rgba(bottom, 1));
+        Pal p = GlassPal(c.theme);
+        p.icon = Ink::Light;
+        return p;
+    }
+    c.theme = Theme::For(true);
+    c.inkDark = 1;
+    c.Fill(all, 0, Rgba(0xFFFFFF, 1));
+    return PaperPal();
+}
+
 } // namespace
 
 float ReminderScrollMax(const WidgetContent& content, WidgetSize size)
@@ -440,10 +735,11 @@ bool WidgetSupports(WidgetKind kind, WidgetSize size)
     }
 }
 
-void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, const WidgetContent& content, const WidgetWorld& world, std::vector<WidgetHit>& hits)
+void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial material, const WidgetContent& content, const WidgetWorld& world,
+                 std::vector<WidgetHit>& hits)
 {
-    const Pal p = GlassPal(c.theme);
     const float W = WidgetWidth(size), H = WidgetHeight(size);
+    const Pal p = Face(c, kind, material, world, H);
     hits.clear();
     switch (kind) {
     case WidgetKind::Clock:
@@ -469,6 +765,9 @@ void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, const WidgetConten
         break;
     case WidgetKind::Photos:
         PaintPhotos(c, content, p, W, H);
+        break;
+    case WidgetKind::Weather:
+        PaintWeather(c, size, world, p, W, H);
         break;
     }
 }
