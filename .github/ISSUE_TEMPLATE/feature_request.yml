@@ -29,8 +29,9 @@ body:
       description: |
         截图、草图，或其他软件（macOS、Windows 各版本等）的类似效果，直接拖进来即可；视频建议 10 MB 以内的 mp4。
         Screenshots, sketches, or how other software (macOS, other Windows versions…) does it. Drag them in; keep videos under 10 MB (mp4).
-  - type: textarea
-    id: constraints
+  - type: input
+    id: build
     attributes:
-      label: Windows 限制（可选）/ Windows constraints (optional)
-      description: 涉及的公开 API，或已知的限制 / Public APIs involved, or known limitations.
+      label: Windows 版本（可选）/ Windows version (optional)
+      description: "`Win + R` › `winver` 的第二行 / the second line of `winver`"
+      placeholder: 版本 24H2（OS 内部版本 26100.2454） / Version 24H2 (OS Build 26100.2454)
