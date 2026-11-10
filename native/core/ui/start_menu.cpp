@@ -1230,7 +1230,7 @@ void StartMenu::PaintGrip(Canvas& c, const Theme& t)
     c.Arc(m.right - r, r, r - 6, -80.f, -10.f, Alpha(t.subtext, a), 3.5f);
 }
 
-// The capsule: the account on the left; network, volume, battery, tray and
+// The capsule: the account on the left; network, volume, battery and
 // power on the right, round buttons like the bar's.
 void StartMenu::PaintShelf(Canvas& c, const Theme& t)
 {
@@ -1258,9 +1258,6 @@ void StartMenu::PaintShelf(Canvas& c, const Theme& t)
         x = b.left - 2;
     };
     button(L"power", L"\uE7E8", L"", false);
-    c.Line(x - 4, cy - 12, x - 4, cy + 12, t.divider);
-    x -= 8;
-    button(L"tray", L"\uE70E", L"", false);
     if (status_.battery) {
         int level = std::clamp(status_.batteryPercent / 10, 0, 10);
         std::wstring glyph(1, wchar_t((status_.charging ? 0xEBAB : 0xEBA0) + level));
@@ -2147,7 +2144,8 @@ bool StartMenu::Message(UINT m, WPARAM w, LPARAM l, LRESULT& result)
             rippleX_ = x;
             rippleY_ = y;
             rippleMs_ = ClockMs();
-            surface_.Ripple(rippleX_, rippleY_);
+            // 玻璃涟漪使用内容坐标，保留菜单的垂直偏移。
+            surface_.Ripple(float(content.x) / s, float(content.y) / s);
         }
         surface_.Invalidate();
         return true;
