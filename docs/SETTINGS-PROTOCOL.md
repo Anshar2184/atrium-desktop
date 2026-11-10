@@ -31,9 +31,17 @@
 | `statusStyle` | string | `ring` / `icons` | `ring` | 状态栏的样子：Wi-Fi 外面一圈电量或音量的圆环；或者像 Windows 任务栏那样并排的网络、音量、电池三个图标（自绘，跟随字色）。点按都打开控制中心 |
 | `iconSize` | number | 16–64 DIP | 30 | 任务栏图标边长 |
 | `magnify` | number | 1–2 | 1.7 | 悬停放大：指针下图标的缩放倍数，相邻图标按波形放大；1 为关闭 |
+| `hoverRise` | bool | | true | 形状页的“跟随鼠标拱起”：背景随鼠标局部向上延伸，幅度复用 `magnify`；关闭后保持图标放大 |
 | `autoWidth` | bool | | true | 宽度随内容伸缩，最大为 `width` |
 | `showRunning` | bool | | true | 显示未固定但正在运行的应用 |
+| `dockDisplayMode` | string | `follow` / `primary` / `fixed` / `all` | `follow` | 单个 Dock 在其他屏幕底边停留后唤出；仅主屏；固定屏幕；或每个扩展显示器常驻一条任务栏 |
+| `dockDisplayDelay` | number | 100–2000 ms | 450 | 跨屏唤出的连续停留时间；拖动图标、文件或使用弹出面板时不切屏 |
+| `dockDisplay` | string | 显示器设备接口 ID，或空字符串 | `""` | `fixed` 模式的目标；空值跟随系统主屏；断开后临时使用主屏，保留 ID 供重连恢复 |
+| `desktopDisplay` | string | 显示器设备接口 ID，或空字符串 | `""` | 小组件与台前调度的屏幕，独立于 Dock；空值跟随系统主屏；切换前恢复原屏幕中台前调度收起的窗口 |
+| `taskbarApps` | string | `all` / `primaryAndWindow` / `window` | `all` | 运行中的应用分别显示在所有任务栏、系统主屏和窗口所在屏、或仅窗口所在屏；固定应用保留，运行标记和预览只使用符合规则的窗口 |
+| `taskbarRightPrimaryOnly` | bool | | false | 仅在系统主屏显示任务栏右侧元素；副屏隐藏托盘、状态圆环、时钟日期、通知入口及分隔线，不保留占位；各元素原有的显示开关保持不变，也适用于跨屏唤出和固定显示器模式 |
 | `notifyTimeout` | number | 3–30 s | 6 | 通知弹出后停留的时间（指针停在卡片上时不计时） |
+| `notifyPlacement` | string | `dock` / `topRight` | `dock` | 默认在任务栏上方堆叠；右上角模式下，弹窗和铃铛打开的通知中心均固定在系统主屏工作区右上角，新通知从右侧淡入，已有通知平滑下移；通知中心的操作区在列表上方，超出屏幕高度可滚动 |
 | `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |
 | `notifyListener` | bool | | true | 通过 UserNotificationListener 把 Windows 通知显示为 Atrium 卡片（系统横幅仍会出现，除非用户在 Windows 里关闭该应用的横幅） |
 | `notifyWeChat` | bool | | true | 实验：读取微信窗口的会话列表（UI 自动化，只读），非免打扰会话有新的未读消息时显示卡片 |

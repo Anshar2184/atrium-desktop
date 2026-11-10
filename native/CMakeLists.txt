@@ -13,3 +13,9 @@ add_compile_options("$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Release>>:/Zi>")
 add_link_options("$<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>")
 
 add_subdirectory(core)
+
+option(ATRIUM_BUILD_TESTS "Build native regression checks" OFF)
+if(ATRIUM_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

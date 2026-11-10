@@ -56,19 +56,20 @@ struct BarScene {
     std::wstring pressedKey;
     std::wstring dragKey;      // item being dragged: follows the pointer, drawn on top
     // Magnification: icons near the pointer grow up to `magnify` times, over a
-    // wave `magnifyRange` px wide on each side; the bar stretches to fit.
+    // wave `magnifyRange` px wide on each side; the glass stretches and rises with it.
     float magnify = 1;         // 1 = off
     float magnifyRange = 1;
+    float magnifyLift = 0;     // glass rise at full magnification, px
     float pointerX = -1;       // window px; < 0 = the pointer is not on the bar
     // Press ripple in the glass (window px), started at ClockMs() `rippleMs`.
     float rippleX = 0, rippleY = 0;
     double rippleMs = 0;
 };
 
-// What the glass needs from the content each frame: the stretched shape and
-// the ripple.
+// What the glass needs each frame: the stretched shape, local rise and ripple.
 struct BarFrame {
     D2D1_RECT_F shape{};
+    float waveX = 0, waveWidth = 0, waveHeight = 0; // local glass rise under the pointer
     float rippleX = 0, rippleY = 0, rippleR = 0, rippleA = 0;
     float slideY = 0;    // auto-hide: how far the bar is down (px; the content and the glass move together)
 };
