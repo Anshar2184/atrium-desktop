@@ -1,7 +1,7 @@
 // Atrium's own start menu (opened from the logo on the bar, or by the Windows
 // key: winKeyStart), a launcher of separate pieces of the bar's glass: a panel
 // with the search field and the tiles, and below it a capsule shaped like the
-// bar with the account, network, volume, battery, the system tray and power.
+// bar with the account, network, volume, battery and power.
 // The power choices open in a third piece of glass, an open folder in another
 // over the tiles.
 //
