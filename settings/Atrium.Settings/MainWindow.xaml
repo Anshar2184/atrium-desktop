@@ -360,6 +360,8 @@
                                               Note="只留下 Atrium 栏。关闭开关或退出 Atrium 时恢复；Win 键等系统快捷键照常可用。" />
                             <local:ToggleTile x:Name="HideBannersSwitch" Title="隐藏系统通知横幅" SwitchName="隐藏系统通知横幅" Toggled="OnHideBannersToggled"
                                               Note="打开 Windows 的“请勿打扰”；通知照常显示为 Atrium 卡片。关闭开关或退出时恢复。" />
+                            <local:ToggleTile x:Name="WinKeySwitch" Title="Win 键打开 Atrium 开始菜单" SwitchName="Win 键打开 Atrium 开始菜单" Toggled="OnWinKeyToggled" />
+                            <local:ToggleTile x:Name="WinNumbersSwitch" Title="Win + 数字键打开任务栏应用" SwitchName="Win + 数字键打开任务栏应用" Toggled="OnWinNumbersToggled" />
                         </local:ResponsiveGrid>
                     </StackPanel>
 
@@ -482,6 +484,13 @@
                                 <TextBlock Text="栏上显示" Style="{StaticResource SectionStyle}" />
                                 <local:ToggleTile x:Name="TraySwitch" Title="系统托盘" SwitchName="显示系统托盘" Toggled="OnBarContentToggled" Flat="True" />
                                 <local:ToggleTile x:Name="StatusSwitch" Title="状态栏" SwitchName="显示状态栏" Toggled="OnBarContentToggled" Flat="True" />
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="状态栏图标" Style="{StaticResource RowTitleStyle}" />
+                                    <local:SegmentTrack>
+                                            <RadioButton x:Name="StatusRing" GroupName="statusstyle" Content="圆环" Tag="ring" Style="{StaticResource SegmentStyle}" Checked="OnStatusStyleChecked" />
+                                            <RadioButton x:Name="StatusIcons" GroupName="statusstyle" Content="系统图标" Tag="icons" Style="{StaticResource SegmentStyle}" Checked="OnStatusStyleChecked" />
+                                        </local:SegmentTrack>
+                                </StackPanel>
                                 <local:ToggleTile x:Name="NotificationsSwitch" Title="通知" SwitchName="显示通知按钮" Toggled="OnBarContentToggled" Flat="True" />
                                 <local:ToggleTile x:Name="ClockSwitch" Title="时钟和日期" SwitchName="显示时钟和日期" Toggled="OnClockToggled" Flat="True"
                                                   Note="在栏的右端，使用系统的时间与日期格式。" />
@@ -493,6 +502,14 @@
                                             <RadioButton x:Name="TextAuto" GroupName="ink" Content="自动" Tag="auto" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
                                             <RadioButton x:Name="TextLight" GroupName="ink" Content="浅色" Tag="light" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
                                             <RadioButton x:Name="TextDark" GroupName="ink" Content="深色" Tag="dark" Style="{StaticResource SegmentStyle}" Checked="OnTextColorChecked" />
+                                        </local:SegmentTrack>
+                                </StackPanel>
+                                <StackPanel Style="{StaticResource FlatRowStyle}">
+                                    <TextBlock Text="显示方式" Style="{StaticResource RowTitleStyle}" />
+                                    <local:SegmentTrack>
+                                            <RadioButton x:Name="HideNever" GroupName="autohide" Content="常驻" Tag="never" Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
+                                            <RadioButton x:Name="HideFullscreen" GroupName="autohide" Content="全屏时隐藏" Tag="fullscreen" Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
+                                            <RadioButton x:Name="HideAlways" GroupName="autohide" Content="一直隐藏" Tag="always" Style="{StaticResource SegmentStyle}" Checked="OnAutoHideChecked" />
                                         </local:SegmentTrack>
                                 </StackPanel>
                             </StackPanel>

@@ -44,6 +44,10 @@ void Settings::Clamp()
     tint &= 0xFFFFFF;
     if (textColor != L"light" && textColor != L"dark")
         textColor = L"auto";
+    if (autoHide != L"never" && autoHide != L"always")
+        autoHide = L"fullscreen";
+    if (statusStyle != L"icons")
+        statusStyle = L"ring";
     if (pins && pins->size() > 64)
         pins->resize(64);
     if (preset != L"liquid" && preset != L"frosted")
@@ -79,6 +83,8 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
     o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
     o.SetNamedValue(L"textColor", json::JsonValue::CreateStringValue(textColor));
+    o.SetNamedValue(L"autoHide", json::JsonValue::CreateStringValue(autoHide));
+    o.SetNamedValue(L"statusStyle", json::JsonValue::CreateStringValue(statusStyle));
     num(L"notifyTimeout", notifyTimeout);
     o.SetNamedValue(L"notifyHideBody", json::JsonValue::CreateBooleanValue(notifyHideBody));
     o.SetNamedValue(L"notifyListener", json::JsonValue::CreateBooleanValue(notifyListener));
@@ -94,6 +100,8 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"stageAutoHide", json::JsonValue::CreateBooleanValue(stageAutoHide));
     o.SetNamedValue(L"hideTaskbar", json::JsonValue::CreateBooleanValue(hideTaskbar));
     o.SetNamedValue(L"hideBanners", json::JsonValue::CreateBooleanValue(hideBanners));
+    o.SetNamedValue(L"winKeyStart", json::JsonValue::CreateBooleanValue(winKeyStart));
+    o.SetNamedValue(L"winNumbers", json::JsonValue::CreateBooleanValue(winNumbers));
     o.SetNamedValue(L"startOnLogin", json::JsonValue::CreateBooleanValue(startOnLogin));
     if (pins) {
         json::JsonArray a;
@@ -169,6 +177,8 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"stageAutoHide", s.stageAutoHide);
     flag(L"hideTaskbar", s.hideTaskbar);
     flag(L"hideBanners", s.hideBanners);
+    flag(L"winKeyStart", s.winKeyStart);
+    flag(L"winNumbers", s.winNumbers);
     flag(L"startOnLogin", s.startOnLogin);
     if (o.HasKey(L"widgetBackdrop") && o.GetNamedValue(L"widgetBackdrop").ValueType() == json::JsonValueType::String)
         s.widgetBackdrop = std::wstring(o.GetNamedString(L"widgetBackdrop")) == L"wallpaper" ? L"wallpaper" : L"desktop";
@@ -178,6 +188,10 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     }
     if (o.HasKey(L"textColor") && o.GetNamedValue(L"textColor").ValueType() == json::JsonValueType::String)
         s.textColor = std::wstring(o.GetNamedString(L"textColor"));
+    if (o.HasKey(L"autoHide") && o.GetNamedValue(L"autoHide").ValueType() == json::JsonValueType::String)
+        s.autoHide = std::wstring(o.GetNamedString(L"autoHide"));
+    if (o.HasKey(L"statusStyle") && o.GetNamedValue(L"statusStyle").ValueType() == json::JsonValueType::String)
+        s.statusStyle = std::wstring(o.GetNamedString(L"statusStyle"));
     if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {
         std::vector<PinnedApp> pins;
         for (const auto& v : o.GetNamedArray(L"pins")) {

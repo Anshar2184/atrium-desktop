@@ -47,6 +47,7 @@ struct BarScene {
     std::vector<SceneItem> items;  // apps only (drag and drop works on these)
     std::vector<SceneItem> extras; // Atrium logo (#start), overflow (#more), tray (#tray), status (#status), notifications (#notify)
     SystemStatus status;           // drawn by the #status entry
+    bool statusIcons = false;      // as the Windows taskbar's three icons rather than the ring (statusStyle)
     float separatorX = -1;     // < 0: none
     D2D1_RECT_F clock{};       // empty: no clock
     float timePx = 0, datePx = 0;
@@ -107,6 +108,9 @@ private:
     // wired / offline); while the volume or the brightness changes the ring
     // shows it and a speaker or a sun takes the fan's place (StatusMotion).
     void DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, bool darkInk);
+    // The same as the Windows taskbar shows it: the network, the speaker and the battery side by
+    // side in `r` (its height the icons'), redrawn in the bar's ink.
+    void DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2D1_RECT_F r, ID2D1SolidColorBrush* brush, D2D1_COLOR_F ink, bool darkInk);
     float MapX(float u) const; // base x -> displayed x under the magnification
 
     struct Motion {

@@ -706,6 +706,7 @@ void Bar::Apply(const Settings& s)
 {
     settings_ = s;
     Relayout();
+    UpdateCover(); // the hide mode may have changed
 }
 
 void Bar::SetItems(std::vector<TaskItem> items)
@@ -770,6 +771,8 @@ void Bar::Relayout()
     // Left to right: [logo] [apps ... (overflow)] | [tray] [status] [clock] [bell].
     // The logo, the overflow entry, the tray and the bell use the same plates
     // as the apps; so does the status ring (battery or volume, Wi-Fi).
+    // The status entry as three icons (statusStyle) is wider than a plate by about an icon.
+    const int statusExtra = st.statusStyle == L"icons" ? int(std::lround(icon * 1.3f)) : 0;
     const int rightCount = int(st.showTray) + int(st.showStatus) + int(st.showNotifications) + int(clockW != 0);
     const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
@@ -781,7 +784,8 @@ void Bar::Relayout()
         int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
         if (rightCount)
-            w += 2 * sepGap + p * (int(st.showTray) + int(st.showStatus) + int(st.showNotifications)) + clockW + (rightCount - 1) * g;
+            w += 2 * sepGap + p * (int(st.showTray) + int(st.showStatus) + int(st.showNotifications)) + (st.showStatus ? statusExtra : 0) + clockW +
+                 (rightCount - 1) * g;
         return std::max(w, barH * 2);
     };
     // The magnified bar stretches by up to (mag - 1) * range on top of its width.
@@ -805,7 +809,7 @@ void Bar::Relayout()
     // Never narrower than what is always there (logo, overflow, tray, status, clock, bell).
     const int barW = std::max(st.autoWidth ? std::min(contentWidth(n, plate, gap, more), maxW) : maxW, std::min(contentWidth(0, plate, gap, more), screenW));
     const int pad = padFor(plate);
-    const int statusW = plate;
+    const int statusW = plate + statusExtra;
     const int v = (barH - plate) / 2;
     const int pitch = plate + gap;
     const int radius = std::min(Px(st.cornerRadius, s), std::min(barW, barH) / 2);
@@ -976,6 +980,7 @@ void Bar::Relayout()
         hits_.push_back({kStatusKey, RECT{statusLeft - gap / 2, hitTop, statusRight + gap / 2, hitBottom}});
     }
     scene.status = status_;
+    scene.statusIcons = st.statusStyle == L"icons";
     if (clockW) {
         scene.clock = D2D1::RectF(float(clockLeft), plateTop, float(clockRight), plateTop + float(plate));
         scene.timePx = timePx;
@@ -1039,6 +1044,17 @@ void Bar::SetRegion(bool extended)
     appliedRgn_[3] = insetX_;
     appliedRgn_[4] = insetTop_;
     appliedRgn_[5] = ext;
+}
+
+void Bar::ActivateIndex(int index)
+{
+    if (index < 0 || index >= int(items_.size()) || !onActivate)
+        return;
+    const TaskItem& t = items_[size_t(index)];
+    Log(L"bar: app %d by the keyboard (%s)", index + 1, t.name.c_str());
+    if (t.windows.empty())
+        Bounce(t.key);
+    onActivate(std::wstring(t.key)); // the copy: activating may change the items
 }
 
 void Bar::Bounce(const std::wstring& key)
@@ -1105,7 +1121,9 @@ bool Bar::ForegroundCoversScreen() const
 
 void Bar::UpdateCover()
 {
-    bool covered = ForegroundCoversScreen();
+    // The hide mode (autoHide): never, always, or while such an app is in front.
+    const std::wstring& mode = settings_.autoHide;
+    bool covered = mode == L"always" || (mode != L"never" && ForegroundCoversScreen());
     if (covered == covered_)
         return;
     covered_ = covered;
@@ -1117,7 +1135,10 @@ void Bar::UpdateCover()
     leftAt_ = 0;
     wchar_t cls[64] = {};
     GetClassNameW(GetForegroundWindow(), cls, 64);
-    Log(L"bar: %s (%s)", covered ? L"a maximized or full-screen app is in front: auto-hide" : L"no maximized or full-screen app in front", cls);
+    if (mode == L"fullscreen")
+        Log(L"bar: %s (%s)", covered ? L"a maximized or full-screen app is in front: auto-hide" : L"no maximized or full-screen app in front", cls);
+    else
+        Log(L"bar: auto-hide %s (%s)", covered ? L"always" : L"never", mode.c_str());
     if (covered)
         SetTimer(input_, kPointerTimer, kPointerMs, nullptr);
     else

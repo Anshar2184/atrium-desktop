@@ -41,6 +41,10 @@ struct Settings {
     bool showNotifications = true;
     bool showRunning = true;
     std::wstring textColor = L"auto"; // auto | light | dark
+    // When the bar steps out of the way: never | fullscreen (a maximized or full-screen app is in
+    // front) | always (it waits below the screen's bottom edge). The pointer there brings it up.
+    std::wstring autoHide = L"fullscreen";
+    std::wstring statusStyle = L"ring"; // the status entry: ring (a ring round the Wi-Fi fan) | icons (network, volume, battery)
     // Notifications (Atrium's own cards above the bell).
     double notifyTimeout = 6;        // seconds a popup stays (3..30)
     bool notifyHideBody = false;     // privacy: no message text; cards excluded from screen capture
@@ -63,6 +67,8 @@ struct Settings {
     // Windows' own shell (shell/system_chrome.h): put back when turned off or on exit.
     bool hideTaskbar = false;        // the system taskbar is hidden while Atrium runs
     bool hideBanners = false;        // Do Not Disturb: no system banners, the notifications still become cards
+    bool winKeyStart = false;        // the Windows key alone opens Atrium's start menu instead of Windows'
+    bool winNumbers = false;         // Win + 1..9, 0 open the bar's apps
     bool startOnLogin = true;        // independent of starting/stopping the current session
     // Pinned apps; nullopt = never saved yet (first run imports the Windows pins).
     std::optional<std::vector<PinnedApp>> pins;

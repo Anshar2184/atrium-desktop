@@ -16,6 +16,7 @@
 #include "shell/system_chrome.h"
 #include "shell/system_status.h"
 #include "shell/tray_model.h"
+#include "shell/win_key.h"
 #include "shell/feishu_source.h"
 #include "shell/wechat_source.h"
 #include "ui/calendar_panel.h"
@@ -48,6 +49,7 @@ namespace {
 using namespace atrium;
 
 constexpr wchar_t kHostClass[] = L"AtriumCoreHost";
+constexpr wchar_t kGuardMutex[] = L"Local\\Atrium.Guard"; // held by the guard while it runs
 constexpr wchar_t kInstanceMutex[] = L"Local\\Atrium.Core";
 constexpr UINT WM_TRAY = WM_APP + 2;
 constexpr UINT WM_OPEN_SETTINGS = WM_APP + 3; // sent by a second Atrium.exe
@@ -57,6 +59,7 @@ constexpr UINT WM_TRAY_ICONS = WM_APP + 6;    // the tray model has read the ico
 constexpr UINT WM_VOLUME = WM_APP + 7;        // the default playback device's volume changed
 constexpr UINT WM_STATUS = WM_APP + 10;       // lParam: SystemStatus*, read off the UI thread
 constexpr UINT WM_UPDATE_READY = WM_APP + 11; // background package is validated and ready
+constexpr UINT WM_WIN_KEY = WM_APP + 12;      // the Windows key alone (wParam 0, winKeyStart), Win + 1..9, 0 (1..10, winNumbers)
 constexpr UINT_PTR kTrayTimer = 0x51;
 constexpr UINT_PTR kStatusTimer = 0x52;       // the bar's status icon
 constexpr UINT_PTR kTrayFocusTimer = 0x53;    // after a forwarded tray click
@@ -94,6 +97,9 @@ struct App {
     std::unique_ptr<GlassMenu> menu;
     std::unique_ptr<WindowPreview> preview;
     std::unique_ptr<StageManager> stage;
+    std::unique_ptr<WinKey> winKey;
+    HANDLE guard = nullptr; // the guard process (EnsureGuard)
+    bool winKeyStart = false, winNumbers = false; // what it watches
     bool widgetsOn = false;
     std::optional<bool> barOn; // the bar module, as last applied
     int brightness = -1; // the built-in screen's, from GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS
@@ -464,6 +470,8 @@ bool RunNoticeAction(const Notice& n)
 }
 
 // Applies settings to the bar and the task model.
+void EnsureGuard();
+
 void ApplySettings(const Settings& s)
 {
     // Popups share the bar's material and corner radius (concentric inside).
@@ -522,11 +530,96 @@ void ApplySettings(const Settings& s)
     g_app.widgets->SetMaterial(s.widgetMaterial == L"dusk" ? WidgetMaterial::Dusk : s.widgetMaterial == L"color" ? WidgetMaterial::Color : WidgetMaterial::Glass);
     g_app.widgets->SetEnabled(s.widgets);
     g_app.widgetsOn = s.widgets;
+    // The Windows key opens the start menu and the bar's apps, which belong to the bar.
+    const bool keyStart = s.bar && s.winKeyStart, keyNumbers = s.bar && s.winNumbers;
+    if (!(keyStart == g_app.winKeyStart && keyNumbers == g_app.winNumbers && bool(g_app.winKey) == (keyStart || keyNumbers))) {
+        g_app.winKey.reset();
+        if (keyStart || keyNumbers)
+            g_app.winKey = std::make_unique<WinKey>(g_app.host, WM_WIN_KEY, keyStart, keyNumbers);
+        g_app.winKeyStart = keyStart;
+        g_app.winNumbers = keyNumbers;
+    }
     if (g_app.chrome) {
         // Without the bar, Windows' own taskbar and banners are never hidden.
         g_app.chrome->SetTaskbarHidden(s.bar && s.hideTaskbar);
         g_app.chrome->SetBannersHidden(s.bar && s.hideBanners);
+        if (s.bar && (s.hideTaskbar || s.hideBanners))
+            EnsureGuard();
     }
+}
+
+// While Windows' taskbar or its banners are hidden, a second Atrium.exe (`--guard`, RunGuard)
+// watches this one: however it ends (a crash past the exception filter, abort, being killed),
+// what it changed in Windows is put back at once; while it does not respond, the taskbar shows.
+void EnsureGuard()
+{
+    if (g_app.guard && WaitForSingleObject(g_app.guard, 0) == WAIT_TIMEOUT)
+        return;
+    if (g_app.guard) {
+        CloseHandle(g_app.guard);
+        g_app.guard = nullptr;
+    }
+    wchar_t exe[MAX_PATH * 2];
+    if (!GetModuleFileNameW(nullptr, exe, DWORD(std::size(exe))))
+        return;
+    std::wstring command = L"\"" + std::wstring(exe) + L"\" --guard " + std::to_wstring(GetCurrentProcessId());
+    STARTUPINFOW si{sizeof(si)};
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        Log(L"guard: could not start (%lu)", GetLastError());
+        return;
+    }
+    CloseHandle(pi.hThread);
+    g_app.guard = pi.hProcess;
+    Log(L"guard: started (%lu)", pi.dwProcessId);
+}
+
+int RunGuard(DWORD pid)
+{
+    HANDLE held = CreateMutexW(nullptr, TRUE, kGuardMutex);
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process)
+        return 1;
+    HWND host = nullptr;
+    int silent = 0; // checks in a row without an answer
+    bool shown = false;
+    while (WaitForSingleObject(process, 2000) == WAIT_TIMEOUT) {
+        if (!host || !IsWindow(host)) {
+            host = nullptr;
+            for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, kHostClass, nullptr)) != nullptr;) {
+                DWORD owner = 0;
+                GetWindowThreadProcessId(w, &owner);
+                if (owner == pid)
+                    host = w;
+            }
+        }
+        DWORD_PTR answer = 0;
+        const bool alive = !host || SendMessageTimeoutW(host, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &answer);
+        silent = alive ? 0 : silent + 1;
+        if (silent >= 4 && !shown) {
+            // About 15 s without an answer: the taskbar back (Atrium hides it again if it recovers).
+            Log(L"guard: Atrium (%lu) is not responding: Windows' taskbar shown", pid);
+            SystemChrome::ShowTaskbarsNow();
+            shown = true;
+        } else if (alive && shown) {
+            Log(L"guard: Atrium (%lu) responds again", pid);
+            shown = false;
+        }
+    }
+    DWORD code = 0;
+    GetExitCodeProcess(process, &code);
+    CloseHandle(process);
+    // A clean exit put everything back (system.json is gone); anything else is put back here.
+    if (SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
+        if (SystemChrome::UndoLeftover())
+            Log(L"guard: Atrium (%lu) ended without putting Windows back (exit 0x%08lX): done here", pid, code);
+        CoUninitialize();
+    }
+    if (held) {
+        ReleaseMutex(held);
+        CloseHandle(held);
+    }
+    return 0;
 }
 
 void ShowItemMenu(const std::wstring& key, POINT pt)
@@ -543,8 +636,6 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     entries.push_back({it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium", int(it->pinned ? kCmdUnpin : kCmdPin)});
     if (!it->windows.empty())
         entries.push_back({it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口", kCmdClose});
-    entries.push_back({});
-    entries.push_back({L"外观设置…", kCmdSettings});
     int pinIndex = it->pinIndex;
     g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex](int cmd) {
         switch (cmd) {
@@ -576,9 +667,6 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
                 SHOpenFolderAndSelectItems(id, 0, nullptr, 0);
                 ILFree(id);
             }
-            break;
-        case kCmdSettings:
-            OpenSettings();
             break;
         }
     });
@@ -662,9 +750,15 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TRAY:
         switch (LOWORD(l)) {
         case WM_CONTEXTMENU:
-        case WM_RBUTTONUP:
-            ShowMenu(POINT{GET_X_LPARAM(w), GET_Y_LPARAM(w)});
+        case WM_RBUTTONUP: {
+            // Explorer gives the icon's place; with the system taskbar hidden (and from Atrium's
+            // tray panel) that is a hidden button at the screen's edge: the pointer then.
+            POINT at{GET_X_LPARAM(w), GET_Y_LPARAM(w)}, cursor;
+            if (GetCursorPos(&cursor) && (std::abs(at.x - cursor.x) > 48 || std::abs(at.y - cursor.y) > 48))
+                at = cursor;
+            ShowMenu(at);
             return 0;
+        }
         case NIN_SELECT:
         case NIN_KEYSELECT:
         case WM_LBUTTONDBLCLK:
@@ -674,6 +768,38 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_OPEN_SETTINGS:
         OpenSettings();
+        return 0;
+    case WM_WIN_KEY:
+        if (!g_app.barOn.value_or(true))
+            return 0;
+        if (w) {
+            // Win + digit: the bar's app at that place, as a click on it. The keys never reached a
+            // window of ours (the foreground lock holds): share the foreground thread's input state.
+            HWND fg = GetForegroundWindow();
+            DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0, me = GetCurrentThreadId();
+            bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
+            AllowSetForegroundWindow(ASFW_ANY);
+            g_app.bar->ActivateIndex(int(w) - 1);
+            if (attached)
+                AttachThreadInput(me, fgThread, FALSE);
+            return 0;
+        }
+        if (g_app.start->Visible()) {
+            g_app.start->Close(false);
+        } else {
+            // The keyboard's: whatever was in front gets the focus back when it closes. The key
+            // never reached a window of ours, so the foreground lock holds: share the foreground
+            // thread's input state for the moment the menu takes the focus (as the tray does).
+            HWND fg = GetForegroundWindow();
+            DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0, me = GetCurrentThreadId();
+            bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
+            g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), fg);
+            if (attached)
+                AttachThreadInput(me, fgThread, FALSE);
+            g_app.notes->PanelsChanged();
+            if (GetForegroundWindow() != g_app.start->Hwnd())
+                Log(L"winkey: the start menu did not get the focus");
+        }
         return 0;
     case WM_NOTICE:
         if (auto* n = reinterpret_cast<Notice*>(l)) {
@@ -735,6 +861,10 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (w == kStatusTimer) {
             if (!g_app.trayAdded)
                 AddTrayIcon();
+            if (g_app.guard && WaitForSingleObject(g_app.guard, 0) == WAIT_OBJECT_0) {
+                Log(L"guard: it went away; started again");
+                EnsureGuard();
+            }
             UpdateStatus();
             if (g_app.chrome)
                 g_app.chrome->Enforce();
@@ -837,6 +967,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         // The launcher exits before the script removes this executable.
         return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", powershell.c_str(), arguments.c_str(), nullptr, SW_HIDE)) > 32 ? 0 : 1;
     }
+    // `Atrium.exe --guard <pid>`: the guard of a run hiding Windows' taskbar (EnsureGuard).
+    if (const wchar_t* guard = wcsstr(cmdLine, L"--guard ")) {
+        const DWORD pid = wcstoul(guard + 8, nullptr, 10);
+        return pid ? RunGuard(pid) : 1;
+    }
     // `Atrium.exe --exit` asks a running instance to quit (installer, updater).
     if (wcsstr(cmdLine, L"--exit")) {
         HWND other = FindWindowW(kHostClass, nullptr);
@@ -850,6 +985,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         DWORD wait = process ? WaitForSingleObject(process, 10000) : WAIT_FAILED;
         if (process)
             CloseHandle(process);
+        // And its guard, which runs from the same file (the updater moves the folder next).
+        if (HANDLE guard = OpenMutexW(SYNCHRONIZE, FALSE, kGuardMutex)) {
+            DWORD done = WaitForSingleObject(guard, 5000);
+            if (done == WAIT_OBJECT_0 || done == WAIT_ABANDONED)
+                ReleaseMutex(guard);
+            CloseHandle(guard);
+        }
         return wait == WAIT_OBJECT_0 ? 0 : 1;
     }
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
@@ -1030,6 +1172,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     // the system taskbar comes back and the process ends.
     if (g_app.chrome) g_app.chrome->RestoreForExit();
     g_app.stage->RestoreAll(); // the windows Stage Manager put away come back
+    g_app.winKey.reset();
     g_app.status.reset();
     g_app.preview->Close();
     if (!g_app.bar->StopRendering(3000)) {

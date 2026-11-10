@@ -10,7 +10,8 @@
 // window covers them (foreground changes, a move ends, a 1 s check); they stay
 // below a revealed system taskbar. While a maximized or full-screen app is in
 // front the bar slides down off the screen and comes up again while the
-// pointer is at the screen's bottom edge below it (auto-hide).
+// pointer is at the screen's bottom edge below it (auto-hide; setting autoHide
+// can keep it up always, or hide it whatever is in front).
 // The render thread also draws the glass layer of Atrium's popups.
 #pragma once
 
@@ -55,6 +56,8 @@ public:
     void SetUnread(int count);
     // Network, battery and volume for the status icon.
     void SetStatus(const SystemStatus& status);
+    // The app at `index` (0-based, in bar order) as a click on it would (Win + digit).
+    void ActivateIndex(int index);
     // Screen rectangle of an entry ("#start", "#notify", an app key); empty if not shown.
     RECT EntryRect(const std::wstring& key) const;
     // Screen rectangle of the glass shape.

@@ -155,7 +155,7 @@ public sealed partial class MainWindow : Window
         // `--page widgets` (the widgets' menu): open on that page.
         var args = Environment.GetCommandLineArgs();
         int page = Array.IndexOf(args, "--page") is int i && i >= 0 && i + 1 < args.Length
-            ? args[i + 1] switch { "widgets" => 4, "stage" => 5, "about" => 8, _ => 0 } : 0;
+            ? args[i + 1] switch { "dock" => 2, "widgets" => 4, "stage" => 5, "system" => 6, "about" => 8, _ => 0 } : 0;
         Nav.SelectedIndex = page;
         _ = ConnectAndLoadAsync();
         _ = CheckForUpdatesAsync(); // once per settings window; no resident polling
@@ -719,6 +719,10 @@ public sealed partial class MainWindow : Window
         (_current.WidgetBackdrop == "wallpaper" ? BackdropWallpaper : BackdropDesktop).IsChecked = true;
         (_current.WidgetMaterial switch { "dusk" => MaterialDusk, "color" => MaterialColor, _ => MaterialGlass }).IsChecked = true;
         HideBannersSwitch.IsOn = _current.HideBanners;
+        WinKeySwitch.IsOn = _current.WinKeyStart;
+        WinNumbersSwitch.IsOn = _current.WinNumbers;
+        (_current.StatusStyle == "icons" ? StatusIcons : StatusRing).IsChecked = true;
+        (_current.AutoHide switch { "never" => HideNever, "always" => HideAlways, _ => HideFullscreen }).IsChecked = true;
         StartupSwitch.IsOn = _current.StartOnLogin;
         (_current.TextColor switch { "light" => TextLight, "dark" => TextDark, _ => TextAuto }).IsChecked = true;
         UpdateGallery();
@@ -936,6 +940,34 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _current.HideBanners = HideBannersSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnWinKeyToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.WinKeyStart = WinKeySwitch.IsOn;
+        Changed();
+    }
+
+    private void OnWinNumbersToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.WinNumbers = WinNumbersSwitch.IsOn;
+        Changed();
+    }
+
+    private void OnStatusStyleChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || sender is not RadioButton { Tag: string tag }) return;
+        _current.StatusStyle = tag;
+        Changed();
+    }
+
+    private void OnAutoHideChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || sender is not RadioButton { Tag: string tag }) return;
+        _current.AutoHide = tag;
         Changed();
     }
 
