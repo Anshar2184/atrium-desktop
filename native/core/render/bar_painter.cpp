@@ -293,6 +293,10 @@ bool BarPainter::Animate(const BarScene& scene, double nowMs)
 
     // What the glass shows this frame: the stretched shape and the ripple.
     frame_.shape = D2D1::RectF(MapX(barL_), scene.bar.top + frame_.slideY, MapX(barR_), scene.bar.bottom + frame_.slideY);
+    // Share the icons' wave and easing; its support widens with the stretched bar.
+    frame_.waveX = centre_;
+    frame_.waveWidth = range_ * (1 + (mag_ - 1) * amount_ / 2);
+    frame_.waveHeight = scene.magnifyLift * amount_;
     frame_.rippleA = 0;
     if (scene.rippleMs > 0) {
         constexpr double kRippleMs = 720;
@@ -469,9 +473,9 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     float cx = MapX(bx);
     float hover = motion::EaseOut(m.hover), lift = motion::EaseOut(m.lift);
 
-    // Plate (only without magnification): hover, press and drag feedback.
+    // 底板仅响应悬停（关闭放大时）和拖动，按下仅缩放图标。
     // Its corners are concentric with the bar's.
-    float plateA = (magnifying ? 0.f : hover) + 0.35f * m.press + 0.4f * lift;
+    float plateA = (magnifying ? 0.f : hover) + 0.4f * lift;
     if (plateA > 0.001f) {
         D2D1_COLOR_F c = wash;
         c.a *= std::min(plateA, 1.6f);

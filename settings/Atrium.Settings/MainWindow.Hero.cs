@@ -336,19 +336,27 @@ public sealed partial class MainWindow
             _heroPhotoGen = j.PhotoGeneration;
             Interlocked.Exchange(ref _photoPending, _mainBg);
         }
-        var spec = GlassSpec.For(j.S, L.S * j.Rs);
+        // Keep the specimen and loupe in step with the native hover-rise switch.
+        GlassSpec Spec(double ppd) => GlassSpec.For(j.S, L.S * ppd) with
+        {
+            WaveX = (float)((L.Centre - L.BarX - L.BarW / 2) * ppd),
+            WaveWidth = (float)(L.Range * (1 + L.K / 2) * ppd),
+            WaveHeight = j.S.HoverRise ? (float)(L.Icon * L.K * ppd) : 0,
+        };
+        var spec = Spec(j.Rs);
         int inset = (int)spec.Inset;
+        int rise = spec.RiseInset;
         int bx = (int)Math.Round(L.BarX * j.Rs), by = (int)Math.Round(L.BarY * j.Rs);
         int bw = (int)Math.Round(L.BarW * j.Rs), bh = (int)Math.Round(L.BarH * j.Rs);
-        int gw = bw + 2 * inset, gh = bh + 2 * inset;
+        int gw = bw + 2 * inset, gh = bh + 2 * inset + rise;
         var frames = _heroFrames;
         if (frames == null || frames.Width != gw || frames.Height != gh)
             _heroFrames = frames = new FrameBuffers(gw, gh);
         Array.Clear(frames.Back);
-        GlassRenderer.DrawOverlay(_mainBg, frames.Back, bx - inset, by - inset, gw, gh, spec);
-        float luma = GlassRenderer.MeanLuma(frames.Back, gw, inset + Math.Clamp(bh / 2, 0, bw - 1), inset + bh / 4,
-            inset + Math.Clamp(bw - bh / 2, 1, bw), inset + Math.Max(bh * 3 / 4, bh / 4 + 1));
-        frames.Publish(luma, (bx - inset) / j.Rs, (by - inset) / j.Rs, j.Rs);
+        GlassRenderer.DrawOverlay(_mainBg, frames.Back, bx - inset, by - inset - rise, gw, gh, spec);
+        float luma = GlassRenderer.MeanLuma(frames.Back, gw, inset + Math.Clamp(bh / 2, 0, bw - 1), inset + rise + bh / 4,
+            inset + Math.Clamp(bw - bh / 2, 1, bw), inset + rise + Math.Max(bh * 3 / 4, bh / 4 + 1));
+        frames.Publish(luma, (bx - inset) / j.Rs, (by - inset - rise) / j.Rs, j.Rs);
 
         // Only the material page with the loupe enabled needs its second render.
         int lw = j.Loupe ? (int)Math.Round(Math.Round(L.LoupeW * LoupeZoom) * j.Rs) : 0, lh = j.Loupe ? (int)Math.Round(Math.Round(L.LoupeH * LoupeZoom) * j.Rs) : 0;
@@ -365,11 +373,12 @@ public sealed partial class MainWindow
             if (lframes == null || lframes.Width != lw || lframes.Height != lh)
                 _loupeFrames = lframes = new FrameBuffers(lw, lh);
             Buffer.BlockCopy(_loupeBg.Base, 0, lframes.Back, 0, _loupeBg.Base.Length);
-            var lspec = GlassSpec.For(j.S, L.S * ppd);
+            var lspec = Spec(ppd);
             int linset = (int)lspec.Inset;
             int lbx = (int)Math.Round((L.BarX - L.LoupeX0) * ppd), lby = (int)Math.Round((L.BarY - L.LoupeY0) * ppd);
             int lbw = (int)Math.Round(L.BarW * ppd), lbh = (int)Math.Round(L.BarH * ppd);
-            GlassRenderer.Draw(_loupeBg, lframes.Back, lbx - linset, lby - linset, lbw + 2 * linset, lbh + 2 * linset, lspec);
+            GlassRenderer.Draw(_loupeBg, lframes.Back, lbx - linset, lby - linset - lspec.RiseInset,
+                lbw + 2 * linset, lbh + 2 * linset + lspec.RiseInset, lspec);
             lframes.Publish(luma);
         }
         else

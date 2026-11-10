@@ -68,7 +68,7 @@ constexpr UINT kStatusMs = 3000;
 constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
-    kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager,
+    kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager, kCmdTerminate,
     kCmdWidgets, kCmdStage, kCmdWidgetsModule
 };
 
@@ -78,6 +78,12 @@ struct App {
     UINT taskbarCreated = 0;
     bool trayAdded = false;
     std::unique_ptr<Bar> bar;
+    std::vector<std::unique_ptr<Bar>> secondaryBars;
+    Bar* activeBar = nullptr; // the last taskbar the pointer interacted with
+    SystemStatus lastStatus;
+    bool capturable = false;
+    bool displaysReady = false;
+    ULONGLONG switchedBarAt = 0; // switching displays must not suppress the first popup click
     std::unique_ptr<SystemStatusReader> status;
     std::unique_ptr<SettingsServer> server;
     std::unique_ptr<TaskModel> tasks;
@@ -101,6 +107,8 @@ struct App {
     HANDLE guard = nullptr; // the guard process (EnsureGuard)
     bool winKeyStart = false, winNumbers = false; // what it watches
     bool widgetsOn = false;
+    std::wstring desktopDisplay; // effective setting, also available during display broadcasts
+    Settings displaySettings;
     std::optional<bool> barOn; // the bar module, as last applied
     int brightness = -1; // the built-in screen's, from GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS
     HPOWERNOTIFY brightnessNotify = nullptr;
@@ -108,6 +116,18 @@ struct App {
 
 App g_app;
 std::wstring g_readyEvent;
+
+Bar& ActiveBar() { return *g_app.activeBar; }
+
+template<class Action> void ForBars(Action action)
+{
+    action(*g_app.bar);
+    for (const auto& bar : g_app.secondaryBars)
+        action(*bar);
+}
+
+void ConfigureBar(Bar& bar);
+void SyncDisplayBars(const Settings& settings, bool refresh = false);
 
 // GUID_VIDEO_CURRENT_MONITOR_BRIGHTNESS: Windows reports every change of the
 // built-in screen's brightness (keys, quick settings, our slider), and the
@@ -246,7 +266,7 @@ void OpenTrayStep2()
 void OpenSystem(const std::wstring& what)
 {
     if (what == L"network" || what == L"volume" || what == L"battery") {
-        g_app.control->Open(g_app.bar->EntryRect(L"#status"), g_app.bar->BarRect());
+        g_app.control->Open(ActiveBar().EntryRect(L"#status"), ActiveBar().BarRect());
         g_app.notes->PanelsChanged();
         Log(L"start: system entry %s (control centre)", what.c_str());
         return;
@@ -256,7 +276,7 @@ void OpenSystem(const std::wstring& what)
         return;
     }
     if (what == L"tray") {
-        g_app.trayPanel->Open(g_app.bar->EntryRect(L"#tray"), g_app.bar->BarRect(), g_app.bar->PreviousForeground());
+        g_app.trayPanel->Open(ActiveBar().EntryRect(L"#tray"), ActiveBar().BarRect(), ActiveBar().PreviousForeground());
         g_app.notes->PanelsChanged();
         Log(L"start: system entry tray (tray panel)");
         return;
@@ -285,9 +305,9 @@ void ToggleTray(RECT)
         g_app.trayPanel->Close();
         return;
     }
-    if (GetTickCount64() - g_app.trayPanel->LastClosed() < 400)
+    if (GetTickCount64() - g_app.trayPanel->LastClosed() < 400 && g_app.trayPanel->LastClosed() > g_app.switchedBarAt)
         return;
-    g_app.trayPanel->Open(g_app.bar->EntryRect(L"#tray"), g_app.bar->BarRect(), g_app.bar->PreviousForeground());
+    g_app.trayPanel->Open(ActiveBar().EntryRect(L"#tray"), ActiveBar().BarRect(), ActiveBar().PreviousForeground());
     g_app.notes->PanelsChanged();
 }
 
@@ -297,9 +317,9 @@ void ToggleControl(RECT)
         g_app.control->Close();
         return;
     }
-    if (GetTickCount64() - g_app.control->LastClosed() < 400)
+    if (GetTickCount64() - g_app.control->LastClosed() < 400 && g_app.control->LastClosed() > g_app.switchedBarAt)
         return;
-    g_app.control->Open(g_app.bar->EntryRect(L"#status"), g_app.bar->BarRect());
+    g_app.control->Open(ActiveBar().EntryRect(L"#status"), ActiveBar().BarRect());
     g_app.notes->PanelsChanged();
 }
 
@@ -309,9 +329,9 @@ void ToggleCalendar()
         g_app.calendar->Close();
         return;
     }
-    if (GetTickCount64() - g_app.calendar->LastClosed() < 400)
+    if (GetTickCount64() - g_app.calendar->LastClosed() < 400 && g_app.calendar->LastClosed() > g_app.switchedBarAt)
         return;
-    g_app.calendar->Open(g_app.bar->EntryRect(L"#clock"), g_app.bar->BarRect());
+    g_app.calendar->Open(ActiveBar().EntryRect(L"#clock"), ActiveBar().BarRect());
     g_app.notes->PanelsChanged();
 }
 
@@ -323,9 +343,9 @@ void ToggleStart(RECT)
     }
     // A click on the logo while the menu is open first deactivates (closes) it;
     // that click must not open it again.
-    if (GetTickCount64() - g_app.start->LastClosed() < 400)
+    if (GetTickCount64() - g_app.start->LastClosed() < 400 && g_app.start->LastClosed() > g_app.switchedBarAt)
         return;
-    g_app.start->Open(g_app.bar->BarRect(), g_app.bar->EntryRect(L"#start"), g_app.bar->PreviousForeground());
+    g_app.start->Open(ActiveBar().BarRect(), ActiveBar().EntryRect(L"#start"), ActiveBar().PreviousForeground());
     g_app.notes->PanelsChanged();
 }
 
@@ -474,6 +494,8 @@ void EnsureGuard();
 
 void ApplySettings(const Settings& s)
 {
+    g_app.desktopDisplay = s.desktopDisplay;
+    g_app.displaySettings = s;
     // Popups share the bar's material and corner radius (concentric inside).
     Theme::SetGlass(s.tint, s.transparency);
     float radius = float(std::clamp(s.cornerRadius, 8.0, std::max(8.0, s.height / 2)));
@@ -485,7 +507,7 @@ void ApplySettings(const Settings& s)
     g_app.calendar->SetBarHeight(float(s.height));
     g_app.start->SetBarHeight(float(s.height)); // its status capsule is shaped like the bar
     g_app.notes->SetRadius(radius);
-    g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody);
+    g_app.notes->SetOptions(s.notifyTimeout, s.notifyHideBody, s.notifyPlacement);
     // Notification cards belong to the bar (its bell): without it, Windows shows its own banners.
     if (s.bar && s.notifyListener && !g_app.listener)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
@@ -501,7 +523,7 @@ void ApplySettings(const Settings& s)
         g_app.feishu.reset();
     g_app.tasks->SetPins(s.pins.value_or(std::vector<PinnedApp>{}));
     g_app.tasks->SetShowRunning(s.showRunning);
-    g_app.bar->Apply(s);
+    SyncDisplayBars(s);
     if (g_app.barOn != s.bar) {
         g_app.barOn = s.bar;
         if (!s.bar) {
@@ -514,15 +536,15 @@ void ApplySettings(const Settings& s)
                 g_app.notes->ToggleCenter();
         }
         // The bar's windows go, its render thread stays: it draws the widgets' and menus' glass.
-        g_app.bar->SetVisible(s.bar);
+        ForBars([&](Bar& bar) { bar.SetVisible(s.bar); });
         Log(L"modules: bar %s", s.bar ? L"on" : L"off");
     }
-    // Widgets live on the bar's monitor, where its capture gives them glass.
-    RECT bar = g_app.bar->BarRect();
-    g_app.widgets->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
+    // The desktop stays on its own display when the shared Dock moves.
+    HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), s.desktopDisplay);
+    g_app.widgets->SetMonitor(desktop);
     // With Stage Manager on, the widgets keep to the other side of the screen.
     g_app.widgets->SetOnRight(s.stageManager ? !s.stageOnRight : s.widgetsOnRight);
-    g_app.stage->SetMonitor(MonitorFromRect(&bar, MONITOR_DEFAULTTOPRIMARY));
+    g_app.stage->SetMonitor(desktop);
     g_app.stage->SetOnRight(s.stageOnRight);
     g_app.stage->SetAutoHide(s.stageAutoHide);
     g_app.stage->SetEnabled(s.stageManager);
@@ -624,7 +646,7 @@ int RunGuard(DWORD pid)
 
 void ShowItemMenu(const std::wstring& key, POINT pt)
 {
-    std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    std::vector<TaskItem> items = ActiveBar().Items();
     auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
         return;
@@ -636,8 +658,10 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     entries.push_back({it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium", int(it->pinned ? kCmdUnpin : kCmdPin)});
     if (!it->windows.empty())
         entries.push_back({it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口", kCmdClose});
+    entries.push_back({L"关闭程序", kCmdTerminate, false, !g_app.tasks->CanTerminate(key)});
     int pinIndex = it->pinIndex;
-    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex](int cmd) {
+    auto windows = it->windows;
+    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex, windows](int cmd) {
         switch (cmd) {
         case kCmdNewWindow:
             g_app.tasks->Launch(key);
@@ -660,7 +684,11 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             });
             break;
         case kCmdClose:
-            g_app.tasks->CloseAll(key);
+            for (HWND window : windows)
+                TaskModel::CloseWindow(window);
+            break;
+        case kCmdTerminate:
+            g_app.tasks->Terminate(key);
             break;
         case kCmdOpenLocation:
             if (PIDLIST_ABSOLUTE id = ILCreateFromPathW(location.c_str())) {
@@ -675,7 +703,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
 // The overflow entry: the apps that did not fit, as a menu above the entry.
 void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
 {
-    std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    std::vector<TaskItem> items = ActiveBar().Items();
     std::vector<MenuEntry> entries;
     const int px = int(std::lround(16 * PopupScale(anchor)));
     for (size_t i = 0; i < keys.size(); ++i) {
@@ -687,7 +715,7 @@ void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
     }
     g_app.menu->Open(std::move(entries), POINT{(anchor.left + anchor.right) / 2, anchor.top}, MenuPlace::AboveCentered, [keys](int cmd) {
         if (cmd >= 1000 && cmd < 1000 + int(keys.size()))
-            g_app.tasks->Activate(keys[size_t(cmd - 1000)]);
+            g_app.tasks->Activate(keys[size_t(cmd - 1000)], ActiveBar().TaskMonitor());
     });
 }
 
@@ -697,7 +725,7 @@ void ShowOverflow(const std::vector<std::wstring>& keys, RECT anchor)
 // pins (dragging never unpins, as on the Windows taskbar).
 void Reorder(const std::wstring& key, int to)
 {
-    std::vector<TaskItem> items = g_app.tasks->Snapshot();
+    std::vector<TaskItem> items = ActiveBar().Items();
     auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
         return;
@@ -706,7 +734,17 @@ void Reorder(const std::wstring& key, int to)
     to = std::clamp(to, 0, int(items.size()));
     int pinnedLeft = int(std::count_if(items.begin(), items.end(), [](const TaskItem& t) { return t.pinned; }));
     if (!dragged.pinned && to >= pinnedLeft) {
-        g_app.tasks->MoveRunning(key, to - pinnedLeft);
+        // Translate the visible insertion point into the shared running-app order.
+        const auto all = g_app.tasks->Snapshot();
+        const std::wstring before = to < int(items.size()) ? items[size_t(to)].key : L"";
+        int running = 0;
+        for (const TaskItem& item : all) {
+            if (item.key == before)
+                break;
+            if (!item.pinned && item.key != key)
+                ++running;
+        }
+        g_app.tasks->MoveRunning(key, running);
         return;
     }
     // Pin index (in the current list) the item goes in front of.
@@ -728,6 +766,112 @@ void Reorder(const std::wstring& key, int to)
         s.pins = std::move(pins);
     });
     Log(L"bar: %s moved to %d%s", key.c_str(), to, dragged.pinned ? L"" : L" and pinned");
+}
+
+void CloseBarPopups()
+{
+    g_app.start->Close(false);
+    g_app.trayPanel->Close();
+    g_app.control->Close();
+    g_app.calendar->Close();
+    g_app.menu->Close();
+    g_app.preview->Close();
+    if (g_app.notes->CenterVisible())
+        g_app.notes->ToggleCenter();
+}
+
+void ConfigureBar(Bar& bar)
+{
+    bar.onInteract = [&bar] {
+        if (g_app.activeBar == &bar)
+            return;
+        CloseBarPopups();
+        g_app.activeBar = &bar;
+        g_app.switchedBarAt = GetTickCount64();
+        g_app.notes->PanelsChanged();
+    };
+    bar.iconProvider = [](const std::wstring& key, int px) { return g_app.tasks->Icon(key, px); };
+    bar.onActivate = [&bar](const std::wstring& key) { g_app.tasks->Activate(key, bar.TaskMonitor()); };
+    bar.onLaunch = [](const std::wstring& key) { g_app.tasks->Launch(key); };
+    bar.onItemMenu = ShowItemMenu;
+    bar.onClockClick = ToggleCalendar;
+    bar.onReorder = Reorder;
+    bar.onOverflow = ShowOverflow;
+    bar.onStartClick = ToggleStart;
+    bar.onNotifyClick = [](RECT) { g_app.notes->ToggleCenter(); };
+    bar.onTrayClick = ToggleTray;
+    bar.onStatusClick = ToggleControl;
+    bar.keepShown = [&bar] {
+        return g_app.activeBar == &bar && (g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() ||
+            g_app.calendar->Visible() || g_app.notes->CenterVisible() || g_app.menu->Visible());
+    };
+    bar.onStatusWheel = [](int notches) { AdjustVolume(2 * notches); UpdateStatus(); };
+    bar.onFileDragHover = [](const std::wstring& key) { g_app.tasks->Show(key); };
+    bar.canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
+    bar.onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
+    bar.onContextMenu = ShowMenu;
+    bar.onPreview = [](const std::wstring& key, const std::vector<HWND>& windows, POINT anchor) {
+        g_app.preview->Show(key, windows, anchor, g_app.tasks->Icon(key, 64));
+    };
+    bar.onPreviewLeave = [&bar] { if (g_app.activeBar == &bar) g_app.preview->Leave(); };
+    bar.onPreviewClose = [&bar] { if (g_app.activeBar == &bar) g_app.preview->Close(); };
+    bar.previewOpen = [&bar] { return g_app.activeBar == &bar && g_app.preview->Visible(); };
+    bar.onMonitorChanged = [&bar] {
+        if (g_app.activeBar == &bar) {
+            CloseBarPopups();
+            g_app.notes->PanelsChanged();
+        }
+    };
+    bar.onItemsChanged = [&bar] {
+        if (g_app.activeBar == &bar)
+            g_app.preview->Refresh(bar.Items());
+    };
+    bar.onCloseRequest = [] { PostMessageW(g_app.host, WM_CLOSE, 0, 0); };
+}
+
+void SyncDisplayBars(const Settings& settings, bool refresh)
+{
+    const auto displays = ConnectedDisplays();
+    // Keep existing renderers when changing appearance; only retire disconnected or unused bars.
+    std::erase_if(g_app.secondaryBars, [&](const auto& bar) {
+        const bool connected = settings.bar && settings.dockDisplayMode == L"all" && std::any_of(displays.begin(), displays.end(),
+            [&](const DisplayInfo& display) { return !display.primary && display.id == bar->DisplayOverride(); });
+        if (connected)
+            return false;
+        if (g_app.activeBar == bar.get()) {
+            CloseBarPopups();
+            g_app.activeBar = g_app.bar.get();
+        }
+        bar->SetVisible(false);
+        // Same bounded shutdown as the primary renderer: restore the Windows shell if a driver hangs.
+        if (!bar->StopRendering(3000)) {
+            g_app.chrome->RestoreForExit();
+            Log(L"core: secondary display renderer stuck during removal");
+            TerminateProcess(GetCurrentProcess(), 0);
+        }
+        return true;
+    });
+    if (settings.bar && settings.dockDisplayMode == L"all")
+        for (const DisplayInfo& display : displays) {
+            if (display.primary || std::any_of(g_app.secondaryBars.begin(), g_app.secondaryBars.end(),
+                    [&](const auto& bar) { return bar->DisplayOverride() == display.id; }))
+                continue;
+            auto bar = std::make_unique<Bar>(g_app.instance, g_app.capturable, display.id);
+            ConfigureBar(*bar);
+            bar->Apply(settings);
+            bar->SetStatus(g_app.lastStatus);
+            bar->SetUnread(g_app.notes->Unread());
+            g_app.secondaryBars.push_back(std::move(bar));
+        }
+    const auto items = g_app.tasks->Snapshot();
+    ForBars([&](Bar& bar) {
+        if (refresh)
+            bar.RefreshDisplays();
+        bar.Apply(settings);
+        bar.SetItems(items);
+        bar.SetVisible(settings.bar);
+    });
+    g_app.notes->PanelsChanged();
 }
 
 LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -821,7 +965,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_STATUS: {
         std::unique_ptr<SystemStatus> status(reinterpret_cast<SystemStatus*>(l));
         status->brightness = g_app.brightness;
-        g_app.bar->SetStatus(*status);
+        g_app.lastStatus = *status;
+        ForBars([&](Bar& bar) { bar.SetStatus(*status); });
         g_app.control->SetStatus(*status);
         g_app.start->SetStatus(*status);
         g_app.widgets->SetStatus(*status);
@@ -918,13 +1063,25 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_DISPLAYCHANGE:
     case WM_DPICHANGED:
+        if (!g_app.displaysReady)
+            return 0;
         if (g_app.chrome)
             g_app.chrome->Enforce(); // a new display's taskbar
-        g_app.bar->Relayout();
+        SyncDisplayBars(g_app.displaySettings, true);
+        {
+            HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), g_app.desktopDisplay);
+            g_app.widgets->SetMonitor(desktop, true);
+            g_app.stage->SetMonitor(desktop, true);
+            g_app.notes->PanelsChanged();
+        }
         return 0;
     case WM_SETTINGCHANGE:
-        if (w == SPI_SETWORKAREA)
-            g_app.bar->Relayout(); // e.g. the system taskbar changed size or auto-hide
+        if (w == SPI_SETWORKAREA && g_app.displaysReady) {
+            SyncDisplayBars(g_app.displaySettings, true);
+            HMONITOR desktop = ResolveDisplay(ConnectedDisplays(), g_app.desktopDisplay);
+            g_app.widgets->SetMonitor(desktop, true);
+            g_app.stage->SetMonitor(desktop, true);
+        }
         return 0;
     case WM_CLOSE:
         if (g_app.chrome) g_app.chrome->RestoreForExit();
@@ -1044,7 +1201,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         Log(L"core: imported %zu Windows taskbar pins", settings.pins->size());
     }
     const bool capturable = wcsstr(cmdLine, L"--debug-capturable") != nullptr;
+    g_app.capturable = capturable;
     g_app.bar = std::make_unique<Bar>(instance, capturable);
+    g_app.activeBar = g_app.bar.get();
     // The bar's render thread draws the popups' glass from its capture.
     Surface::SetGlassHost(g_app.bar.get());
     Surface::SetCapturable(capturable);
@@ -1055,10 +1214,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
             g_app.stage->Update(g_app.tasks->Snapshot(true));
         const double t1 = ClockMs();
         auto items = g_app.tasks->Snapshot();
-        if (g_app.preview)
-            g_app.preview->Refresh(items);
         const double t2 = ClockMs();
-        g_app.bar->SetItems(std::move(items));
+        ForBars([&](Bar& bar) { bar.SetItems(items); });
+        if (g_app.preview)
+            g_app.preview->Refresh(ActiveBar().Items());
         const double t3 = ClockMs();
         if (g_app.start)
             g_app.start->Refresh();
@@ -1100,47 +1259,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         if (!g_app.calendar->Visible())
             ToggleCalendar();
     };
-    g_app.notes->bellRect = [] { return g_app.bar->EntryRect(L"#notify"); };
-    g_app.notes->barRect = [] { return g_app.bar->BarRect(); };
-    g_app.notes->onUnread = [](int n) { g_app.bar->SetUnread(n); };
+    g_app.notes->bellRect = [] { return ActiveBar().EntryRect(L"#notify"); };
+    g_app.notes->barRect = [] { return ActiveBar().BarRect(); };
+    g_app.notes->onUnread = [](int n) { ForBars([&](Bar& bar) { bar.SetUnread(n); }); };
     g_app.notes->onActivate = RunNoticeAction;
     g_app.notes->quietIsOurs = [] { return g_app.chrome && g_app.chrome->QuietIsOurs(); };
     // New cards wait while one of Atrium's panels is open (they would overlap it).
     g_app.notes->held = [] {
         return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible();
     };
-    g_app.bar->iconProvider = [](const std::wstring& key, int px) { return g_app.tasks->Icon(key, px); };
-    g_app.bar->onActivate = [](const std::wstring& key) { g_app.tasks->Activate(key); };
-    g_app.bar->onLaunch = [](const std::wstring& key) { g_app.tasks->Launch(key); };
-    g_app.bar->onItemMenu = ShowItemMenu;
-    g_app.bar->onClockClick = ToggleCalendar;
-    g_app.bar->onReorder = Reorder;
-    g_app.bar->onOverflow = ShowOverflow;
-    g_app.bar->onStartClick = ToggleStart;
-    g_app.bar->onNotifyClick = [](RECT) { g_app.notes->ToggleCenter(); };
-    g_app.bar->onTrayClick = ToggleTray;
-    g_app.bar->onStatusClick = ToggleControl;
-    g_app.bar->keepShown = [] {
-        return g_app.start->Visible() || g_app.trayPanel->Visible() || g_app.control->Visible() || g_app.calendar->Visible() ||
-               g_app.notes->CenterVisible();
-    };
-    g_app.bar->onStatusWheel = [](int notches) {
-        AdjustVolume(2 * notches);
-        UpdateStatus();
-    };
-    g_app.bar->onFileDragHover = [](const std::wstring& key) { g_app.tasks->Show(key); };
-    g_app.bar->canOpenFiles = [](const std::wstring& key) { return g_app.tasks->CanOpenFiles(key); };
-    g_app.bar->onDropFiles = [](const std::wstring& key, const std::vector<std::wstring>& files) { g_app.tasks->OpenFiles(key, files); };
-    g_app.bar->onContextMenu = ShowMenu;
     // Pointer on an app with windows: its windows, previewed above it (as the Windows taskbar).
     g_app.preview = std::make_unique<WindowPreview>(instance);
-    g_app.bar->onPreview = [](const std::wstring& key, const std::vector<HWND>& windows, POINT anchor) {
-        g_app.preview->Show(key, windows, anchor, g_app.tasks->Icon(key, 64));
-    };
-    g_app.bar->onPreviewLeave = [] { g_app.preview->Leave(); };
-    g_app.bar->onPreviewClose = [] { g_app.preview->Close(); };
-    g_app.bar->previewOpen = [] { return g_app.preview->Visible(); };
-    g_app.bar->onCloseRequest = [] { PostMessageW(g_app.host, WM_CLOSE, 0, 0); };
+    ConfigureBar(*g_app.bar);
+    g_app.displaysReady = true;
     ApplySettings(settings);
     g_app.bar->SetItems(g_app.tasks->Snapshot());
     g_app.server = std::make_unique<SettingsServer>(g_app.host, settings);
@@ -1167,6 +1298,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    g_app.displaysReady = false;
     // First the render thread, while every window it draws for is still there; a driver call stuck
     // in the desktop duplication (it holds the shared device) must not keep Atrium from exiting:
     // the system taskbar comes back and the process ends.
@@ -1175,7 +1307,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.winKey.reset();
     g_app.status.reset();
     g_app.preview->Close();
-    if (!g_app.bar->StopRendering(3000)) {
+    bool renderingStopped = true;
+    ForBars([&](Bar& bar) { renderingStopped &= bar.StopRendering(3000); });
+    if (!renderingStopped) {
         g_app.chrome.reset();
         Log(L"core: exited (render thread stuck)");
         ReleaseMutex(mutex);
@@ -1201,6 +1335,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     Surface::SetGlassHost(nullptr);
     g_app.catalog.reset();
     g_app.tasks.reset();
+    g_app.secondaryBars.clear();
     g_app.bar.reset();
     g_app.chrome.reset();
     Log(L"core: exited");
