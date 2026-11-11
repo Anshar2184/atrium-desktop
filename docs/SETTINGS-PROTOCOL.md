@@ -30,7 +30,7 @@
 | `showStatus` | bool | | true | 状态环与控制中心入口 |
 | `showNotifications` | bool | | true | 通知入口；关闭入口不关闭通知来源 |
 | `textColor` | string | `auto` / `light` / `dark` | `auto` | 文字颜色；`auto` 按玻璃下方的实际亮度选择 |
-| `autoHide` | string | `never` / `fullscreen` / `always` | `fullscreen` | 栏的显示方式：常驻；全屏时隐藏（最大化或全屏的应用在前面时滑出屏幕）；一直隐藏。隐藏时，指针移到栏下方的屏幕底边栏就出现，离开后收回 |
+| `autoHide` | string | `never` / `fullscreen` / `always` | `fullscreen` | 栏的显示方式：常驻；全屏时隐藏（有最大化、全屏或分屏铺满屏幕的窗口时滑出屏幕，前面再开小窗口也不出来）；一直隐藏。隐藏时，指针移到栏下方的屏幕底边栏就出现，离开后收回 |
 | `statusStyle` | string | `ring` / `icons` | `ring` | 状态栏的样子：Wi-Fi 外面一圈电量或音量的圆环；或者像 Windows 任务栏那样并排的网络、音量、电池三个图标（自绘，跟随字色）。点按都打开控制中心 |
 | `iconSize` | number | 16–64 DIP | 30 | 任务栏图标边长 |
 | `magnify` | number | 1–2 | 1.7 | 悬停放大：指针下图标的缩放倍数，相邻图标按波形放大；1 为关闭 |
@@ -56,8 +56,8 @@
 | `widgetMaterial` | string | `glass` / `dusk` / `color` | `glass` | 小组件的材质：任务栏的玻璃（墨色随玻璃变化）；暮色（同一块玻璃压上 22% 的黑，文字与图标全白，单色）；原色（不渲染玻璃，不透明的白底与浅色模式强调色，天气小组件为随天气变化的天空渐变） |
 | `stageManager` | bool | | false | 台前调度：前台应用留在屏幕中间，其他应用的窗口先在后台拍下画面，再最小化（不激活），画面斜立在屏幕一侧；打开时桌面小组件排到台前调度的另一侧（Core 从栏上打开时同时写入 `widgetsOnRight`）；关闭或 Core 退出时全部恢复。Core 把收起的窗口记在 `%LOCALAPPDATA%\Atrium\stage.json`（窗口句柄、应用键与分组），异常退出后再次启动时接回仍处于最小化的窗口 |
 | `stageOnRight` | bool | | false | 台前调度的窗口放在屏幕右侧；默认左侧 |
-| `stageAutoHide` | bool | | false | 悬停弹出：台前调度平时隐藏，指针碰到那一侧的屏幕边缘时才滑出；默认常驻（窗口挡住时让开） |
-| `stageMinimize` | bool | | false | 窗口最小化到台前调度：前面的应用的窗口全部最小化后，窗口的画面直接飞进一侧的卡片（不播放系统的最小化动画），点卡片换回前面；默认关闭（最小化的窗口不进台前调度） |
+| `stageAutoHide` | bool | | false | 悬停弹出：台前调度平时隐藏，指针碰到那一侧的屏幕边缘时才滑出；默认常驻：压在侧边位置上的普通窗口来到前台时挪到旁边；窗口最大化、被拖到上面或应用铺满整个屏幕时让开（指针碰到屏幕边缘时滑出） |
+| `stageMinimize` | bool | | false | 窗口最小化到台前调度：前面的窗口最小化后，它的画面直接飞进一侧的卡片（不播放系统的最小化动画），点卡片换回前面；默认关闭（最小化的窗口不进台前调度） |
 | `hideTaskbar` | bool | | false | Atrium 运行时隐藏系统任务栏（并设为自动隐藏），关闭或退出时恢复（D37）。隐藏期间另有一个看护进程（`Atrium.exe --guard <pid>`）：Atrium 无论怎样结束（崩溃、被结束进程），它都立刻还原任务栏、自动隐藏设置和请勿打扰；Atrium 约 15 秒无响应时先显示任务栏 |
 | `hideBanners` | bool | | false | 打开“请勿打扰”（仅闹钟）去掉系统横幅，通知仍显示为 Atrium 卡片；关闭或退出时恢复（D37） |
 | `winKeyStart` | bool | | false | 单独按下 Win 键时打开 Atrium 的开始菜单，Windows 的开始菜单不出现。低级键盘钩子在单独的线程上先扣下 Win 键：后面跟了别的键（Win + E 等）就把两个键一起交给 Windows，单独松开则 Windows 始终没有收到它。前台是管理员权限的窗口时（补发的按键送不进去）不拦截。Win + L 由系统在钩子之前处理，不受影响。需要打开 `bar` |

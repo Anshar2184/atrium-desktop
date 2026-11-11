@@ -39,11 +39,13 @@ public:
     WindowSnapshots(const WindowSnapshots&) = delete;
     WindowSnapshots& operator=(const WindowSnapshots&) = delete;
 
-    // Pictures `window` at most maxWidth x maxHeight px, corners of `radius` px.
-    void Request(HWND window, int maxWidth, int maxHeight, float radius);
+    // Pictures `window` at most maxWidth x maxHeight px, corners of `radius` px; with largeMax, also
+    // a large one (at most largeMax px either way, the window's own corners, no shadow).
+    void Request(HWND window, int maxWidth, int maxHeight, float radius, int largeMax = 0);
     struct Result {
         HWND window;
         WindowPicture picture;
+        WindowPicture large; // ok only if asked for and taken
     };
     std::vector<Result> Take();
 

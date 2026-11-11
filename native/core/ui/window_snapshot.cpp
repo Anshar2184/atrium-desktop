@@ -95,7 +95,7 @@ IconImage SoftShadow(int w, int h)
 
 namespace {
 
-WindowPicture Finish(std::vector<uint8_t> pixels, int w, int h, float radius)
+WindowPicture Finish(std::vector<uint8_t> pixels, int w, int h, float radius, bool shadow = true)
 {
     WindowPicture p;
     p.width = w;
@@ -113,12 +113,34 @@ WindowPicture Finish(std::vector<uint8_t> pixels, int w, int h, float radius)
             d[2] = uint8_t(std::lround(s[2] * a));
             d[3] = uint8_t(std::lround(255 * a));
         }
-    p.shadow = SoftShadow(w, h);
+    if (shadow)
+        p.shadow = SoftShadow(w, h);
     p.ok = true;
     return p;
 }
 
-WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius)
+// The window's own corners, px: rounded on Windows 11 (unless maximized, or the app asks otherwise),
+// square before.
+float CornerRadius(HWND window)
+{
+    if (IsZoomed(window))
+        return 0;
+    static const bool eleven = [] {
+        using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
+        OSVERSIONINFOW v{sizeof(v)};
+        auto get = reinterpret_cast<RtlGetVersionFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
+        return get && get(&v) == 0 && v.dwBuildNumber >= 22000;
+    }();
+    if (!eleven)
+        return 0;
+    DWM_WINDOW_CORNER_PREFERENCE pref = DWMWCP_DEFAULT;
+    DwmGetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
+    if (pref == DWMWCP_DONOTROUND)
+        return 0;
+    return (pref == DWMWCP_ROUNDSMALL ? 4.f : 8.f) * float(GetDpiForWindow(window)) / 96.f;
+}
+
+WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius, int largeMax, WindowPicture* large)
 {
     RECT win{}, frame{};
     if (!GetWindowRect(window, &win) || win.right <= win.left || win.bottom <= win.top)
@@ -162,6 +184,12 @@ WindowPicture Capture(HWND window, int maxWidth, int maxHeight, float radius)
             const float f = std::min({1.f, float(maxWidth) / float(pw), float(maxHeight) / float(ph)});
             const int tw = std::max(1, int(std::lround(pw * f))), th = std::max(1, int(std::lround(ph * f)));
             result = Finish(Shrink(src, pw, ph, ww * 4, tw, th), tw, th, radius);
+            if (largeMax > 0 && large) {
+                // Near the window's own size, with its own corners: where it flies to its place.
+                const float g = std::min(1.f, float(largeMax) / float(std::max(pw, ph)));
+                const int lw = std::max(1, int(std::lround(pw * g))), lh = std::max(1, int(std::lround(ph * g)));
+                *large = Finish(Shrink(src, pw, ph, ww * 4, lw, lh), lw, lh, CornerRadius(window) * g, false);
+            }
         }
     }
     SelectObject(dc, old);
@@ -210,16 +238,17 @@ WindowSnapshots::~WindowSnapshots()
     shared_->notify = nullptr; // workers still out drop what they bring
 }
 
-void WindowSnapshots::Request(HWND window, int maxWidth, int maxHeight, float radius)
+void WindowSnapshots::Request(HWND window, int maxWidth, int maxHeight, float radius, int largeMax)
 {
-    std::thread([shared = shared_, window, maxWidth, maxHeight, radius] {
+    std::thread([shared = shared_, window, maxWidth, maxHeight, radius, largeMax] {
         // Physical px of every monitor, as the window's own picture is.
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        WindowPicture p = Capture(window, maxWidth, maxHeight, radius);
+        WindowPicture large;
+        WindowPicture p = Capture(window, maxWidth, maxHeight, radius, largeMax, &large);
         std::lock_guard g(shared->lock);
         if (!shared->notify)
             return;
-        shared->done.push_back(Result{window, std::move(p)});
+        shared->done.push_back(Result{window, std::move(p), std::move(large)});
         PostMessageW(shared->notify, shared->message, 0, 0);
     }).detach();
 }

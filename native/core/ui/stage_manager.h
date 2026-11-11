@@ -1,8 +1,8 @@
-// Stage Manager, after macOS's: the app in front stays on the stage, the others wait in a strip at
-// the side of the screen, their windows standing at an angle in perspective, each with its shadow and
-// its app's icon, nothing behind them. A click there swaps the sets; Shift and a click brings a set
-// onto the stage beside the one there, and the apps on the stage together go back to the strip as
-// one set, to come back together. Activating a window any other way (the bar, Alt+Tab, a
+// Stage Manager, after macOS's: the window in front stays on the stage, the others wait in a strip
+// at the side of the screen, each on a card of its own (two windows of one app are two cards),
+// standing at an angle in perspective, with its shadow and its app's icon, nothing behind them. A
+// click there swaps the sets; Shift and a click brings a set onto the stage beside the one there,
+// and the windows on the stage together go back to the strip as one set, to come back together. Activating a window any other way (the bar, Alt+Tab, a
 // notification) changes the stage too.
 //
 // Waiting windows are minimized without activation: Windows' own state, so nothing is lost if
@@ -13,8 +13,10 @@
 // so that a restart picks them up again; turning Stage Manager off or quitting Atrium brings them
 // all back.
 //
-// Only the selected desktop display is managed. Always shown, the strip steps aside while a window on the stage
-// covers its place; auto-hidden, it only comes out while the pointer rests on that edge of the screen.
+// Only the selected desktop display is managed. Always shown, a window taking the stage over the
+// strip's place moves beside it (so that the strip stays out); the strip steps aside while a window
+// covers its place anyway (maximized, or put there), and comes out over it while the pointer rests on
+// that edge. Auto-hidden, it only comes out that way.
 #pragma once
 
 #include "motion.h"
@@ -44,8 +46,7 @@ public:
     bool Enabled() const { return enabled_; }
     void SetOnRight(bool onRight);
     void SetAutoHide(bool autoHide);
-    // A window minimized on the stage goes to the strip with its app (setting stageMinimize): once
-    // all of an app's windows on the stage are down, the app waits there as a set of its own.
+    // A window minimized on the stage goes to the strip (setting stageMinimize), on a card of its own.
     void SetMinimizeToStrip(bool on);
     // EVENT_SYSTEM_MINIMIZESTART (its hook while the option is on): at once, not when the task model next reports.
     void Minimized(HWND window);
@@ -65,6 +66,7 @@ private:
     };
     struct Picture {
         std::shared_ptr<const WindowPicture> picture;
+        std::shared_ptr<const WindowPicture> large; // near the window's size, its own corners (flights)
         unsigned gen = 0; // its images' cache keys change with it
         ULONGLONG taken = 0; // when it was taken (or asked for)
     };
@@ -80,13 +82,15 @@ private:
         HWND window = nullptr;
         std::shared_ptr<const WindowPicture> picture;
         std::wstring key;
+        std::shared_ptr<const WindowPicture> large; // the picture becomes this near the window's place
+        std::wstring largeKey;
         bool toStrip = true;
         Pose from;        // fromStrip: where it was in the strip
         Pose place;       // the window's place
         double elapsed = 0, last = 0; // ms of the flight drawn, and when the last frame was
         bool restored = false, activate = false;
     };
-    using Set = std::vector<std::wstring>; // apps that come and go together
+    using Set = std::vector<std::wstring>; // windows (WindowKey) that come and go together
     struct Entry {
         Set keys;
         std::vector<HWND> windows; // front first, at most kStack
@@ -109,6 +113,10 @@ private:
     void ReleaseUp();          // the stage's windows get their own minimize animation back
     bool AdoptMinimized();     // the stage's apps whose windows were all minimized go to the strip
     void KeepPicture();        // a picture of the window in front, ready for when it is minimized
+    void RequestPicture(HWND window);
+    void SetLarge(Flight& f);  // the flight's large picture, if the window has one
+    bool Beside(RECT& frame) const; // moves a frame over the strip's place beside it; false if it was not over it
+    void MoveBeside(HWND window);   // the window beside the strip (minimized: where it comes back)
     void Save();
     void Load();
     int Capacity() const;
@@ -138,7 +146,7 @@ private:
     D2D1_POINT_2F StripOffset() const;        // strip DIP to flight DIP
     bool Flying(HWND window) const;
     void PaintFlights(Canvas& c);
-    void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity);
+    void DrawPicture(Canvas& c, const WindowPicture& p, const std::wstring& key, const Pose& pose, float opacity, bool shadow = true, bool image = true);
 
     TaskModel& tasks_;
     Surface surface_;
