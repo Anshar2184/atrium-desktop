@@ -18,6 +18,26 @@ struct Face {
     winrt::com_ptr<IDWriteTypography> tabular;
 };
 
+} // namespace
+
+const wchar_t* IconFontFamily()
+{
+    static const wchar_t* family = [] {
+        winrt::com_ptr<IDWriteFactory> dw;
+        winrt::com_ptr<IDWriteFontCollection> fonts;
+        UINT32 index = 0;
+        BOOL exists = FALSE;
+        if (SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dw.put()))) &&
+            SUCCEEDED(dw->GetSystemFontCollection(fonts.put())) && SUCCEEDED(fonts->FindFamilyName(L"Segoe Fluent Icons", &index, &exists)) && exists)
+            return L"Segoe Fluent Icons";
+        Log(L"font: no Segoe Fluent Icons, icons in Segoe MDL2 Assets");
+        return L"Segoe MDL2 Assets";
+    }();
+    return family;
+}
+
+namespace {
+
 const Face& TheFace()
 {
     static Face face;

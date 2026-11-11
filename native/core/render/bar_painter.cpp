@@ -503,7 +503,7 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     if (it.key == L"#start") {
         DrawLogo(d2d, icon, m.appear);
     } else if (!it.glyph.empty()) {
-        if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+        if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
             brush->SetColor(ink);
             d2d->DrawText(it.glyph.c_str(), UINT32(it.glyph.size()), f, icon, brush);
         }
@@ -606,7 +606,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
         if (alpha <= 0.003f)
             return;
         if (st.connected && !st.wifi) {
-            if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+            if (IDWriteTextFormat* f = Format(size * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
                 brush->SetColor(fade(ink, alpha));
                 d2d->DrawText(L"\uE839", 1, f, D2D1::RectF(cx - size, cy - size / 2, cx + size, cy + size / 2), brush);
             }
@@ -670,7 +670,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
     auto symbol = [&](const wchar_t* glyph, float alpha) {
         if (alpha <= 0.003f)
             return;
-        if (IDWriteTextFormat* f = Format(h * 0.40f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+        if (IDWriteTextFormat* f = Format(h * 0.40f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
             brush->SetColor(fade(ink, alpha));
             d2d->DrawText(glyph, 1, f, D2D1::RectF(cx - h / 2, cy - h / 2, cx + h / 2, cy + h / 2), brush);
         }
@@ -683,7 +683,7 @@ void BarPainter::DrawStatus(ID2D1DeviceContext2* d2d, const SystemStatus& st, D2
     // laptop's bolt would be (gone while the brightness shows).
     const float gapSpeaker = !st.battery && st.audio ? 1 - sm.brightMix : 0.f;
     if (gapSpeaker > 0.003f)
-        if (IDWriteTextFormat* f = Format(h * 0.22f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+        if (IDWriteTextFormat* f = Format(h * 0.22f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
             brush->SetColor(fade(ink, gapSpeaker));
             const float gy = cy + rad;
             d2d->DrawText(volumeGlyph, 1, f, D2D1::RectF(cx - h / 4, gy - h / 4, cx + h / 4, gy + h / 4), brush);
@@ -708,7 +708,7 @@ void BarPainter::DrawStatusIcons(ID2D1DeviceContext2* d2d, const SystemStatus& s
 
     // The network: the Wi-Fi fan lit by the signal, the wired glyph, or a faint fan offline.
     if (st.connected && !st.wifi) {
-        if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons")) {
+        if (IDWriteTextFormat* f = Format(h * 0.62f, DWRITE_FONT_WEIGHT_NORMAL, IconFontFamily())) {
             brush->SetColor(ink);
             d2d->DrawText(L"\uE839", 1, f, D2D1::RectF(x - h, cy - h / 2, x + netW + h, cy + h / 2), brush);
         }

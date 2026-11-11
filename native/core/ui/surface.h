@@ -220,6 +220,7 @@ private:
     void Present();
     bool EnsureDevice();
     void ResetDevice();
+    void RetryFrame();
     void Place(RECT rect); // texture = content + margin; desktop HWND stays stationary
     void ApplyPlacement();
     void ApplyRegion();
@@ -296,7 +297,8 @@ private:
     winrt::com_ptr<ID2D1Bitmap> calloutMask_; // one current label mask, only allocated for the plain fallback
     std::array<float, 7> calloutMaskKey_{};
     winrt::com_ptr<ID2D1BitmapBrush> roundedImageBrush_;
-    winrt::com_ptr<ID2D1Effect> blur_; // Canvas::EndBlur
+    winrt::com_ptr<ID2D1Effect> blur_; // Canvas::EndBlur; of the current device context only
+    int failedFrames_ = 0;             // in a row, each on a fresh device (RetryFrame)
     winrt::com_ptr<ID2D1CommandList> roundedMask_;
     D2D1_RECT_F roundedMaskRect_{};
     float roundedMaskRadius_ = 0;

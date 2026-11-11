@@ -14,6 +14,10 @@
 
 namespace atrium {
 
+// The icon glyphs' face: Segoe Fluent Icons (Windows 11), else Segoe MDL2 Assets (Windows 10 and
+// systems without it), which has every glyph Atrium draws at the same code points.
+const wchar_t* IconFontFamily();
+
 // A text format in the interface face at `px`, for one of the usual weights.
 HRESULT UiTextFormat(IDWriteFactory* dw, float px, DWRITE_FONT_WEIGHT weight, IDWriteTextFormat** out);
 

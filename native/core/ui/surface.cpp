@@ -347,7 +347,7 @@ IDWriteTextFormat* Canvas::Format(float px, DWRITE_FONT_WEIGHT w, bool glyph, in
     auto& f = s_.formats_[key];
     if (!f) {
         if (glyph)
-            s_.dwrite_->CreateTextFormat(L"Segoe Fluent Icons", nullptr, w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put());
+            s_.dwrite_->CreateTextFormat(IconFontFamily(), nullptr, w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"", f.put());
         else
             UiTextFormat(s_.dwrite_.get(), px, w, f.put());
         if (!f)
@@ -1172,11 +1172,20 @@ void Surface::ResetDevice()
     calloutMask_ = nullptr;
     roundedImageBrush_ = nullptr;
     roundedMask_ = nullptr;
+    blur_ = nullptr; // an effect belongs to the device context that made it
     bitmaps_.clear();
     bufW_ = bufH_ = 0;
     if (shared_)
         shared_->dcomp->Commit();
     shared_ = nullptr;
+}
+
+// A lost frame is drawn again on the fresh device at once: nothing else may ask for one, and the
+// window would show only its glass. A device that keeps failing is not retried in a loop.
+void Surface::RetryFrame()
+{
+    if (++failedFrames_ <= 3 && visible_)
+        FramePump::Get().Want(hwnd_);
 }
 
 bool Surface::EnsureDevice()
@@ -1298,8 +1307,10 @@ void Surface::Paint()
         if (shared_)
             shared_->lost = true;
         ResetDevice();
+        RetryFrame();
         return;
     }
+    failedFrames_ = 0;
     paintMs_ = ms;
     presentGen_ = glassGen_;
     presentPending_ = true;
@@ -1331,6 +1342,7 @@ void Surface::Present()
         if (shared_)
             shared_->lost = true;
         ResetDevice();
+        RetryFrame();
         return;
     }
     const double ms = paintMs_;
