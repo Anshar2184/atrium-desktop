@@ -1,5 +1,7 @@
 #include "shell/feishu_source.h"
 
+#include "localization.h"
+
 #include "log.h"
 #include "shell/uia_client.h"
 
@@ -211,7 +213,7 @@ void FeishuSource::Run()
                         continue;
                     auto* n = new Notice();
                     n->source = L"feishu";
-                    n->app = L"飞书";
+                    n->app = Tr(L"飞书");
                     n->appId = procs.at(pid);
                     n->title = t[0];
                     for (size_t i = 1; i < t.size(); ++i)

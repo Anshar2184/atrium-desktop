@@ -2,6 +2,7 @@ add_executable(display_settings_tests
     display_settings.cpp
     ../core/shell/displays.cpp
     ../core/settings.cpp
+    ../core/localization.cpp
     ../core/log.cpp
     ../core/shell/logon_task.cpp)
 target_include_directories(display_settings_tests PRIVATE ../core)

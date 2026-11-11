@@ -1,4 +1,6 @@
 #include "shell/update_checker.h"
+
+#include "localization.h"
 #include "log.h"
 #include "settings.h"
 #include "ui/notifications.h"
@@ -214,8 +216,8 @@ void UpdateChecker::NotifyPrepared(Notifications& notifications)
         notice.source = L"atrium-update";
         notice.externalId = 1; // one current update card, independent of ordinary notices
         notice.app = L"Atrium";
-        notice.title = L"更新已准备好";
-        notice.body = tag + L" 已下载完成，可在关于中选择重启更新。";
+        notice.title = Tr(L"更新已准备好");
+        notice.body = tag + Tr(L" 已下载完成，可在关于中选择重启更新。");
         notice.action = L"settings:updates";
         notifications.Post(std::move(notice), silent);
         // This runs synchronously on the UI thread: the card is now accepted,

@@ -32,6 +32,8 @@ public:
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor, bool refresh = false);
     void SetMaterial(WidgetMaterial material);
+    // A language change: the weather's labels are fetched, so fetch them again and repaint.
+    void ReloadLanguage();
     // Adds a widget in the first free place; false when there is no room.
     bool Add(WidgetKind kind, WidgetSize size);
     // The same by name ("clock", "medium"; the settings app's gallery).

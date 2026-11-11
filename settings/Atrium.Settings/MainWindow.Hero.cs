@@ -131,7 +131,8 @@ public sealed partial class MainWindow
     private void OnEngage(string title, bool on)
     {
         _engaged = on ? title : (_engaged == title ? null : _engaged);
-        bool edge = _engaged is "折射强度" or "折射边缘宽度" or "色散" or "高光" or "圆角" or "阴影";
+        bool edge = _engaged == Loc.T("折射强度") || _engaged == Loc.T("折射边缘宽度") || _engaged == Loc.T("色散") ||
+                    _engaged == Loc.T("高光") || _engaged == Loc.T("圆角") || _engaged == Loc.T("阴影");
         Loupe.BorderBrush = edge ? Tokens.Brush("AccentBrush") : new SolidColorBrush(Color.FromArgb(179, 255, 255, 255));
         UpdateHero();
     }
@@ -278,50 +279,42 @@ public sealed partial class MainWindow
         }
 
         double barBottom = L.BarY + L.BarH, barRight = L.BarX + L.BarW;
-        switch (_engaged)
+        if (_engaged == Loc.T("高度"))
         {
-            case "高度":
-            {
-                double x = L.BarX - 14;
-                Line(x, L.BarY, x, barBottom); Line(x - 4, L.BarY, x + 4, L.BarY); Line(x - 4, barBottom, x + 4, barBottom);
-                Chip($"{Math.Round(_current.Height)} px", x - 30, L.BarY + L.BarH / 2 - 10);
-                break;
-            }
-            case "底部间距":
-            {
-                double x = L.BarX + L.BarW * 0.5;
-                Line(x, barBottom, x, _heroH); Line(x - 4, barBottom, x + 4, barBottom); Line(x - 4, _heroH - 1, x + 4, _heroH - 1);
-                Chip($"{Math.Round(_current.Margin)} px", x + 34, (barBottom + _heroH) / 2 - 10);
-                break;
-            }
-            case "最大宽度":
-            {
-                double y = L.BarY - 12, x0 = (_heroW - L.MaxW) / 2, x1 = x0 + L.MaxW;
-                Line(x0, y, x1, y, dashed: true); Line(x0, y - 4, x0, y + 4); Line(x1, y - 4, x1, y + 4);
-                Chip($"{Math.Round(_current.Width)} px", _heroW / 2, y - 24);
-                break;
-            }
-            case "圆角":
-            {
-                // The circle the corner is an arc of, and its radius.
-                double r = Math.Max(L.Radius, 2);
-                var circle = new Ellipse { Width = 2 * r, Height = 2 * r, Stroke = white, StrokeThickness = 1.25, StrokeDashArray = new DoubleCollection { 3, 3 }, IsHitTestVisible = false };
-                Canvas.SetLeft(circle, L.BarX);
-                Canvas.SetTop(circle, L.BarY);
-                _annotations.Add(circle);
-                HeroCanvas.Children.Add(circle);
-                Line(L.BarX + r, L.BarY + r, L.BarX + r - r * 0.7071, L.BarY + r - r * 0.7071);
-                Chip($"R {Math.Round(Math.Min(_current.CornerRadius, _current.Height / 2))} px", L.BarX + r, L.BarY - 30);
-                break;
-            }
-            case "图标大小":
-            {
-                if (L.N == 0) break;
-                double x = L.PlateX(0) + L.P / 2 - L.Icon / 2 - 4, y0 = L.PlateY + L.P / 2 - L.Icon / 2, y1 = y0 + L.Icon;
-                Line(x, y0, x, y1); Line(x - 3, y0, x + 3, y0); Line(x - 3, y1, x + 3, y1);
-                Chip($"{Math.Round(_current.IconSize)} px", L.PlateX(0) + L.P / 2, L.BarY - 28);
-                break;
-            }
+            double x = L.BarX - 14;
+            Line(x, L.BarY, x, barBottom); Line(x - 4, L.BarY, x + 4, L.BarY); Line(x - 4, barBottom, x + 4, barBottom);
+            Chip($"{Math.Round(_current.Height)} px", x - 30, L.BarY + L.BarH / 2 - 10);
+        }
+        else if (_engaged == Loc.T("底部间距"))
+        {
+            double x = L.BarX + L.BarW * 0.5;
+            Line(x, barBottom, x, _heroH); Line(x - 4, barBottom, x + 4, barBottom); Line(x - 4, _heroH - 1, x + 4, _heroH - 1);
+            Chip($"{Math.Round(_current.Margin)} px", x + 34, (barBottom + _heroH) / 2 - 10);
+        }
+        else if (_engaged == Loc.T("最大宽度"))
+        {
+            double y = L.BarY - 12, x0 = (_heroW - L.MaxW) / 2, x1 = x0 + L.MaxW;
+            Line(x0, y, x1, y, dashed: true); Line(x0, y - 4, x0, y + 4); Line(x1, y - 4, x1, y + 4);
+            Chip($"{Math.Round(_current.Width)} px", _heroW / 2, y - 24);
+        }
+        else if (_engaged == Loc.T("圆角"))
+        {
+            // The circle the corner is an arc of, and its radius.
+            double r = Math.Max(L.Radius, 2);
+            var circle = new Ellipse { Width = 2 * r, Height = 2 * r, Stroke = white, StrokeThickness = 1.25, StrokeDashArray = new DoubleCollection { 3, 3 }, IsHitTestVisible = false };
+            Canvas.SetLeft(circle, L.BarX);
+            Canvas.SetTop(circle, L.BarY);
+            _annotations.Add(circle);
+            HeroCanvas.Children.Add(circle);
+            Line(L.BarX + r, L.BarY + r, L.BarX + r - r * 0.7071, L.BarY + r - r * 0.7071);
+            Chip($"R {Math.Round(Math.Min(_current.CornerRadius, _current.Height / 2))} px", L.BarX + r, L.BarY - 30);
+        }
+        else if (_engaged == Loc.T("图标大小"))
+        {
+            if (L.N == 0) return;
+            double x = L.PlateX(0) + L.P / 2 - L.Icon / 2 - 4, y0 = L.PlateY + L.P / 2 - L.Icon / 2, y1 = y0 + L.Icon;
+            Line(x, y0, x, y1); Line(x - 3, y0, x + 3, y0); Line(x - 3, y1, x + 3, y1);
+            Chip($"{Math.Round(_current.IconSize)} px", L.PlateX(0) + L.P / 2, L.BarY - 28);
         }
     }
 

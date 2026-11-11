@@ -1,5 +1,6 @@
 #include "shell/lunar.h"
 
+#include "localization.h"
 #include "log.h"
 
 #include <windows.h>
@@ -94,6 +95,8 @@ std::wstring ChineseCalendar::Line(int y, int m, int d) const
     bool leap = false;
     if (!Lunar(y, m, d, lm, ld, leap, cy))
         return {};
+    if (LanguageIsEnglish())
+        return L"Lunar " + std::to_wstring(lm) + L"/" + std::to_wstring(ld);
     static const wchar_t stems[] = L"甲乙丙丁戊己庚辛壬癸";
     static const wchar_t branches[] = L"子丑寅卯辰巳午未申酉戌亥";
     std::wstring year;
@@ -106,7 +109,9 @@ std::wstring ChineseCalendar::MonthDay(int y, int m, int d) const
 {
     int lm = 0, ld = 0, cy = 0;
     bool leap = false;
-    return Lunar(y, m, d, lm, ld, leap, cy) ? LunarMonth(lm, leap) + LunarDay(ld) : std::wstring();
+    if (!Lunar(y, m, d, lm, ld, leap, cy))
+        return {};
+    return LanguageIsEnglish() ? L"Lunar " + std::to_wstring(lm) + L"/" + std::to_wstring(ld) : LunarMonth(lm, leap) + LunarDay(ld);
 }
 
 std::wstring ChineseCalendar::DayLabel(int y, int m, int d, bool* festival) const
@@ -114,7 +119,7 @@ std::wstring ChineseCalendar::DayLabel(int y, int m, int d, bool* festival) cons
     auto mark = [&](const wchar_t* name) {
         if (festival)
             *festival = true;
-        return std::wstring(name);
+        return std::wstring(LanguageIsEnglish() ? Tr(name) : name);
     };
     if (festival)
         *festival = false;
@@ -148,6 +153,8 @@ std::wstring ChineseCalendar::DayLabel(int y, int m, int d, bool* festival) cons
         if (Lunar(ny, nm, nd, lm2, ld2, leap2, c2) && lm2 == 1 && ld2 == 1)
             return mark(L"除夕");
     }
+    if (LanguageIsEnglish())
+        return {}; // no lunar day under the Gregorian one; the festivals above still show
     return ld == 1 ? LunarMonth(lm, leap) : LunarDay(ld);
 }
 

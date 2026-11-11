@@ -125,10 +125,10 @@ public sealed partial class MainWindow
         StageCanvas.Width = W;
         StageCanvas.Height = H;
         bool on = _current.StageManager;
-        string side = _current.StageOnRight ? "右" : "左";
-        StageCaption.Text = !on ? "台前调度已关闭：窗口照常叠放在桌面上"
-            : _current.StageAutoHide ? $"把指针移到预览的{side}边缘，卡片滑出；点按换到前面，按住 Shift 点按加入这一组"
-            : $"点按{side}侧的卡片换到前面；按住 Shift 点按，加入当前这一组";
+        string side = _current.StageOnRight ? Loc.T("右") : Loc.T("左");
+        StageCaption.Text = !on ? Loc.T("台前调度已关闭：窗口照常叠放在桌面上")
+            : _current.StageAutoHide ? Loc.F("把指针移到预览的{0}边缘，卡片滑出；点按换到前面，按住 Shift 点按加入这一组", side)
+            : Loc.F("点按{0}侧的卡片换到前面；按住 Shift 点按，加入当前这一组", side);
         StageReplay.IsEnabled = on;
 
         StageCanvas.Children.Clear();
@@ -447,7 +447,7 @@ public sealed partial class MainWindow
                 Put(Plate(Vertical(Rgb(0xFFFFFF), Rgb(0xF3F3F6))), 0, 0);
                 Put(new TextBlock
                 {
-                    Text = "周三", Width = 64, TextAlignment = TextAlignment.Center, FontSize = 10.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Text = Loc.T("周三"), Width = 64, TextAlignment = TextAlignment.Center, FontSize = 10.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = new SolidColorBrush(Rgb(0xFF3B30)), IsTextScaleFactorEnabled = false,
                 }, 0, 6);
                 Put(new TextBlock
@@ -522,7 +522,7 @@ public sealed partial class MainWindow
         var titleBar = new Grid { Padding = new Thickness(9, 0, 10, 0), Background = new SolidColorBrush(app.Dark ? Rgb(0x2A2A2D) : Rgb(0xF6F6F8)) };
         var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         name.Children.Add(StageIconLive(index, 14));
-        name.Children.Add(new TextBlock { Text = app.Name, FontSize = 10, Foreground = new SolidColorBrush(faint), IsTextScaleFactorEnabled = false, VerticalAlignment = VerticalAlignment.Center });
+        name.Children.Add(new TextBlock { Text = Loc.T(app.Name), FontSize = 10, Foreground = new SolidColorBrush(faint), IsTextScaleFactorEnabled = false, VerticalAlignment = VerticalAlignment.Center });
         titleBar.Children.Add(name);
         titleBar.Children.Add(new TextBlock
         {
@@ -572,7 +572,7 @@ public sealed partial class MainWindow
                 }
                 g.Children.Add(list);
                 var paper = new StackPanel { Spacing = 9, Padding = new Thickness(16, 12, 16, 0) };
-                paper.Children.Add(StageText("周末计划", 13));
+                paper.Children.Add(StageText(Loc.T("周末计划"), 13));
                 foreach (double lw in new[] { 0.95, 0.8, 0.9, 0.6, 0.85, 0.4 }) paper.Children.Add(Bar(176 * lw, 5, line));
                 Grid.SetColumn(paper, 1);
                 g.Children.Add(paper);
@@ -605,7 +605,7 @@ public sealed partial class MainWindow
                 Grid.SetColumn(mails, 1);
                 g.Children.Add(mails);
                 var read = new StackPanel { Spacing = 8, Padding = new Thickness(12, 10, 12, 0) };
-                read.Children.Add(StageText("季度总结", 11));
+                read.Children.Add(StageText(Loc.T("季度总结"), 11));
                 foreach (double lw in new[] { 0.9, 0.95, 0.7, 0.85, 0.5 }) read.Children.Add(Bar(128 * lw, 4, line));
                 Grid.SetColumn(read, 2);
                 g.Children.Add(read);
@@ -617,7 +617,7 @@ public sealed partial class MainWindow
                 g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
                 for (int r = 0; r < 5; r++) g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
                 for (int col = 0; col < 7; col++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                var month = new TextBlock { Text = "11月", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Rgb(0x1C1C1E)), IsTextScaleFactorEnabled = false };
+                var month = new TextBlock { Text = Loc.T("11月"), FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Rgb(0x1C1C1E)), IsTextScaleFactorEnabled = false };
                 Grid.SetColumnSpan(month, 7);
                 g.Children.Add(month);
                 for (int d = 0; d < 35; d++)

@@ -1,5 +1,7 @@
 #include "shell/wechat_source.h"
 
+#include "localization.h"
+
 #include "log.h"
 #include "shell/uia_client.h"
 
@@ -245,7 +247,7 @@ void WeChatSource::Run()
                         if (baseline && rose && !r.muted) {
                             auto* n = new Notice();
                             n->source = L"wechat";
-                            n->app = L"微信";
+                            n->app = Tr(L"微信");
                             n->appId = exe;
                             n->title = r.chat;
                             n->body = r.summary;

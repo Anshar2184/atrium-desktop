@@ -44,6 +44,9 @@ struct Settings {
     bool showStatus = true;
     bool showNotifications = true;
     bool showRunning = true;
+    // The interface language of the bar, its popups, the widgets and the settings app.
+    // auto follows Windows' UI language (Chinese -> zh, anything else -> en).
+    std::wstring language = L"auto"; // auto | zh | en
     std::wstring textColor = L"auto"; // auto | light | dark
     // When the bar steps out of the way: never | fullscreen (a maximized or full-screen app is in
     // front) | always (it waits below the screen's bottom edge). The pointer there brings it up.

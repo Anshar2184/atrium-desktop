@@ -13,7 +13,8 @@ public partial class App : Application
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int MessageBox(IntPtr hwnd, string text, string title, uint type);
     internal const uint OpenAboutMessage = 0x8000 + 31;
 
-    public const string WindowTitle = "Atrium 设置";
+    public static string WindowTitle => Loc.T("Atrium 设置");
+    internal static MainWindow? CurrentWindow { get; private set; }
     private static Mutex? s_instance;
     private MainWindow? _window;
 
@@ -38,6 +39,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        Loc.Load(); // also before the single-instance lookup: the title follows the language
         // Single instance: a second launch (tray menu, double click) brings the
         // existing window to the front instead of opening another one.
         s_instance = new Mutex(true, @"Local\Atrium.Settings", out bool created);
@@ -56,7 +58,7 @@ public partial class App : Application
                 catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
                 if (!same)
                 {
-                    MessageBox(IntPtr.Zero, "另一位置的 Atrium 设置正在运行。请先关闭该窗口，再打开本目录中的设置中心。", "Atrium", 0x40);
+                    MessageBox(IntPtr.Zero, Loc.T("另一位置的 Atrium 设置正在运行。请先关闭该窗口，再打开本目录中的设置中心。"), "Atrium", 0x40);
                     Exit();
                     return;
                 }
@@ -73,6 +75,7 @@ public partial class App : Application
         try
         {
             _window = new MainWindow();
+            CurrentWindow = _window;
             _window.Activate();
         }
         catch (Exception e)
@@ -80,6 +83,17 @@ public partial class App : Application
             LogCrash(e);
             throw;
         }
+    }
+
+    // A language change re-creates the window: every XAML string is loaded
+    // again in the new language. The old window is saved and must not prompt.
+    internal static void ReloadWindow(int page)
+    {
+        var old = CurrentWindow;
+        var window = new MainWindow(page);
+        CurrentWindow = window;
+        window.Activate();
+        old?.Close();
     }
 
     internal static void SignalStartupReady(bool coreReady)

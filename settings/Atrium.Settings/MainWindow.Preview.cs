@@ -25,7 +25,7 @@ public sealed partial class MainWindow
     {
         if (_page != 1) return;
         if (_readout.Count == 0)
-            foreach (var name in new[] { "高度", "圆角", "宽度", "轮廓" })
+            foreach (var name in new[] { Loc.T("高度"), Loc.T("圆角"), Loc.T("宽度"), Loc.T("轮廓") })
             {
                 var value = new TextBlock { Style = StyleOf("TitleStyle") };
                 Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(value, Microsoft.UI.Xaml.FontNumeralAlignment.Tabular);
@@ -41,13 +41,13 @@ public sealed partial class MainWindow
         double r = Math.Min(s.CornerRadius, s.Height / 2);
         bool capsule = s.CornerRadius >= s.Height / 2;
         _readout[0].Value.Text = $"{s.Height:0} px";
-        _readout[0].Note.Text = $"图标 {s.IconSize:0} px";
+        _readout[0].Note.Text = Loc.F("图标 {0:0} px", s.IconSize);
         _readout[1].Value.Text = $"{r:0} px";
-        _readout[1].Note.Text = s.CornerRadius > r ? $"设为 {s.CornerRadius:0}，不超过高度的一半" : capsule ? "G3 连续胶囊轮廓" : "G3 连续圆角";
-        _readout[2].Value.Text = s.AutoWidth ? "自动" : $"{s.Width:0} px";
-        _readout[2].Note.Text = s.AutoWidth ? $"最宽 {s.Width:0} px" : "固定宽度";
-        _readout[3].Value.Text = capsule ? "胶囊形" : r < 1 ? "直角" : "圆角矩形";
-        _readout[3].Note.Text = $"距底边 {s.Margin:0} px";
+        _readout[1].Note.Text = s.CornerRadius > r ? Loc.F("设为 {0:0}，不超过高度的一半", s.CornerRadius) : capsule ? Loc.T("G3 连续胶囊轮廓") : Loc.T("G3 连续圆角");
+        _readout[2].Value.Text = s.AutoWidth ? Loc.T("自动") : $"{s.Width:0} px";
+        _readout[2].Note.Text = s.AutoWidth ? Loc.F("最宽 {0:0} px", s.Width) : Loc.T("固定宽度");
+        _readout[3].Value.Text = capsule ? Loc.T("胶囊形") : r < 1 ? Loc.T("直角") : Loc.T("圆角矩形");
+        _readout[3].Note.Text = Loc.F("距底边 {0:0} px", s.Margin);
     }
 
     // Notification previews follow the selected live layout and its existing motion curves.
@@ -89,7 +89,7 @@ public sealed partial class MainWindow
         Canvas.SetLeft(backCard, back.X - pad); Canvas.SetTop(backCard, back.Y - pad);
         Canvas.SetLeft(frontCard, front.X - pad); Canvas.SetTop(frontCard, front.Y - pad);
         _notifyEntrancePending |= animate;
-        NotifyCaption.Text = (topRight ? "主屏右上角 · 已有通知向下让位 · " : "跟随任务栏 · ") + $"{s.NotifyTimeout:0} 秒后收起" + (s.NotifyHideBody ? " · 正文已隐藏" : "");
+        NotifyCaption.Text = (topRight ? Loc.T("主屏右上角 · 已有通知向下让位 · ") : Loc.T("跟随任务栏 · ")) + Loc.F("{0:0} 秒后收起", s.NotifyTimeout) + (s.NotifyHideBody ? Loc.T(" · 正文已隐藏") : "");
 
         // Their glass: rendered over the picture where they rest; each card carries its own piece.
         PostTiles(NotifyCards, W, H, 1, new[] { back, front }, null, f =>
@@ -158,8 +158,8 @@ public sealed partial class MainWindow
     private void UpdateNotifyText(BarSettings settings)
     {
         NotifyFrontText.Margin = NotifyBackText.Margin = new Thickness(GlassSpec.InsetDip);
-        NotifyFrontBody.Text = settings.NotifyHideBody ? "内容已隐藏" : "明天的活动时间定了吗？我这边上午都有空，下午三点以后也可以。";
-        NotifyBackBody.Text = settings.NotifyHideBody ? "内容已隐藏" : "下午三点，项目讨论。";
+        NotifyFrontBody.Text = settings.NotifyHideBody ? Loc.T("内容已隐藏") : Loc.T("明天的活动时间定了吗？我这边上午都有空，下午三点以后也可以。");
+        NotifyBackBody.Text = settings.NotifyHideBody ? Loc.T("内容已隐藏") : Loc.T("下午三点，项目讨论。");
         SetNotifyInk(_notifyDark, settings.NotifyHideBody, NotifyFrontApp, NotifyFrontTime, NotifyFrontTitle, NotifyFrontBody);
         SetNotifyInk(_notifyBackDark, settings.NotifyHideBody, NotifyBackApp, NotifyBackTime, NotifyBackTitle, NotifyBackBody);
     }
@@ -547,9 +547,9 @@ public sealed partial class MainWindow
             Ready("widgets", photoGeneration);
         }, overlays: true, scaled: true);
 
-        WidgetMapCaption.Text = !_current.Widgets ? "桌面小组件已关闭"
-            : shown == 0 ? "暂无小组件"
-            : $"{shown} 个小组件";
+        WidgetMapCaption.Text = !_current.Widgets ? Loc.T("桌面小组件已关闭")
+            : shown == 0 ? Loc.T("暂无小组件")
+            : Loc.F("{0} 个小组件", shown);
         WidgetMap.Opacity = _current.Widgets ? 1 : 0.5;
     }
 

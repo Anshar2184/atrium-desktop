@@ -105,7 +105,8 @@ internal static partial class WidgetFaces
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException) { }
         double hours = Math.Round((t - now).TotalMinutes / 15) / 4;
         int dd = t.Date.CompareTo(now.Date);
-        return (t, (dd > 0 ? "明天" : dd < 0 ? "昨天" : "今天") + (hours >= 0 ? " +" : " ") + hours.ToString("0.##") + "小时");
+        return (t, Loc.T(dd > 0 ? "明天" : dd < 0 ? "昨天" : "今天") + (hours >= 0 ? " +" : " ") +
+                   hours.ToString("0.##", CultureInfo.InvariantCulture) + Loc.T("小时"));
     }
 
     public static FrameworkElement Face(string kind, string size, bool darkInk, Brush? photo = null, string material = "glass", IReadOnlyList<string>? cities = null)
@@ -124,7 +125,7 @@ internal static partial class WidgetFaces
         switch (kind)
         {
             case "clock" when size == "small":
-                ClockFace(c, w / 2, h / 2, h / 2 - 9, now, p.Face, p.Text, true, "北京", p.Sub, p);
+                ClockFace(c, w / 2, h / 2, h / 2 - 9, now, p.Face, p.Text, true, Loc.T("北京"), p.Sub, p);
                 break;
             case "clock":
             {
@@ -137,7 +138,7 @@ internal static partial class WidgetFaces
                     double cx = Pad + colW * (i + 0.5), cy = (h - 2 * R - 42) / 2 + R - 2;
                     Color face = night ? p.NightFace : p.Face, ink = night ? Color.FromArgb(245, 255, 255, 255) : p.Text;
                     ClockFace(c, cx, cy, R, t, face, ink, false, null, ink, p);
-                    Text(c, names[i], cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26, 12.5, p.Text, 2, 1, p);
+                    Text(c, Loc.T(names[i]), cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26, 12.5, p.Text, 2, 1, p);
                     Text(c, when, cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42, 10.5, p.Sub, 0, 1, p);
                 }
                 break;
@@ -145,13 +146,13 @@ internal static partial class WidgetFaces
             case "digital":
             {
                 double leftW = size == "small" ? w - 2 * Pad : 150;
-                Text(c, "本地", Pad + 2, Pad, Pad + leftW, Pad + 18, 12.5, p.Sub, 2, 0, p);
+                Text(c, Loc.T("本地"), Pad + 2, Pad, Pad + leftW, Pad + 18, 12.5, p.Sub, 2, 0, p);
                 // Match the core's fixed daily size, with one DIP of glyph-rounding headroom.
                 double fit = TextWidth("00:00", 50, "TitleFont");
                 double timeW = leftW - 1;
                 Text(c, now.ToString("H:mm"), Pad, Pad + 22, Pad + leftW, Pad + 84, fit > timeW ? 50 * timeW / fit : 50, p.Text, 2, 1, p);
-                Text(c, WeekLong[Weekday(now)], Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 13, p.Blue, 2, 0, p);
-                Text(c, $"{now.Month}月{now.Day}日", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 13, p.Text, 0, 0, p);
+                Text(c, Loc.T(WeekLong[Weekday(now)]), Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 13, p.Blue, 2, 0, p);
+                Text(c, Loc.English ? $"{Loc.T(Months[now.Month - 1])} {now.Day}" : $"{now.Month}月{now.Day}日", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 13, p.Text, 0, 0, p);
                 if (size == "small") break;
                 double x0 = Pad + leftW + 8, rowH = (h - 2 * Pad) / 3;
                 var more = CitiesOf(kind, cities);
@@ -160,7 +161,7 @@ internal static partial class WidgetFaces
                     double y = Pad + rowH * i;
                     var (t, when) = CityTime(more[i], now);
                     if (i > 0) Line(c, x0, y, w - Pad, y, A(p.Text, 0.12), 1);
-                    Text(c, more[i], x0, y + 4, w - Pad - 70, y + rowH / 2 + 2, 13, p.Text, 2, 0, p);
+                    Text(c, Loc.T(more[i]), x0, y + 4, w - Pad - 70, y + rowH / 2 + 2, 13, p.Text, 2, 0, p);
                     Text(c, when, x0, y + rowH / 2, w - Pad - 70, y + rowH - 4, 10.5, p.Sub, 0, 0, p);
                     Text(c, t.ToString("H:mm"), w - Pad - 80, y, w - Pad, y + rowH, 22, p.Text, 2, 2, p);
                 }
@@ -178,7 +179,7 @@ internal static partial class WidgetFaces
                     // A desktop: the ring full, a plug, plugged in (PaintBattery).
                     Arc(c, cx, cy, R, -90, 360, p.Green, 9, false);
                     Glyph(c, "\uE83E", cx - 22, cy - 22, cx + 22, cy + 22, 22, p.Text);
-                    Text(c, "已接通电源", 0, cy + R + 12, w, cy + R + 34, 13, p.Text, 2, 1, p);
+                    Text(c, Loc.T("已接通电源"), 0, cy + R + 12, w, cy + R + 34, 13, p.Text, 2, 1, p);
                     break;
                 }
                 var (fill, charging, low) = BarFace.Battery();
@@ -194,7 +195,7 @@ internal static partial class WidgetFaces
             case "bluetooth":
             {
                 // PaintBluetooth, with examples: the gallery does not read the devices.
-                (string Glyph, string Name, int Pct)[] d = { ("\uE7F6", "耳机", 82), ("\uE765", "键盘", 64), ("\uE962", "鼠标", 18), ("\uE7FC", "手柄", 45) };
+                (string Glyph, string Name, int Pct)[] d = { ("\uE7F6", Loc.T("耳机"), 82), ("\uE765", Loc.T("键盘"), 64), ("\uE962", Loc.T("鼠标"), 18), ("\uE7FC", Loc.T("手柄"), 45) };
                 Color Col(int v) => v <= 20 ? p.Red : p.Green;
                 if (size == "small")
                 {
@@ -223,11 +224,11 @@ internal static partial class WidgetFaces
             }
             case "system":
             {
-                (string Name, double V, string Detail)[] g = { ("CPU", 0.23, "处理器"), ("内存", 0.58, "9.2 / 16 GB"), ("磁盘", 0.74, "214 GB 可用") };
+                (string Name, double V, string Detail)[] g = { ("CPU", 0.23, Loc.T("处理器")), (Loc.T("内存"), 0.58, "9.2 / 16 GB"), (Loc.T("磁盘"), 0.74, Loc.T("214 GB 可用")) };
                 Color Col(double v) => v >= 0.9 ? p.Red : v >= 0.7 ? p.Orange : p.Green;
                 if (size == "small")
                 {
-                    Text(c, "系统", Pad + 2, Pad - 2, w - Pad, Pad + 16, 12.5, p.Sub, 2, 0, p);
+                    Text(c, Loc.T("系统"), Pad + 2, Pad - 2, w - Pad, Pad + 16, 12.5, p.Sub, 2, 0, p);
                     double rowH = (h - 2 * Pad - 18) / 3;
                     for (int i = 0; i < 3; i++)
                     {
@@ -252,14 +253,14 @@ internal static partial class WidgetFaces
                 break;
             }
             case "notes":
-                Text(c, "备忘录", Pad + 2, Pad - 2, w - Pad, Pad + 18, 13.5, p.Orange, 2, 0, p);
-                Paragraph(c, size == "small" ? "周五前交设计评审\n换上新的壁纸" : "周五前交设计评审\n换上新的壁纸\n试试磨砂预设",
+                Text(c, Loc.T("备忘录"), Pad + 2, Pad - 2, w - Pad, Pad + 18, 13.5, p.Orange, 2, 0, p);
+                Paragraph(c, size == "small" ? Loc.T("周五前交设计评审\n换上新的壁纸") : Loc.T("周五前交设计评审\n换上新的壁纸\n试试磨砂预设"),
                           Pad + 2, Pad + 24, w - Pad - 2, h - Pad, 13.5, p.Text, p);
                 break;
             case "reminders":
             {
-                (string Text, bool Done)[] items = { ("给桌面拍一组截图", false), ("整理本周的会议记录", false), ("订周末的电影票", true) };
-                Text(c, "提醒事项", Pad + 2, Pad - 2, w - Pad - 40, Pad + 18, 13.5, p.Orange, 2, 0, p);
+                (string Text, bool Done)[] items = { (Loc.T("给桌面拍一组截图"), false), (Loc.T("整理本周的会议记录"), false), (Loc.T("订周末的电影票"), true) };
+                Text(c, Loc.T("提醒事项"), Pad + 2, Pad - 2, w - Pad - 40, Pad + 18, 13.5, p.Orange, 2, 0, p);
                 Text(c, "2", w - Pad - 48, Pad - 6, w - Pad - 2, Pad + 22, 22, p.Orange, 2, 2, p);
                 const double RowH = 27, Top = Pad + 28;
                 int slots = Math.Max(1, (int)((h - Pad - Top) / RowH));
@@ -282,7 +283,7 @@ internal static partial class WidgetFaces
                 {
                     double y = Top + RowH * shown;
                     Text(c, "+", Pad - 1, y, Pad + 19, y + RowH, 17, p.Faint, 0, 1, p);
-                    Text(c, "新提醒", Pad + 26, y, w - Pad, y + RowH, 13.5, p.Faint, 0, 0, p);
+                    Text(c, Loc.T("新提醒"), Pad + 26, y, w - Pad, y + RowH, 13.5, p.Faint, 0, 0, p);
                 }
                 break;
             }
@@ -344,13 +345,15 @@ internal static partial class WidgetFaces
     internal static string LunarMonthDay(DateTime t)
     {
         var (m, d, leap) = ToLunar(t);
+        if (Loc.English) return $"Lunar {m}/{d}";
         return (leap ? "闰" : "") + LunarMonths[Math.Clamp(m, 1, 12) - 1] + "月" + LunarDay(d);
     }
 
-    // ChineseCalendar::Line: "农历丙午年 九月廿三".
+    // ChineseCalendar::Line: "农历丙午年 九月廿三" ("Lunar 9/23" in English).
     internal static string LunarLine(DateTime t)
     {
         const string stems = "甲乙丙丁戊己庚辛壬癸", branches = "子丑寅卯辰巳午未申酉戌亥";
+        if (Loc.English) return LunarMonthDay(t);
         try
         {
             int n = Lunar.GetSexagenaryYear(t);
@@ -363,17 +366,18 @@ internal static partial class WidgetFaces
     internal static string DayLabel(DateTime t, out bool festival)
     {
         festival = true;
-        if (t.Month == 1 && t.Day == 1) return "元旦";
-        if (t.Month == 5 && t.Day == 1) return "劳动节";
-        if (t.Month == 10 && t.Day == 1) return "国庆节";
+        if (t.Month == 1 && t.Day == 1) return Loc.T("元旦");
+        if (t.Month == 5 && t.Day == 1) return Loc.T("劳动节");
+        if (t.Month == 10 && t.Day == 1) return Loc.T("国庆节");
         var (m, d, leap) = ToLunar(t);
         if (!leap)
         {
-            (int M, int D, string Name)[] fests = { (1, 1, "春节"), (1, 15, "元宵节"), (5, 5, "端午节"), (7, 7, "七夕"), (8, 15, "中秋节"), (9, 9, "重阳节"), (12, 8, "腊八节") };
-            foreach (var f in fests) if (f.M == m && f.D == d) return f.Name;
-            if (m == 12 && ToLunar(t.AddDays(1)) is (1, 1, false)) return "除夕";
+            (int M, int D, string Name)[] fests = { (1, 1, Loc.T("春节")), (1, 15, Loc.T("元宵节")), (5, 5, Loc.T("端午节")), (7, 7, Loc.T("七夕")), (8, 15, Loc.T("中秋节")), (9, 9, Loc.T("重阳节")), (12, 8, Loc.T("腊八节")) };
+            foreach (var f in fests) if (f.M == m && f.D == d) return Loc.T(f.Name);
+            if (m == 12 && ToLunar(t.AddDays(1)) is (1, 1, false)) return Loc.T("除夕");
         }
         festival = false;
+        if (Loc.English) return "";
         return d == 1 ? (leap ? "闰" : "") + LunarMonths[Math.Clamp(m, 1, 12) - 1] + "月" : LunarDay(d);
     }
 
@@ -386,10 +390,10 @@ internal static partial class WidgetFaces
         int lead = (Weekday(firstDay) - first + 7) % 7, days = DateTime.DaysInMonth(now.Year, now.Month);
         if (size == "large")
         {
-            Text(c, Months[now.Month - 1], Pad + 4, Pad, w / 2, Pad + 22, 16, p.Blue, 2, 0, p);
-            Text(c, $"{now.Year}年 · 农历{LunarMonthDay(now)}", w / 2 - 40, Pad, w - Pad - 4, Pad + 22, 11.5, p.Sub, 0, 2, p);
+            Text(c, Loc.T(Months[now.Month - 1]), Pad + 4, Pad, w / 2, Pad + 22, 16, p.Blue, 2, 0, p);
+            Text(c, Loc.English ? $"{now.Year} · {LunarMonthDay(now)}" : $"{now.Year}年 · 农历{LunarMonthDay(now)}", w / 2 - 40, Pad, w - Pad - 4, Pad + 22, 11.5, p.Sub, 0, 2, p);
             double gx = Pad, cw = (w - 2 * Pad) / 7, y = Pad + 28;
-            for (int i = 0; i < 7; i++) Text(c, WeekShort[(first + i) % 7], gx + i * cw, y, gx + (i + 1) * cw, y + 16, 10.5, p.Sub, 2, 1, p);
+            for (int i = 0; i < 7; i++) Text(c, Loc.T(WeekShort[(first + i) % 7]), gx + i * cw, y, gx + (i + 1) * cw, y + 16, 10.5, p.Sub, 2, 1, p);
             y += 20;
             int rows = (lead + days + 6) / 7;
             double rh = (h - Pad - y) / Math.Max(rows, 5);
@@ -407,16 +411,17 @@ internal static partial class WidgetFaces
             return;
         }
         double leftW = size == "small" ? w - 2 * Pad : 126;
-        Text(c, WeekLong[Weekday(now)], Pad + 2, Pad, Pad + leftW, Pad + 20, 14, p.Blue, 2, 0, p);
+        Text(c, Loc.T(WeekLong[Weekday(now)]), Pad + 2, Pad, Pad + leftW, Pad + 20, 14, p.Blue, 2, 0, p);
         Text(c, now.Day.ToString(), Pad, Pad + 16, Pad + leftW, Pad + 80, 54, p.Text, 0, 0, p);
         string todayLabel = DayLabel(now, out bool fest);
-        Text(c, "农历" + LunarMonthDay(now), Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 12.5, p.Text, 2, 0, p);
-        Text(c, fest ? todayLabel : $"{now.Year}年{Months[now.Month - 1]}", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 12, fest ? p.Blue : p.Sub, 0, 0, p);
+        Text(c, Loc.English ? LunarMonthDay(now) : Loc.T("农历") + LunarMonthDay(now), Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 12.5, p.Text, 2, 0, p);
+        Text(c, fest ? todayLabel : (Loc.English ? $"{now.Year} {Loc.T(Months[now.Month - 1])}" : $"{now.Year}年{Loc.T(Months[now.Month - 1])}"),
+             Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 12, fest ? p.Blue : p.Sub, 0, 0, p);
         if (size == "small") return;
         double gx2 = Pad + leftW + 6, gw = w - Pad - gx2, cw2 = gw / 7;
-        Text(c, Months[now.Month - 1], gx2 + 4, Pad - 1, gx2 + gw, Pad + 17, 12.5, p.Blue, 2, 0, p);
+        Text(c, Loc.T(Months[now.Month - 1]), gx2 + 4, Pad - 1, gx2 + gw, Pad + 17, 12.5, p.Blue, 2, 0, p);
         double yy = Pad + 20;
-        for (int i = 0; i < 7; i++) Text(c, WeekShort[(first + i) % 7], gx2 + i * cw2, yy, gx2 + (i + 1) * cw2, yy + 14, 9.5, p.Sub, 2, 1, p);
+        for (int i = 0; i < 7; i++) Text(c, Loc.T(WeekShort[(first + i) % 7]), gx2 + i * cw2, yy, gx2 + (i + 1) * cw2, yy + 14, 9.5, p.Sub, 2, 1, p);
         yy += 16;
         int rows2 = (lead + days + 6) / 7;
         double rh2 = Math.Min(17, (h - Pad - yy) / rows2);

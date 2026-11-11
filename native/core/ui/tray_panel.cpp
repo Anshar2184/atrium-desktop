@@ -1,5 +1,7 @@
 #include "ui/tray_panel.h"
 
+#include "localization.h"
+
 #include "clock.h"
 #include "log.h"
 #include "motion.h"
@@ -256,7 +258,7 @@ void TrayPanel::Paint(Canvas& c)
     const float m = Margin(), gridTop = m - kAir, footTop = h - m - kFooterH, divider = footTop - kSplit;
     const float plateR = std::clamp(radius_ - m - 2, 6.f, 12.f); // concentric with the panel's corners
     if (icons_.empty()) {
-        std::wstring msg = !model_.Loaded() ? L"正在读取…" : model_.Available() ? L"没有托盘图标" : L"读取不到系统托盘";
+        std::wstring msg = !model_.Loaded() ? Tr(L"正在读取…") : model_.Available() ? Tr(L"没有托盘图标") : Tr(L"读取不到系统托盘");
         c.Text(msg, D2D1::RectF(m, gridTop, w - m, gridTop + kCell), 12.5f, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
     const int iconPx = int(std::lround(kIcon * c.scale));
@@ -312,11 +314,11 @@ void TrayPanel::Paint(Canvas& c)
     if (hover_.rfind(L"icon:", 0) == 0) {
         size_t i = size_t(std::stoul(hover_.substr(5)));
         if (i < icons_.size())
-            label = private_ ? L"托盘图标" : TrayModel::Title(icons_[i].tip);
+            label = private_ ? Tr(L"托盘图标") : TrayModel::Title(icons_[i].tip);
     }
     if (label.empty())
-        label = icons_.empty() ? L"托盘" : std::to_wstring(icons_.size()) + L" 个图标";
-    std::wstring sys = L"系统托盘";
+        label = icons_.empty() ? Tr(L"托盘") : std::to_wstring(icons_.size()) + Tr(L" 个图标");
+    std::wstring sys = Tr(L"系统托盘");
     float bw = c.TextWidth(sys, 11.5f) + 20;
     D2D1_RECT_F b = D2D1::RectF(w - m - bw, footTop, w - m, footTop + kFooterH);
     c.Text(label, D2D1::RectF(m, footTop, b.left - 10, footTop + kFooterH), 12, hover_.rfind(L"icon:", 0) == 0 ? t.text : t.subtext);

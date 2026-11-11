@@ -249,7 +249,7 @@
                                     </ListView.ItemsPanel>
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="local:PinVm">
-                                                <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent">
+                                                <Grid Padding="14,8,10,8" ColumnSpacing="14" MinHeight="60" Background="Transparent" Loaded="OnLocalizeTemplate">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="Auto" />
@@ -475,6 +475,20 @@
 
                     <!-- ==== System ==== -->
                     <StackPanel x:Name="MainSystem" Visibility="Collapsed">
+                        <TextBlock Text="语言" Style="{StaticResource SectionStyle}" />
+                        <Border Style="{StaticResource TileStyle}" Margin="0,0,0,8">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="界面语言" Style="{StaticResource RowTitleStyle}" />
+                                <ComboBox x:Name="LanguagePicker" HorizontalAlignment="Stretch" SelectionChanged="OnLanguageChanged"
+                                          AutomationProperties.Name="界面语言">
+                                    <ComboBoxItem Content="跟随系统" Tag="auto" />
+                                    <ComboBoxItem Content="简体中文" Tag="zh" />
+                                    <ComboBoxItem Content="English" Tag="en" />
+                                </ComboBox>
+                                <TextBlock Style="{StaticResource RowNoteStyle}" TextWrapping="Wrap"
+                                           Text="Atrium 的栏、面板、小组件和设置中心使用的语言。跟随系统时，中文 Windows 使用中文，其余使用英文；更改会在保存后应用。" />
+                            </StackPanel>
+                        </Border>
                         <TextBlock Text="Windows" Style="{StaticResource SectionStyle}" />
                         <local:ResponsiveGrid MinCellWidth="280" Gap="12" StretchLastRow="True">
                             <local:ToggleTile x:Name="StartupSwitch" Title="开机启动" SwitchName="开机启动" Toggled="OnStartupToggled"

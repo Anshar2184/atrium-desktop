@@ -1,5 +1,7 @@
 #include "shell/weather.h"
 
+#include "localization.h"
+
 #include "log.h"
 #include "settings.h"
 
@@ -87,22 +89,25 @@ std::wstring PlaceName(double lat, double lon)
 {
     static double lastLat = 1000, lastLon = 1000;
     static std::wstring lastName;
-    if (!lastName.empty() && std::fabs(lat - lastLat) < 0.03 && std::fabs(lon - lastLon) < 0.03)
+    static bool lastEnglish = false;
+    const bool english = LanguageIsEnglish();
+    if (!lastName.empty() && lastEnglish == english && std::fabs(lat - lastLat) < 0.03 && std::fabs(lon - lastLon) < 0.03)
         return lastName;
     wchar_t url[256];
-    swprintf_s(url, L"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=zh", lat, lon);
+    swprintf_s(url, L"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=%s", lat, lon, english ? L"en" : L"zh");
     json::JsonObject o{nullptr};
     if (!json::JsonObject::TryParse(winrt::to_hstring(GetAny(url)), o))
         return {};
     std::wstring name(o.GetNamedString(L"city", L""));
     if (name.empty())
         name = std::wstring(o.GetNamedString(L"locality", L""));
-    if (name.size() > 2 && name.back() == L'市')
+    if (!LanguageIsEnglish() && name.size() > 2 && name.back() == L'市')
         name.pop_back();
     if (!name.empty()) {
         lastLat = lat;
         lastLon = lon;
         lastName = name;
+        lastEnglish = english;
     }
     return name;
 }
@@ -131,7 +136,10 @@ bool Locate(double& lat, double& lon, std::wstring& city)
     if (located && !city.empty())
         return true;
     json::JsonObject o{nullptr};
-    if (!json::JsonObject::TryParse(winrt::to_hstring(Get(L"http://ip-api.com/json/?lang=zh-CN&fields=status,city,lat,lon", true)), o) ||
+    if (!json::JsonObject::TryParse(winrt::to_hstring(Get(LanguageIsEnglish() ? L"http://ip-api.com/json/?lang=en&fields=status,city,lat,lon"
+                                                                              : L"http://ip-api.com/json/?lang=zh-CN&fields=status,city,lat,lon",
+                                                                    true)),
+                                    o) ||
         o.GetNamedString(L"status", L"") != L"success")
         return located;
     city = std::wstring(o.GetNamedString(L"city", L""));
@@ -177,6 +185,8 @@ int64_t Minutes(const std::wstring& t, int* hour = nullptr, int* minute = nullpt
 }
 
 const wchar_t* const kWeek[] = {L"周日", L"周一", L"周二", L"周三", L"周四", L"周五", L"周六"};
+const wchar_t* const kWeekEn[] = {L"Sun", L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat"};
+const wchar_t* WeekName(int wd) { return LanguageIsEnglish() ? kWeekEn[wd] : kWeek[wd]; }
 
 json::JsonObject ToJson(const Weather& w)
 {
@@ -241,35 +251,35 @@ bool FromJson(const json::JsonObject& o, Weather& w)
 std::wstring WeatherCondition(int code)
 {
     switch (code) {
-    case 0: return L"晴";
-    case 1: return L"大部晴朗";
-    case 2: return L"局部多云";
-    case 3: return L"阴";
+    case 0: return Tr(L"晴");
+    case 1: return Tr(L"大部晴朗");
+    case 2: return Tr(L"局部多云");
+    case 3: return Tr(L"阴");
     case 45:
-    case 48: return L"雾";
+    case 48: return Tr(L"雾");
     case 51:
     case 53:
-    case 55: return L"毛毛雨";
+    case 55: return Tr(L"毛毛雨");
     case 56:
     case 57:
     case 66:
-    case 67: return L"冻雨";
-    case 61: return L"小雨";
-    case 63: return L"中雨";
-    case 65: return L"大雨";
-    case 71: return L"小雪";
-    case 73: return L"中雪";
-    case 75: return L"大雪";
-    case 77: return L"雪粒";
+    case 67: return Tr(L"冻雨");
+    case 61: return Tr(L"小雨");
+    case 63: return Tr(L"中雨");
+    case 65: return Tr(L"大雨");
+    case 71: return Tr(L"小雪");
+    case 73: return Tr(L"中雪");
+    case 75: return Tr(L"大雪");
+    case 77: return Tr(L"雪粒");
     case 80:
-    case 81: return L"阵雨";
-    case 82: return L"强阵雨";
+    case 81: return Tr(L"阵雨");
+    case 82: return Tr(L"强阵雨");
     case 85:
-    case 86: return L"阵雪";
-    case 95: return L"雷阵雨";
+    case 86: return Tr(L"阵雪");
+    case 95: return Tr(L"雷阵雨");
     case 96:
-    case 99: return L"雷阵雨伴冰雹";
-    default: return L"多云";
+    case 99: return Tr(L"雷阵雨伴冰雹");
+    default: return Tr(L"多云");
     }
 }
 
@@ -307,6 +317,15 @@ void WeatherSource::SetActive(bool on)
         if (on == active_)
             return;
         active_ = on;
+    }
+    wake_.notify_all();
+}
+
+void WeatherSource::Refresh()
+{
+    {
+        std::lock_guard g(lock_);
+        dirty_ = true;
     }
     wake_.notify_all();
 }
@@ -352,7 +371,7 @@ bool WeatherSource::Fetch()
     if (!Locate(lat, lon, city)) {
         std::lock_guard g(lock_);
         latest_.ok = latest_.ok && !latest_.hours.empty();
-        latest_.error = L"无法确定位置";
+        latest_.error = Tr(L"无法确定位置");
         Log(L"weather: no location");
         return false;
     }
@@ -365,7 +384,7 @@ bool WeatherSource::Fetch()
                lat, lon);
     if (!Parse(GetAny(url), o) || !o.HasKey(L"current") || !o.HasKey(L"hourly") || !o.HasKey(L"daily")) {
         std::lock_guard g(lock_);
-        latest_.error = L"无法获取天气";
+        latest_.error = Tr(L"无法获取天气");
         Log(L"weather: no forecast for %s", city.c_str());
         return false;
     }
@@ -392,7 +411,7 @@ bool WeatherSource::Fetch()
         if (at + 60 <= now)
             continue;
         WeatherHour x;
-        x.label = items.empty() ? L"现在" : std::to_wstring(h) + L"时";
+        x.label = items.empty() ? std::wstring(Tr(L"现在")) : LanguageIsEnglish() ? std::to_wstring(h) + L":00" : std::to_wstring(h) + L"时";
         x.temp = float(temps.GetNumberAt(i));
         x.code = int(codes.GetNumberAt(i));
         x.day = days.GetNumberAt(i) != 0;
@@ -429,7 +448,7 @@ bool WeatherSource::Fetch()
         int wd = 0;
         Minutes(std::wstring(dates.GetStringAt(i)) + L"T00:00", nullptr, nullptr, &wd);
         WeatherDay d;
-        d.label = i == 0 ? L"今天" : kWeek[wd];
+        d.label = i == 0 ? Tr(L"今天") : WeekName(wd);
         d.code = int(dcodes.GetNumberAt(i));
         d.hi = float(his.GetNumberAt(i));
         d.lo = float(los.GetNumberAt(i));

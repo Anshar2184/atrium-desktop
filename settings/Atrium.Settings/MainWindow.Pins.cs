@@ -23,10 +23,10 @@ public sealed class PinVm : INotifyPropertyChanged
         _owner = owner;
         Pin = pin;
         Title = MainWindow.PinTitle(pin);
-        UpName = "上移 " + Title;
-        DownName = "下移 " + Title;
-        RemoveName = "移除 " + Title;
-        LaunchName = "启动方式 " + Title;
+        UpName = Loc.T("上移 ") + Title;
+        DownName = Loc.T("下移 ") + Title;
+        RemoveName = Loc.T("移除 ") + Title;
+        LaunchName = Loc.T("启动方式 ") + Title;
     }
 
     internal PinnedApp Pin { get; private set; }
@@ -150,7 +150,7 @@ public sealed partial class MainWindow
         if (index < 0 || to < 0 || to >= _pinVms.Count) return;
         _pinVms.Move(index, to);
         SyncPins();
-        FocusPinButton(vm, delta < 0 ? "上移" : "下移");
+        FocusPinButton(vm, delta < 0 ? Loc.T("上移") : Loc.T("下移"));
         Changed();
     }
 
@@ -166,7 +166,7 @@ public sealed partial class MainWindow
         if (index < 0) return;
         _pinVms.RemoveAt(index);
         SyncPins();
-        if (_pinVms.Count > 0) FocusPinButton(_pinVms[Math.Min(index, _pinVms.Count - 1)], "移除");
+        if (_pinVms.Count > 0) FocusPinButton(_pinVms[Math.Min(index, _pinVms.Count - 1)], Loc.T("移除"));
         Changed();
     }
 
@@ -223,14 +223,14 @@ public sealed partial class MainWindow
         if (file == null) return;
         if (_pinVms.Count >= 64)
         {
-            ShowMessage(InfoBarSeverity.Warning, "固定的应用已达上限", "最多可以固定 64 个应用。");
+            ShowMessage(InfoBarSeverity.Warning, Loc.T("固定的应用已达上限"), Loc.T("最多可以固定 64 个应用。"));
             return;
         }
         var vm = new PinVm(this, new PinnedApp(System.IO.Path.GetFileNameWithoutExtension(file.Path), file.Path, "", ""));
         _pinVms.Add(vm);
         _ = LoadIconAsync(vm);
         SyncPins();
-        FocusPinButton(vm, "移除");
+        FocusPinButton(vm, Loc.T("移除"));
         PinsList.ScrollIntoView(vm);
         Changed();
     }
@@ -241,10 +241,10 @@ public sealed partial class MainWindow
         {
             Style = (Style)Application.Current.Resources["AtriumDialogStyle"],
             XamlRoot = Content.XamlRoot,
-            Title = "导入系统任务栏固定项？",
-            Content = "当前的固定列表将被 Windows 任务栏上固定的应用替换。",
-            PrimaryButtonText = "替换",
-            CloseButtonText = "取消",
+            Title = Loc.T("导入系统任务栏固定项？"),
+            Content = Loc.T("当前的固定列表将被 Windows 任务栏上固定的应用替换。"),
+            PrimaryButtonText = Loc.T("替换"),
+            CloseButtonText = Loc.T("取消"),
             DefaultButton = ContentDialogButton.Close,
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;

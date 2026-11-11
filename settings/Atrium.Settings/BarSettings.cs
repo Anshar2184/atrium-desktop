@@ -48,6 +48,7 @@ internal sealed class BarSettings
     public bool ShowNotifications { get; set; } = true;
     public bool ShowRunning { get; set; } = true;
     public string TextColor { get; set; } = "auto"; // auto | light | dark
+    public string Language { get; set; } = "auto"; // auto (follow Windows) | zh | en
     public string AutoHide { get; set; } = "fullscreen"; // never | fullscreen (a maximized or full-screen app in front) | always
     public string StatusStyle { get; set; } = "ring"; // ring | icons (network, volume, battery as on the Windows taskbar)
     public string DockDisplayMode { get; set; } = "primary"; // primary | follow | fixed | all
@@ -140,6 +141,7 @@ internal sealed class BarSettings
             ["autoWidth"] = AutoWidth,
             ["showRunning"] = ShowRunning,
             ["textColor"] = TextColor,
+            ["language"] = Language,
             ["autoHide"] = AutoHide,
             ["statusStyle"] = StatusStyle,
             ["dockDisplayMode"] = DockDisplayMode,
@@ -262,6 +264,8 @@ internal sealed class BarSettings
         s.AutoHide = o?["autoHide"] is JsonValue ah && ah.TryGetValue(out string? ahs) && ahs != null
             ? (ahs is "never" or "always" ? ahs : "fullscreen")
             : f.AutoHide;
+        string language = Display("language", f.Language);
+        s.Language = language is "zh" or "en" ? language : "auto";
         s.StatusStyle = o?["statusStyle"] is JsonValue ss && ss.TryGetValue(out string? sss) && sss == "icons" ? "icons"
             : o?["statusStyle"] is JsonValue ? "ring" : f.StatusStyle;
         s.Pins = f.Pins == null ? null : new List<PinnedApp>(f.Pins);
@@ -286,7 +290,7 @@ internal sealed class BarSettings
         SameMaterial(o) && Preset == o.Preset && CornerRadius == o.CornerRadius && Width == o.Width && Height == o.Height &&
         Margin == o.Margin && IconSize == o.IconSize && Magnify == o.Magnify && HoverRise == o.HoverRise && AutoWidth == o.AutoWidth && ShowClock == o.ShowClock &&
         ShowTray == o.ShowTray && StartTray == o.StartTray && StartStatus == o.StartStatus && StartSize == o.StartSize && ShowStatus == o.ShowStatus && ShowNotifications == o.ShowNotifications &&
-        ShowRunning == o.ShowRunning && TextColor == o.TextColor && AutoHide == o.AutoHide && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
+        ShowRunning == o.ShowRunning && TextColor == o.TextColor && Language == o.Language && AutoHide == o.AutoHide && StatusStyle == o.StatusStyle && NotifyTimeout == o.NotifyTimeout && NotifyHideBody == o.NotifyHideBody &&
         NotifyListener == o.NotifyListener && NotifyWeChat == o.NotifyWeChat && NotifyFeishu == o.NotifyFeishu && Bar == o.Bar && Widgets == o.Widgets &&
         WidgetsOnRight == o.WidgetsOnRight && WidgetBackdrop == o.WidgetBackdrop && StageManager == o.StageManager && StageOnRight == o.StageOnRight &&
         StageAutoHide == o.StageAutoHide && StageMinimize == o.StageMinimize && WidgetMaterial == o.WidgetMaterial &&

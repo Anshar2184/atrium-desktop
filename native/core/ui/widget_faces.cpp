@@ -1,5 +1,7 @@
 #include "ui/widget_faces.h"
 
+#include "localization.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -46,9 +48,16 @@ Pal PaperPal()
 }
 
 const wchar_t* const kWeekLong[] = {L"星期一", L"星期二", L"星期三", L"星期四", L"星期五", L"星期六", L"星期日"};
+const wchar_t* const kWeekLongEn[] = {L"Monday", L"Tuesday", L"Wednesday", L"Thursday", L"Friday", L"Saturday", L"Sunday"};
 const wchar_t* const kWeekShort[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
+const wchar_t* const kWeekShortEn[] = {L"M", L"T", L"W", L"T", L"F", L"S", L"S"};
 const wchar_t* const kMonths[] = {L"一月", L"二月", L"三月", L"四月", L"五月", L"六月",
                                   L"七月", L"八月", L"九月", L"十月", L"十一月", L"十二月"};
+const wchar_t* const kMonthsEn[] = {L"January", L"February", L"March", L"April", L"May", L"June",
+                                    L"July", L"August", L"September", L"October", L"November", L"December"};
+const wchar_t* WeekLong(int wd) { return LanguageIsEnglish() ? kWeekLongEn[wd] : kWeekLong[wd]; }
+const wchar_t* WeekShort(int wd) { return LanguageIsEnglish() ? kWeekShortEn[wd] : kWeekShort[wd]; }
+const wchar_t* MonthName(int m) { return LanguageIsEnglish() ? kMonthsEn[std::clamp(m, 1, 12) - 1] : kMonths[std::clamp(m, 1, 12) - 1]; }
 
 bool ZoneInfo(const wchar_t* key, DYNAMIC_TIME_ZONE_INFORMATION& out)
 {
@@ -85,14 +94,14 @@ SYSTEMTIME CityTime(const std::wstring& name, const SYSTEMTIME& now, std::wstrin
     // Minutes() floors the seconds: a quarter-hour zone may come out a minute short.
     const int64_t quarters = (minutes + (minutes >= 0 ? 7 : -7)) / 15;
     int dayDiff = int((Minutes(ct) / 1440) - (Minutes(now) / 1440));
-    when = dayDiff > 0 ? L"明天" : dayDiff < 0 ? L"昨天" : L"今天";
+    when = dayDiff > 0 ? Tr(L"明天") : dayDiff < 0 ? Tr(L"昨天") : Tr(L"今天");
     std::wstring hours = std::to_wstring(quarters / 4);
     if (quarters % 4) {
         wchar_t b[16];
         swprintf_s(b, L"%g", double(quarters) / 4);
         hours = b;
     }
-    when += (quarters >= 0 ? L" +" : L" ") + hours + L"小时";
+    when += (quarters >= 0 ? L" +" : L" ") + hours + Tr(L"小时");
     return ct;
 }
 
@@ -202,7 +211,7 @@ void PaintClock(Canvas& c, WidgetSize size, const WidgetContent& content, const 
         float cx = kPad + colW * (float(i) + 0.5f), cy = (H - 2 * R - 42) / 2 + R - 2;
         D2D1_COLOR_F face = night ? p.nightFace : p.face, ink = night ? Rgba(0xFFFFFF, 0.96f) : p.text;
         ClockFace(c, cx, cy, R, ct, p, face, ink, false, {}, ink);
-        c.Text(cities[size_t(i)], D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 12.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26), 12.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         c.Text(when, D2D1::RectF(cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
     }
 }
@@ -213,15 +222,18 @@ void PaintDigital(Canvas& c, WidgetSize size, const WidgetContent& content, cons
 {
     const int wd = Weekday(w.now.wYear, w.now.wMonth, w.now.wDay);
     const float leftW = size == WidgetSize::Small ? W - 2 * kPad : 150;
-    c.Text(w.city.empty() ? L"本地" : w.city, D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 18), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(w.city.empty() ? Tr(L"本地") : w.city, D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 18), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     // Keep one size all day. Leave one DIP for glyph placement / rounding:
     // tabular figures can still differ slightly at the exact trimming boundary.
     const float fit = c.TextWidth(L"00:00", 50, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     const float timeW = leftW - 1;
     const float timeSize = fit > timeW ? 50 * timeW / fit : 50.f;
     c.Text(HourMinute(w.now), D2D1::RectF(kPad, kPad + 22, kPad + leftW, kPad + 84), timeSize, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-    c.Text(kWeekLong[wd], D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 13, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(std::to_wstring(w.now.wMonth) + L"月" + std::to_wstring(w.now.wDay) + L"日", D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 13,
+    c.Text(WeekLong(wd), D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 13, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const std::wstring dateText = LanguageIsEnglish()
+                                      ? std::wstring(kMonthsEn[std::clamp(int(w.now.wMonth), 1, 12) - 1]) + L" " + std::to_wstring(w.now.wDay)
+                                      : std::to_wstring(w.now.wMonth) + L"月" + std::to_wstring(w.now.wDay) + L"日";
+    c.Text(dateText, D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 13,
            p.text, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
         return;
@@ -233,7 +245,7 @@ void PaintDigital(Canvas& c, WidgetSize size, const WidgetContent& content, cons
         float y = kPad + rowH * float(i);
         if (i > 0)
             c.Line(x0, y, W - kPad, y, Alpha(p.text, 0.12f));
-        c.Text(cities[size_t(i)], D2D1::RectF(x0, y + 4, W - kPad - 70, y + rowH / 2 + 2), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(Tr(cities[size_t(i)].c_str()), D2D1::RectF(x0, y + 4, W - kPad - 70, y + rowH / 2 + 2), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         c.Text(when, D2D1::RectF(x0, y + rowH / 2, W - kPad - 70, y + rowH - 4), 10.5f, p.sub);
         c.Text(HourMinute(ct), D2D1::RectF(W - kPad - 80, y, W - kPad, y + rowH), 22, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
     }
@@ -248,14 +260,16 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
     const int first = FirstWeekday();
     const int lead = (Weekday(now.wYear, now.wMonth, 1) - first + 7) % 7, days = DaysIn(now.wYear, now.wMonth);
     if (size == WidgetSize::Large) {
-        c.Text(kMonths[now.wMonth - 1], D2D1::RectF(kPad + 4, kPad, W / 2, kPad + 22), 16, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(MonthName(now.wMonth), D2D1::RectF(kPad + 4, kPad, W / 2, kPad + 22), 16, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         std::wstring lunarToday = w.lunar ? w.lunar->MonthDay(now.wYear, now.wMonth, now.wDay) : std::wstring();
-        c.Text(lunarToday.empty() ? std::to_wstring(now.wYear) + L"年" : std::to_wstring(now.wYear) + L"年 · 农历" + lunarToday,
-               D2D1::RectF(W / 2 - 40, kPad, W - kPad - 4, kPad + 22), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 2);
+        const std::wstring head = LanguageIsEnglish()
+                                      ? std::to_wstring(now.wYear) + (lunarToday.empty() ? std::wstring() : L" · " + lunarToday)
+                                      : std::to_wstring(now.wYear) + L"年" + (lunarToday.empty() ? std::wstring() : L" · 农历" + lunarToday);
+        c.Text(head, D2D1::RectF(W / 2 - 40, kPad, W - kPad - 4, kPad + 22), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 2);
         const float gx = kPad, gw = W - 2 * kPad, cw = gw / 7;
         float y = kPad + 28;
         for (int i = 0; i < 7; ++i)
-            c.Text(kWeekShort[(first + i) % 7], D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 16), 10.5f, p.sub,
+            c.Text(WeekShort((first + i) % 7), D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 16), 10.5f, p.sub,
                    DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         y += 20;
         const int rows = (lead + days + 6) / 7;
@@ -278,23 +292,26 @@ void PaintCalendar(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& 
     }
     const int wd = Weekday(now.wYear, now.wMonth, now.wDay);
     const float leftW = size == WidgetSize::Small ? W - 2 * kPad : 126;
-    c.Text(kWeekLong[wd], D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 20), 14, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(WeekLong(wd), D2D1::RectF(kPad + 2, kPad, kPad + leftW, kPad + 20), 14, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(std::to_wstring(now.wDay), D2D1::RectF(kPad, kPad + 16, kPad + leftW, kPad + 80), 54, p.text, DWRITE_FONT_WEIGHT_NORMAL);
     bool festival = false;
     std::wstring label = w.lunar ? w.lunar->DayLabel(now.wYear, now.wMonth, now.wDay, &festival) : std::wstring();
     std::wstring lunar = w.lunar ? w.lunar->MonthDay(now.wYear, now.wMonth, now.wDay) : std::wstring();
-    c.Text(lunar.empty() ? std::wstring(kMonths[now.wMonth - 1]) : L"农历" + lunar, D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 12.5f,
+    const std::wstring lunarLine = LanguageIsEnglish() ? lunar : (lunar.empty() ? std::wstring() : L"农历" + lunar);
+    c.Text(lunar.empty() ? std::wstring(MonthName(now.wMonth)) : lunarLine, D2D1::RectF(kPad + 2, H - kPad - 40, kPad + leftW, H - kPad - 20), 12.5f,
            p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    c.Text(festival ? label : std::to_wstring(now.wYear) + L"年" + kMonths[now.wMonth - 1], D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 12,
+    c.Text(festival ? label : (LanguageIsEnglish() ? std::to_wstring(now.wYear) + L" " + MonthName(now.wMonth)
+                                                   : std::to_wstring(now.wYear) + L"年" + MonthName(now.wMonth)),
+           D2D1::RectF(kPad + 2, H - kPad - 20, kPad + leftW, H - kPad), 12,
            festival ? p.blue : p.sub, DWRITE_FONT_WEIGHT_NORMAL);
     if (size == WidgetSize::Small)
         return;
     // The month: weekday initials, the days, today in a red disc.
     const float gx = kPad + leftW + 6, gw = W - kPad - gx, cw = gw / 7;
-    c.Text(kMonths[now.wMonth - 1], D2D1::RectF(gx + 4, kPad - 1, gx + gw, kPad + 17), 12.5f, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(MonthName(now.wMonth), D2D1::RectF(gx + 4, kPad - 1, gx + gw, kPad + 17), 12.5f, p.blue, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     float y = kPad + 20;
     for (int i = 0; i < 7; ++i)
-        c.Text(kWeekShort[(first + i) % 7], D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 14), 9.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(WeekShort((first + i) % 7), D2D1::RectF(gx + float(i) * cw, y, gx + float(i + 1) * cw, y + 14), 9.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     y += 16;
     int rows = (lead + days + 6) / 7;
     float rh = std::min(17.f, (H - kPad - y) / float(rows));
@@ -332,7 +349,7 @@ void PaintBattery(Canvas& c, const WidgetWorld& w, const Pal& p, float W, float 
     } else {
         c.Arc(cx, cy, R, -90, 270, p.green, 9);
         c.Glyph(L"\uE83E", D2D1::RectF(cx - 22, cy - 22, cx + 22, cy + 22), 22, p.text);
-        c.Text(L"已接通电源", D2D1::RectF(0, cy + R + 12, W, cy + R + 34), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(Tr(L"已接通电源"), D2D1::RectF(0, cy + R + 12, W, cy + R + 34), 13, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     }
     (void)H;
 }
@@ -348,12 +365,12 @@ void PaintSystem(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p,
     };
     wchar_t mem[32], disk[32];
     swprintf_s(mem, L"%.1f / %.0f GB", w.memoryGb, w.memoryTotalGb);
-    swprintf_s(disk, L"%.0f GB 可用", w.diskFreeGb);
-    const Gauge gauges[] = {{L"CPU", w.cpu, L"处理器"}, {L"内存", w.memory, mem}, {L"磁盘", w.disk, disk}};
+    swprintf_s(disk, Tr(L"%.0f GB 可用"), w.diskFreeGb);
+    const Gauge gauges[] = {{L"CPU", w.cpu, Tr(L"处理器")}, {Tr(L"内存"), w.memory, mem}, {Tr(L"磁盘"), w.disk, disk}};
     auto colour = [&](float v) { return v >= 0.9f ? p.red : v >= 0.7f ? p.orange : p.green; };
     auto pct = [](float v) { return std::to_wstring(int(std::lround(std::clamp(v, 0.f, 1.f) * 100))) + L"%"; };
     if (size == WidgetSize::Small) {
-        c.Text(L"系统", D2D1::RectF(kPad + 2, kPad - 2, W - kPad, kPad + 16), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(Tr(L"系统"), D2D1::RectF(kPad + 2, kPad - 2, W - kPad, kPad + 16), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         const float rowH = (H - 2 * kPad - 18) / 3;
         for (int i = 0; i < 3; ++i) {
             float y = kPad + 18 + rowH * float(i);
@@ -401,7 +418,7 @@ void PaintBluetooth(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal&
     auto colour = [&](int pct) { return pct <= 20 ? p.red : p.green; };
     if (w.bluetoothRead && n == 0) {
         c.Glyph(L"\uE702", D2D1::RectF(0, H / 2 - 40, W, H / 2 - 4), 26, p.sub);
-        c.Text(L"没有已连接的设备", D2D1::RectF(kPad, H / 2 + 4, W - kPad, H / 2 + 24), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(Tr(L"没有已连接的设备"), D2D1::RectF(kPad, H / 2 + 4, W - kPad, H / 2 + 24), 12.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         return;
     }
     if (size == WidgetSize::Small) {
@@ -439,12 +456,12 @@ void PaintBluetooth(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal&
 // scrolled up when the caret goes below the card.
 void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float W, float H, std::vector<WidgetHit>& hits)
 {
-    c.Text(L"备忘录", D2D1::RectF(kPad + 2, kPad - 2, W - kPad, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(Tr(L"备忘录"), D2D1::RectF(kPad + 2, kPad - 2, W - kPad, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     const D2D1_RECT_F box = D2D1::RectF(kPad + 2, kPad + 24, W - kPad - 2, H - kPad);
     hits.push_back({D2D1::RectF(0, 0, W, H), L"text"});
     const float size = 13.5f;
     if (n.text.empty() && !n.editing) {
-        c.Text(L"点按以记录…", box, size, p.faint, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
+        c.Text(Tr(L"点按以记录…"), box, size, p.faint, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
         return;
     }
     if (!n.editing) {
@@ -468,7 +485,7 @@ void PaintNotes(Canvas& c, const WidgetContent& n, const Pal& p, float W, float 
 void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, float H, std::vector<WidgetHit>& hits)
 {
     int open = int(std::count_if(r.items.begin(), r.items.end(), [](const Reminder& i) { return !i.done; }));
-    c.Text(L"提醒事项", D2D1::RectF(kPad + 2, kPad - 2, W - kPad - 40, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    c.Text(Tr(L"提醒事项"), D2D1::RectF(kPad + 2, kPad - 2, W - kPad - 40, kPad + 18), 13.5f, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     c.Text(std::to_wstring(open), D2D1::RectF(W - kPad - 48, kPad - 6, W - kPad - 2, kPad + 22), 22, p.orange, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
     const float bottom = H - kReminderBottom, view = bottom - kReminderTop;
     const float limit = std::max(0.f, float(r.items.size() + 1) * kReminderRow - view);
@@ -495,7 +512,7 @@ void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, fl
         hit(D2D1::RectF(kPad - 4, y, kPad + 22, y + kReminderRow), L"toggle:" + std::to_wstring(idx));
         D2D1_RECT_F text = D2D1::RectF(kPad + 26, y, W - kPad, y + kReminderRow);
         bool editing = r.editing && r.item == idx;
-        c.Text(it.text.empty() && !editing ? L"新提醒" : it.text, text, 13.5f, it.done ? p.sub : it.text.empty() ? p.faint : p.text);
+        c.Text(it.text.empty() && !editing ? Tr(L"新提醒") : it.text, text, 13.5f, it.done ? p.sub : it.text.empty() ? p.faint : p.text);
         if (it.done && !it.text.empty())
             c.Line(text.left, cy, std::min(text.right, text.left + c.TextWidth(it.text, 13.5f)), cy, p.sub);
         if (editing) {
@@ -512,7 +529,7 @@ void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float W, fl
         float y = kReminderTop + kReminderRow * float(r.items.size()) - scroll;
         if (y < bottom) {
             c.Text(L"+", D2D1::RectF(kPad - 1, y, kPad + 19, y + kReminderRow), 17, p.faint, DWRITE_FONT_WEIGHT_NORMAL, 1);
-            c.Text(r.items.empty() ? L"点按以添加提醒" : L"新提醒", D2D1::RectF(kPad + 26, y, W - kPad, y + kReminderRow), 13.5f, p.faint);
+            c.Text(r.items.empty() ? Tr(L"点按以添加提醒") : Tr(L"新提醒"), D2D1::RectF(kPad + 26, y, W - kPad, y + kReminderRow), 13.5f, p.faint);
             hit(D2D1::RectF(kPad - 4, y, W - kPad, y + kReminderRow), L"add");
         }
     }
@@ -532,8 +549,8 @@ void PaintPhotos(Canvas& c, const WidgetContent& ph, const Pal& p, float W, floa
         return;
     }
     c.Glyph(L"\uE91B", D2D1::RectF(0, H / 2 - 46, W, H / 2 - 6), 30, p.sub);
-    c.Text(L"照片", D2D1::RectF(0, H / 2, W, H / 2 + 20), 14, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
-    c.Text(L"右键选择照片文件夹", D2D1::RectF(0, H / 2 + 20, W, H / 2 + 38), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
+    c.Text(Tr(L"照片"), D2D1::RectF(0, H / 2, W, H / 2 + 20), 14, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+    c.Text(Tr(L"右键选择照片文件夹"), D2D1::RectF(0, H / 2 + 20, W, H / 2 + 38), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
 }
 
 // ---- weather -------------------------------------------------------------------
@@ -710,15 +727,15 @@ void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pa
     const Ink ink = p.icon;
     const bool dark = ink == Ink::Dark;
     const float pad = 16;
-    const std::wstring city = w.city.empty() ? (world.city.empty() ? L"天气" : world.city) : w.city;
+    const std::wstring city = w.city.empty() ? (world.city.empty() ? Tr(L"天气") : world.city) : w.city;
     c.Text(city, D2D1::RectF(pad, 12, W - pad - (size == WidgetSize::Small ? 0 : 120), 32), 14.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     if (!w.ok) {
-        c.Text(w.error.empty() ? L"正在获取天气…" : w.error, D2D1::RectF(pad, H / 2 - 10, W - pad, H / 2 + 10), 13, sub,
+        c.Text(w.error.empty() ? Tr(L"正在获取天气…") : w.error, D2D1::RectF(pad, H / 2 - 10, W - pad, H / 2 + 10), 13, sub,
                DWRITE_FONT_WEIGHT_SEMI_BOLD, size == WidgetSize::Small ? 0 : 1);
         return;
     }
     c.Text(Degrees(w.temp), D2D1::RectF(pad - 2, 30, W / 2 + 40, 82), 44, text, DWRITE_FONT_WEIGHT_LIGHT);
-    const std::wstring range = L"最高 " + Degrees(w.hi) + L"  最低 " + Degrees(w.lo);
+    const std::wstring range = Tr(L"最高 ") + Degrees(w.hi) + Tr(L"  最低 ") + Degrees(w.lo);
     if (size == WidgetSize::Small) {
         WeatherIcon(c, w.code, w.day, pad + 11, H - 62, 22, 0, ink);
         c.Text(WeatherCondition(w.code), D2D1::RectF(pad, H - 48, W - pad, H - 30), 13, text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
@@ -738,7 +755,7 @@ void PaintWeather(Canvas& c, WidgetSize size, const WidgetWorld& world, const Pa
         float x0 = pad + colW * float(i), cx = x0 + colW / 2;
         c.Text(h.label, D2D1::RectF(x0 - 4, hy, x0 + colW + 4, hy + 16), 11.5f, sub, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
         WeatherIcon(c, h.code, h.day, cx, hy + 31, 22, h.event, ink);
-        c.Text(h.event ? (h.event == 1 ? L"日出" : L"日落") : Degrees(h.temp), D2D1::RectF(x0 - 4, hy + 46, x0 + colW + 4, hy + 64),
+        c.Text(h.event ? (h.event == 1 ? Tr(L"日出") : Tr(L"日落")) : Degrees(h.temp), D2D1::RectF(x0 - 4, hy + 46, x0 + colW + 4, hy + 64),
                h.event ? 12.f : 13.5f, text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
     }
     if (size != WidgetSize::Large)

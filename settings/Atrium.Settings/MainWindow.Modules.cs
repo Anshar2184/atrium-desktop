@@ -682,10 +682,10 @@ public sealed partial class MainWindow
             _all = Plate(_panel.Wash45, 22);
             _searchGlyph = Symbol("\uE721", 16, _panel.Sub);
             _hint = Words(15, _panel.Faint);
-            _hint.Text = "搜索应用和文件夹";
+            _hint.Text = Loc.T("搜索应用和文件夹");
             _allGlyph = Symbol("\uE71D", 14, _panel.Text);
             _allLabel = Words(13, _panel.Text);
-            _allLabel.Text = "全部应用";
+            _allLabel.Text = Loc.T("全部应用");
             foreach (var e in new UIElement[] { _search, _searchGlyph, _hint, _caret, _all, _allGlyph, _allLabel }) Marks.Children.Add(e);
             _icons = new Grid[Apps.Length];
             _names = new TextBlock[Apps.Length];
@@ -695,13 +695,13 @@ public sealed partial class MainWindow
             {
                 _icons[i] = DrawnIcon(Apps[i].Glyph, Apps[i].Top, Apps[i].Bottom);
                 _names[i] = Words(11.5, _panel.Text, false, TextAlignment.Center, true);
-                _names[i].Text = Apps[i].Name;
+                _names[i].Text = Loc.T(Apps[i].Name);
                 Marks.Children.Add(_icons[i]);
                 Marks.Children.Add(_names[i]);
             }
             _user = Words(14, _shelf.Text, true);
-            _user.Text = "用户";
-            _initial.Text = "用";
+            _user.Text = Loc.T("用户");
+            _initial.Text = Loc.T("用");
             _divider.Fill = _shelf.Divider;
             foreach (var e in new UIElement[] { _avatar, _initial, _user, _divider }) Marks.Children.Add(e);
             _buttons = new[]
@@ -790,7 +790,7 @@ public sealed partial class MainWindow
             Box(_hint, 24 + 46, top + 20, Math.Max(0, allL - 8 - 48 - 70), 44);
             Put(_caret, 24 + 46 + 1 - 0.75, top + 32, 1.5, 20);
             Put(_all, allL, top + 20, 108, 44);
-            double tw = TextWidth("全部应用", 13), gx = allL + (108 - (16 + 6 + tw)) / 2;
+            double tw = TextWidth(Loc.T("全部应用"), 13), gx = allL + (108 - (16 + 6 + tw)) / 2;
             Box(_allGlyph, gx, top + 20, 16, 44);
             Box(_allLabel, gx + 22, top + 20, tw + 4, 44);
 
@@ -913,10 +913,10 @@ public sealed partial class MainWindow
         {
             _divider.Fill = _ink.Divider;
             _count = Words(12, _ink.Sub);
-            _count.Text = $"{Count} 个图标";
+            _count.Text = Loc.F("{0} 个图标", Count);
             _button = Plate(_ink.Wash45, 12);
             _system = Words(11.5, _ink.Text, false, TextAlignment.Center);
-            _system.Text = "系统托盘";
+            _system.Text = Loc.T("系统托盘");
             foreach (var e in new UIElement[] { _divider, _count, _button, _system }) Marks.Children.Add(e);
         }
 
@@ -967,7 +967,7 @@ public sealed partial class MainWindow
             // Below them: the count, and the system's own tray.
             double footTop = h - m - FooterH, divider = footTop - Split;
             Put(_divider, m, divider, w - 2 * m, 1);
-            double bw = TextWidth("系统托盘", 11.5) + 20;
+            double bw = TextWidth(Loc.T("系统托盘"), 11.5) + 20;
             Box(_count, m, footTop, w - m - bw - 10 - m, FooterH);
             Put(_button, w - m - bw, footTop, bw, FooterH);
             Box(_system, w - m - bw, footTop, bw, FooterH);
@@ -1019,9 +1019,9 @@ public sealed partial class MainWindow
                 Marks.Children.Add(_rowSub[i] = Words(11.5, conn.Sub));
             }
             _rowTitle[0].Text = "Wi-Fi";
-            _rowSub[0].Text = "已连接";
-            _rowTitle[1].Text = "蓝牙";
-            _rowSub[1].Text = "已打开";
+            _rowSub[0].Text = Loc.T("已连接");
+            _rowTitle[1].Text = Loc.T("蓝牙");
+            _rowSub[1].Text = Loc.T("已打开");
             var batt = _inks[1];
             _battTrack.Stroke = batt.Ring;
             _powerDisc.Fill = batt.Quiet;
@@ -1033,18 +1033,18 @@ public sealed partial class MainWindow
             _castDisc.Fill = cast.Quiet;
             _castGlyph = Symbol("\uE7F4", 13, cast.Text);
             _castTitle = Words(13.5, cast.Text, true);
-            _castTitle.Text = "投屏";
+            _castTitle.Text = Loc.T("投屏");
             _castSub = Words(11.5, cast.Sub);
-            _castSub.Text = "无线显示器";
+            _castSub.Text = Loc.T("无线显示器");
             foreach (var e in new UIElement[] { _castDisc, _castGlyph, _castTitle, _castSub }) Marks.Children.Add(e);
             var stage = _inks[3];
             _stageGlyph = Symbol("\uE7C4", 14, stage.Text);
             _stageTitle = Words(13.5, stage.Text, true);
-            _stageTitle.Text = "台前调度";
+            _stageTitle.Text = Loc.T("台前调度");
             _stageSub = Words(11.5, stage.Sub);
             foreach (var e in new UIElement[] { _stageDisc, _stageGlyph, _stageTitle, _stageSub }) Marks.Children.Add(e);
-            _bright = NewRow(_inks[4], "显示器", "\uE706");
-            _sound = NewRow(_inks[5], "声音", "\uE994");
+            _bright = NewRow(_inks[4], Loc.T("显示器"), "\uE706");
+            _sound = NewRow(_inks[5], Loc.T("声音"), "\uE994");
             _chevron = Plate(_inks[5].Chevron, 12);
             _chevronGlyph = Symbol("\uE76C", 9.5, _inks[5].Text);
             Marks.Children.Add(_chevron);
@@ -1146,7 +1146,7 @@ public sealed partial class MainWindow
 
             ArrangeConnections();
             ArrangeTiles(real);
-            ArrangeRow(_bright, Shapes[4], _brightness, laptop, laptop ? $"{_brightness}%" : "不支持调节", _inks[4], false);
+            ArrangeRow(_bright, Shapes[4], _brightness, laptop, laptop ? $"{_brightness}%" : Loc.T("不支持调节"), _inks[4], false);
             _sound.Glyph.Text = StatusGlyph.VolumeGlyph(Look());
             ArrangeRow(_sound, Shapes[5], _volume, true, $"{_volume}%", _inks[5], true);
             return IsOpen || _volumeMix > 0.001 || _brightMix > 0.001 || Math.Abs(_speed) > 0.001;
@@ -1187,7 +1187,7 @@ public sealed partial class MainWindow
                 Box(_battGlyph, cx - 12, cy - 12, 24, 24);
                 _battTitle.FontSize = 15;
                 _battTitle.Text = $"{pct}%";
-                _battSub.Text = real.Charging ? (pct >= 100 ? "已充满" : "正在充电") : "使用电池";
+                _battSub.Text = real.Charging ? (pct >= 100 ? Loc.T("已充满") : Loc.T("正在充电")) : Loc.T("使用电池");
             }
             else
             {
@@ -1196,8 +1196,8 @@ public sealed partial class MainWindow
                 _battGlyph.FontSize = 13;
                 Box(_battGlyph, cx - 14, cy - 14, 28, 28);
                 _battTitle.FontSize = 13.5;
-                _battTitle.Text = "电源";
-                _battSub.Text = "已接通电源";
+                _battTitle.Text = Loc.T("电源");
+                _battSub.Text = Loc.T("已接通电源");
             }
             Box(_battTitle, cx + 24, cy - 18, b.Right - 8 - cx - 24, 19);
             Box(_battSub, cx + 24, cy + 1, b.Right - 8 - cx - 24, 17);
@@ -1219,7 +1219,9 @@ public sealed partial class MainWindow
             _stageDisc.Fill = on ? AccentBrush : stageInk.Quiet;
             _stageGlyph.Foreground = on ? WhiteInk : stageInk.Text;
             Box(_stageGlyph, sx - 14, sy - 14, 28, 28);
-            _stageSub.Text = on ? (M._current.StageOnRight ? "已打开 · 最近使用的应用在右侧" : "已打开 · 最近使用的应用在左侧") : "已关闭";
+            _stageSub.Text = on
+                ? Loc.T(M._current.StageOnRight ? "已打开 · 最近使用的应用在右侧" : "已打开 · 最近使用的应用在左侧")
+                : Loc.T("已关闭");
             Box(_stageTitle, sx + 28, sy - 18, s.Right - Pad - sx - 28, 18);
             Box(_stageSub, sx + 28, sy, s.Right - Pad - sx - 28, 18);
         }
@@ -1254,6 +1256,10 @@ public sealed partial class MainWindow
     {
         private const double CW = 336, Pad = 14, MonthH = 48, WeekH = 26, CellH = 46, Footer = 40, CapGap = 10;
         private static readonly string[] WeekNames = { "一", "二", "三", "四", "五", "六", "日" };
+        // Weekday and month names as the core writes them in English ("Tue, March 10").
+        private static readonly string[] WeekShort = { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
+        private static readonly string[] Months = { "一月", "二月", "三月", "四月", "五月", "六月",
+                                                   "七月", "八月", "九月", "十月", "十一月", "十二月" };
         private readonly PanelInk _card = new(), _cap = new();
         private readonly TextBlock _title, _prev, _next, _settings, _time, _date, _lunar;
         private readonly TextBlock[] _week = new TextBlock[7], _days = new TextBlock[42], _labels = new TextBlock[42];
@@ -1269,7 +1275,7 @@ public sealed partial class MainWindow
             _prev = Symbol("\uE76B", 11, _card.Text);
             _next = Symbol("\uE76C", 11, _card.Text);
             _settings = Words(12.5, _card.Sub, false, TextAlignment.Center);
-            _settings.Text = "日期和时间设置";
+            _settings.Text = Loc.T("日期和时间设置");
             _line.Fill = _card.Divider;
             Marks.Children.Add(_today);
             foreach (var e in new UIElement[] { _title, _prev, _next, _line, _settings }) Marks.Children.Add(e);
@@ -1314,7 +1320,7 @@ public sealed partial class MainWindow
             PlaceMarks(f.Left, f.Top);
             var now = DateTime.Now;
             // The month and its buttons (PaintMonth).
-            _title.Text = $"{now.Year}年{now.Month}月";
+            _title.Text = Loc.English ? $"{Loc.T(Months[now.Month - 1])} {now.Year}" : $"{now.Year}年{now.Month}月";
             Box(_title, Pad + 6, 0, CW / 2 + 20 - Pad - 6, MonthH);
             double by = MonthH / 2;
             Box(_next, CW - Pad - 34, by - 17, 34, 34);
@@ -1326,7 +1332,7 @@ public sealed partial class MainWindow
             for (int i = 0; i < 7; i++)
             {
                 int wd = (first + i) % 7;
-                _week[i].Text = WeekNames[wd];
+                _week[i].Text = Loc.T(WeekNames[wd]);
                 _week[i].Foreground = wd >= 5 ? _card.Sub : _card.Faint;
                 Box(_week[i], Pad + i * cellW, MonthH, cellW, WeekH);
             }
@@ -1359,14 +1365,16 @@ public sealed partial class MainWindow
             // The system's settings.
             double fy = gridTop + 6 * CellH + 8;
             Put(_line, Pad + 8, fy, CW - 2 * Pad - 16, 1);
-            Box(_settings, Pad, fy + 5, TextWidth("日期和时间设置", 12.5) + 28, Footer - 10);
+            Box(_settings, Pad, fy + 5, TextWidth(Loc.T("日期和时间设置"), 12.5) + 28, Footer - 10);
 
             // The capsule (PaintCapsule): the time with its seconds, the day and its lunar date.
             double bh = BarHeight, top = CardH + CapGap, edge = Math.Max(16, bh / 2 - 4);
             _time.Text = now.ToString("HH:mm:ss");
             double tw = TextWidth("00:00:00", 20, true);
             Box(_time, edge, top, tw + 4, bh);
-            _date.Text = $"{now.Month}月{now.Day}日 星期{WeekNames[((int)now.DayOfWeek + 6) % 7]}";
+            int todayWd = ((int)now.DayOfWeek + 6) % 7;
+            _date.Text = Loc.English ? $"{Loc.T(WeekShort[todayWd])}, {Loc.T(Months[now.Month - 1])} {now.Day}"
+                                     : $"{now.Month}月{now.Day}日 星期{WeekNames[todayWd]}";
             _lunar.Text = WidgetFaces.LunarLine(now);
             double tl = edge + tw + 16, mid = top + bh / 2;
             Box(_date, tl, mid - 19, CW - edge - tl, 20);

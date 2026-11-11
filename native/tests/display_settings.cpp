@@ -38,6 +38,11 @@ void CheckSettings()
         "malformed hover rise retains the current value");
     Require(Settings::FromJson(LR"({"hoverRise":true})", settings, parsed) && parsed.hoverRise && parsed.magnify == settings.magnify,
         "hover rise toggles without changing icon magnification");
+    settings.language = L"en";
+    Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed) && parsed.language == L"en", "the interface language survives saving");
+    Require(Settings::FromJson(LR"({})", Settings{}, parsed) && parsed.language == L"auto", "old settings follow the system language");
+    Require(Settings::FromJson(LR"({"language":"bad"})", Settings{}, parsed) && parsed.language == L"auto",
+        "an unknown language follows the system");
     Require(Settings::FromJson(settings.ToJson(), Settings{}, parsed), "restore settings round trip");
     Require(parsed.dockDisplayMode == L"all" && parsed.dockDisplayDelay == 750 && parsed.dockDisplay == settings.dockDisplay &&
             parsed.desktopDisplay == settings.desktopDisplay && parsed.taskbarApps == settings.taskbarApps && parsed.taskbarRightPrimaryOnly &&

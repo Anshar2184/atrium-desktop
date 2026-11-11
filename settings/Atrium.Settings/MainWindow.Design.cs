@@ -71,56 +71,58 @@ public sealed partial class MainWindow
 
     private sealed record Curve(string Name, string Spec, string Formula, string Use, double Seconds, Func<double, double> At);
 
-    private static readonly Curve[] Curves =
+    private static Curve[] Curves => new Curve[]
     {
-        new("kPop · 弹簧", "时长 0.36 s · 回弹 0.38", "闭式弹簧，阻尼比 0.62；切成 12 段 Hermite 曲线交给 DirectComposition", "弹出面板出现：缩放 0.92 → 1，峰值 1.0067", 0.6, t => Motion.Spring(t, 0.36, 0.62)),
-        new("kSmooth · 弹簧", "时长 0.48 s · 回弹 0.23", "闭式弹簧，阻尼比 0.77", "状态圆环：电量、音量与亮度", 0.8, t => Motion.Spring(t, 0.48, 0.77)),
-        new("堆叠 · 临界阻尼弹簧", "时长 0.60 s · 回弹 0", "闭式弹簧，阻尼比 1", "滚轮翻看通知后吸附到一张", 1.0, t => Motion.Spring(t, 0.60, 1.0)),
-        new("EaseOut · 三次缓出", "1 − (1 − t)³ · 320 ms", "1 − (1 − t)³", "换页、淡入、列表依次出现、字色渐变", 0.32, t => Motion.EaseOut(t / 0.32)),
-        new("EaseOutBack · 回弹缓出", "s = 1.5 · 260 ms", "1 + (s + 1)(t − 1)³ + s(t − 1)²", "开始菜单的格子出现", 0.26, t => Motion.EaseOutBack(t / 0.26, 1.5)),
-        new("Approach · 指数渐近", "进 20/s · 出 11/s", "1 − e^(−rate · t)，每帧从当前值继续", "悬停与按下的底板", 0.3, t => Motion.Approach(t, 20)),
-        new("启动 · 一次轻跳", "sin² · 480 ms · 高 0.32 倍图标", "sin²(πt / 0.48)，起跳与落地都没有速度突变", "点开任务栏上的应用：只跳一次", 0.48, t => Motion.Hop(t, 0.48)),
+        new(Loc.T("kPop · 弹簧"), Loc.T("时长 0.36 s · 回弹 0.38"), Loc.T("闭式弹簧，阻尼比 0.62；切成 12 段 Hermite 曲线交给 DirectComposition"), Loc.T("弹出面板出现：缩放 0.92 → 1，峰值 1.0067"), 0.6, t => Motion.Spring(t, 0.36, 0.62)),
+        new(Loc.T("kSmooth · 弹簧"), Loc.T("时长 0.48 s · 回弹 0.23"), Loc.T("闭式弹簧，阻尼比 0.77"), Loc.T("状态圆环：电量、音量与亮度"), 0.8, t => Motion.Spring(t, 0.48, 0.77)),
+        new(Loc.T("堆叠 · 临界阻尼弹簧"), Loc.T("时长 0.60 s · 回弹 0"), Loc.T("闭式弹簧，阻尼比 1"), Loc.T("滚轮翻看通知后吸附到一张"), 1.0, t => Motion.Spring(t, 0.60, 1.0)),
+        new(Loc.T("EaseOut · 三次缓出"), "1 − (1 − t)³ · 320 ms", "1 − (1 − t)³", Loc.T("换页、淡入、列表依次出现、字色渐变"), 0.32, t => Motion.EaseOut(t / 0.32)),
+        new(Loc.T("EaseOutBack · 回弹缓出"), "s = 1.5 · 260 ms", "1 + (s + 1)(t − 1)³ + s(t − 1)²", Loc.T("开始菜单的格子出现"), 0.26, t => Motion.EaseOutBack(t / 0.26, 1.5)),
+        new(Loc.T("Approach · 指数渐近"), Loc.T("进 20/s · 出 11/s"), Loc.T("1 − e^(−rate · t)，每帧从当前值继续"), Loc.T("悬停与按下的底板"), 0.3, t => Motion.Approach(t, 20)),
+        new(Loc.T("启动 · 一次轻跳"), Loc.T("sin² · 480 ms · 高 0.32 倍图标"), Loc.T("sin²(πt / 0.48)，起跳与落地都没有速度突变"), Loc.T("点开任务栏上的应用：只跳一次"), 0.48, t => Motion.Hop(t, 0.48)),
     };
 
     // The type ramp (DESIGN.md §1.2): name, size, MiSans file, its weight, macOS counterpart, where.
-    private static readonly (string Name, double Size, string Font, string Weight, string Mac, string Use)[] TypeRamp =
+    private static (string Name, double Size, string Font, string Weight, string Mac, string Use)[] TypeRamp =>
+        new (string Name, double Size, string Font, string Weight, string Mac, string Use)[]
     {
-        ("Large Title", 30, "TitleFont", "Semibold 520", "Large Title · 26", "页标题、产品名"),
-        ("Title", 20, "TitleFont", "Semibold 520", "Title 1 · 22", "空状态标题、日历的月份"),
-        ("Value", 15, "EmphasisFont", "Demibold 450", "—", "滑块的数值（等宽数字）"),
-        ("Row", 15, "TextFont", "Medium 380", "Body · 13", "设置中心的行标题"),
-        ("Body", 13.5, "TextFont", "Medium 380", "Body · 13", "面板正文、通知内容"),
-        ("Section", 13, "EmphasisFont", "Demibold 450", "—", "分组标题"),
-        ("Note", 13, "TextFont", "Medium 380", "Callout · 12", "行下方的说明"),
-        ("Footnote", 12, "TextFont", "Medium 380", "Footnote · 10", "补充说明；玻璃上升为 Demibold"),
+        ("Large Title", 30, "TitleFont", "Semibold 520", "Large Title · 26", Loc.T("页标题、产品名")),
+        ("Title", 20, "TitleFont", "Semibold 520", "Title 1 · 22", Loc.T("空状态标题、日历的月份")),
+        ("Value", 15, "EmphasisFont", "Demibold 450", "—", Loc.T("滑块的数值（等宽数字）")),
+        ("Row", 15, "TextFont", "Medium 380", "Body · 13", Loc.T("设置中心的行标题")),
+        ("Body", 13.5, "TextFont", "Medium 380", "Body · 13", Loc.T("面板正文、通知内容")),
+        ("Section", 13, "EmphasisFont", "Demibold 450", "—", Loc.T("分组标题")),
+        ("Note", 13, "TextFont", "Medium 380", "Callout · 12", Loc.T("行下方的说明")),
+        ("Footnote", 12, "TextFont", "Medium 380", "Footnote · 10", Loc.T("补充说明；玻璃上升为 Demibold")),
     };
 
     // Logical width from, typical screens, bar height, icon, bottom margin, magnification.
-    private static readonly (double From, string Screens, int Height, int Icon, int Margin, double Magnify)[] SizeClasses =
+    private static (double From, string Screens, int Height, int Icon, int Margin, double Magnify)[] SizeClasses =>
+        new (double From, string Screens, int Height, int Icon, int Margin, double Magnify)[]
     {
-        (0, "1366×768 @100%、1920×1080 @150%", 52, 26, 8, 1.5),
-        (1280, "1920×1080 @125%、2560×1600 @175%、3200×2000 @200%", 60, 30, 10, 1.7),
-        (1680, "1920×1080 @100%、2560×1440 @125%", 64, 32, 12, 1.7),
-        (2400, "2560×1440 @100%、3840×2160 @150%", 68, 34, 14, 1.6),
+        (0, Loc.T("1366×768 @100%、1920×1080 @150%"), 52, 26, 8, 1.5),
+        (1280, Loc.T("1920×1080 @125%、2560×1600 @175%、3200×2000 @200%"), 60, 30, 10, 1.7),
+        (1680, Loc.T("1920×1080 @100%、2560×1440 @125%"), 64, 32, 12, 1.7),
+        (2400, Loc.T("2560×1440 @100%、3840×2160 @150%"), 68, 34, 14, 1.6),
     };
 
     // The spacing scale (DESIGN.md §4.1) and the corner ladder (§2.1).
-    private static readonly (string Name, int Value, string Use)[] Spacing =
+    private static (string Name, int Value, string Use)[] Spacing => new[]
     {
-        ("2xs", 4, "图标与角标、紧贴的元素"), ("xs", 8, "同一组内相邻的元素"), ("s", 10, "面板内卡片之间（kGap）"),
-        ("m", 12, "弹出面板与栏之间（kPopupGapDip）"), ("l", 14, "面板内边距（kPad）、玻璃阴影"), ("xl", 16, "小组件之间的间隙"),
-        ("2xl", 24, "小组件到屏幕边缘、区块之间"),
+        ("2xs", 4, Loc.T("图标与角标、紧贴的元素")), ("xs", 8, Loc.T("同一组内相邻的元素")), ("s", 10, Loc.T("面板内卡片之间（kGap）")),
+        ("m", 12, Loc.T("弹出面板与栏之间（kPopupGapDip）")), ("l", 14, Loc.T("面板内边距（kPad）、玻璃阴影")), ("xl", 16, Loc.T("小组件之间的间隙")),
+        ("2xl", 24, Loc.T("小组件到屏幕边缘、区块之间")),
     };
 
-    private static readonly (string Element, string Radius, string Rule)[] Corners =
+    private static (string Element, string Radius, string Rule)[] Corners => new[]
     {
-        ("栏", "cornerRadius，默认 30", "不超过栏高的一半：默认是胶囊形"),
-        ("弹出面板", "与栏相同，8 到栏高 / 2", "面板与栏是同一种材质、同一种形状"),
-        ("面板内的模块", "min(面板圆角, 22)", "面板很圆时，模块不跟着变成胶囊"),
-        ("托盘图标底板", "clamp(R − m − 2, 6, 12)", "同心：外层圆角减去边距"),
-        ("桌面小组件", "22（格子 164）", "约为边长的 13%，与 macOS 小组件相同"),
-        ("胶囊控件", "高度 / 2", "G3 连续端部；圆形旋钮保持正圆"),
-        ("悬停与按下的底板", "8–12", "不超过所在容器圆角减去边距"),
+        (Loc.T("栏"), Loc.T("cornerRadius，默认 30"), Loc.T("不超过栏高的一半：默认是胶囊形")),
+        (Loc.T("弹出面板"), Loc.T("与栏相同，8 到栏高 / 2"), Loc.T("面板与栏是同一种材质、同一种形状")),
+        (Loc.T("面板内的模块"), Loc.T("min(面板圆角, 22)"), Loc.T("面板很圆时，模块不跟着变成胶囊")),
+        (Loc.T("托盘图标底板"), "clamp(R − m − 2, 6, 12)", Loc.T("同心：外层圆角减去边距")),
+        (Loc.T("桌面小组件圆角"), Loc.T("22（格子 164）"), Loc.T("约为边长的 13%，与 macOS 小组件相同")),
+        (Loc.T("胶囊控件"), Loc.T("高度 / 2"), Loc.T("G3 连续端部；圆形旋钮保持正圆")),
+        (Loc.T("悬停与按下的底板"), "8–12", Loc.T("不超过所在容器圆角减去边距")),
     };
 
     private bool _designBuilt;
@@ -170,36 +172,36 @@ public sealed partial class MainWindow
         _designBuilt = true;
         // ---- First layer: to look at and to touch ----
         DesignStack.Children.Add(Principles());
-        DesignStack.Children.Add(Section("材质", "同一个着色器、两组参数：液态玻璃只在边缘折射、中间几乎透明；磨砂玻璃把背景磨成色块、几乎不折射。左右拖动分界线对比。",
+        DesignStack.Children.Add(Section(Loc.T("材质"), Loc.T("同一个着色器、两组参数：液态玻璃只在边缘折射、中间几乎透明；磨砂玻璃把背景磨成色块、几乎不折射。左右拖动分界线对比。"),
             MaterialCompare()));
-        DesignStack.Children.Add(Section("几何", "统一 G3 连续圆角，保持大圆角与胶囊比例。",
+        DesignStack.Children.Add(Section(Loc.T("几何"), Loc.T("统一 G3 连续圆角，保持大圆角与胶囊比例。"),
             GeometryCard()));
-        DesignStack.Children.Add(Section("排版", "MiSans 三个字重。一个界面最多三档字号；主次先用透明度区分，再用字号，最后才用字重；数字一律等宽。", TypeCard(false)));
-        DesignStack.Children.Add(Section("间距与色彩", "间距只用一组刻度；颜色只有一个强调色，其余都是中性灰。玻璃上的字色由背后的亮度决定。", SpaceAndColour()));
-        DesignStack.Children.Add(Section("交互", "把指针移到任务栏上：图标像波浪一样依次变大（倍数取当前设置）；点一个图标，看启动时的一次轻跳。点通知卡片，重新弹出。", InteractionCard()));
-        DesignStack.Children.Add(Section("动效", "动画可从当前位置改向，并按实际时间推进；弹簧保留速度，小组件缓出目前会重启。点卡片播放。", CurveGrid()));
+        DesignStack.Children.Add(Section(Loc.T("排版"), Loc.T("MiSans 三个字重。一个界面最多三档字号；主次先用透明度区分，再用字号，最后才用字重；数字一律等宽。"), TypeCard(false)));
+        DesignStack.Children.Add(Section(Loc.T("间距与色彩"), Loc.T("间距只用一组刻度；颜色只有一个强调色，其余都是中性灰。玻璃上的字色由背后的亮度决定。"), SpaceAndColour()));
+        DesignStack.Children.Add(Section(Loc.T("交互"), Loc.T("把指针移到任务栏上：图标像波浪一样依次变大（倍数取当前设置）；点一个图标，看启动时的一次轻跳。点通知卡片，重新弹出。"), InteractionCard()));
+        DesignStack.Children.Add(Section(Loc.T("动效"), Loc.T("动画可从当前位置改向，并按实际时间推进；弹簧保留速度，小组件缓出目前会重启。点卡片播放。"), CurveGrid()));
 
         // ---- Second layer: the numbers ----
         var toggle = new Button { HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(16, 7, 14, 8) };
-        var label = new TextBlock { Text = "查看详细参数" };
+        var label = new TextBlock { Text = Loc.T("查看详细参数") };
         var chevron = new FontIcon { Glyph = "\uE70D", FontSize = 11, Margin = new Thickness(10, 1, 0, 0) };
         chevron.RenderTransformOrigin = new Point(0.5, 0.5);
         chevron.RenderTransform = new RotateTransform();
         toggle.Content = new StackPanel { Orientation = Orientation.Horizontal, Children = { label, chevron } };
-        AutomationProperties.SetName(toggle, "查看详细参数");
+        AutomationProperties.SetName(toggle, Loc.T("查看详细参数"));
         _designDetails = new StackPanel { Spacing = 36, Visibility = Visibility.Collapsed };
         toggle.Click += (_, _) =>
         {
             RefreshDesignDetails(true);
             bool open = _designDetails.Visibility != Visibility.Visible;
             _designDetails.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-            label.Text = open ? "收起详细参数" : "查看详细参数";
+            label.Text = open ? Loc.T("收起详细参数") : Loc.T("查看详细参数");
             ((RotateTransform)chevron.RenderTransform).Angle = open ? 180 : 0;
             if (open) AnimateIn(_designDetails);
         };
         var foot = new StackPanel { Spacing = 8 };
-        foot.Children.Add(Text("技术细节", "TitleStyle"));
-        var why = Text("动画的曲线与时长、材质预设的每个参数、字号与字重、圆角与间距：与 Atrium 运行时使用的是同一份数值。", "RowNoteStyle");
+        foot.Children.Add(Text(Loc.T("技术细节"), "TitleStyle"));
+        var why = Text(Loc.T("动画的曲线与时长、材质预设的每个参数、字号与字重、圆角与间距：与 Atrium 运行时使用的是同一份数值。"), "RowNoteStyle");
         why.Margin = new Thickness(0, 0, 0, 6);
         foot.Children.Add(why);
         foot.Children.Add(toggle);
@@ -219,37 +221,37 @@ public sealed partial class MainWindow
 
     private void BuildDesignDetails(StackPanel into)
     {
-        into.Children.Add(Section("动效参数", "弹簧按 Apple 的方式给出：时长与回弹（= 1 − 阻尼比）。弹出动画由 DirectComposition 在合成器里播放，其余由渲染线程按合成时钟逐帧计算。",
-            Table(new[] { "曲线", "参数", "形式", "用于" }, new[] { 1.2, 1.2, 2.0, 1.6 },
+        into.Children.Add(Section(Loc.T("动效参数"), Loc.T("弹簧按 Apple 的方式给出：时长与回弹（= 1 − 阻尼比）。弹出动画由 DirectComposition 在合成器里播放，其余由渲染线程按合成时钟逐帧计算。"),
+            Table(new[] { Loc.T("曲线"), Loc.T("参数"), Loc.T("形式"), Loc.T("用于") }, new[] { 1.2, 1.2, 2.0, 1.6 },
                 Curves.Select(c => new[] { c.Name, c.Spec, c.Formula, c.Use }))));
         var liquid = BarSettings.Liquid();
         var frosted = BarSettings.Frosted();
         string P(double v) => $"{v * 100:0}%";
         string Hex(uint c) => "#" + c.ToString("X6");
-        into.Children.Add(Section("材质参数", "两个预设与当前设置。栏、弹出面板与小组件用同一个着色器（glass.hlsl）和同一组参数。",
-            Table(new[] { "参数", "液态玻璃", "磨砂玻璃", "当前" }, new[] { 1.4, 1.0, 1.0, 1.0 }, new[]
+        into.Children.Add(Section(Loc.T("材质参数"), Loc.T("两个预设与当前设置。栏、弹出面板与小组件用同一个着色器（glass.hlsl）和同一组参数。"),
+            Table(new[] { Loc.T("参数"), Loc.T("液态玻璃"), Loc.T("磨砂玻璃"), Loc.T("当前") }, new[] { 1.4, 1.0, 1.0, 1.0 }, new[]
             {
-                new[] { "透明度", P(liquid.Transparency), P(frosted.Transparency), P(_current.Transparency) },
-                new[] { "模糊", P(liquid.Blur), P(frosted.Blur), P(_current.Blur) },
-                new[] { "折射强度", $"{liquid.Refraction:0} px", $"{frosted.Refraction:0} px", $"{_current.Refraction:0} px" },
-                new[] { "折射边缘宽度", $"{liquid.Edge:0} px", $"{frosted.Edge:0} px", $"{_current.Edge:0} px" },
-                new[] { "色散", P(liquid.Dispersion), P(frosted.Dispersion), P(_current.Dispersion) },
-                new[] { "高光", P(liquid.Highlight), P(frosted.Highlight), P(_current.Highlight) },
-                new[] { "阴影", P(liquid.Shadow), P(frosted.Shadow), P(_current.Shadow) },
-                new[] { "染色", Hex(liquid.Tint), Hex(frosted.Tint), Hex(_current.Tint) },
+                new[] { Loc.T("透明度"), P(liquid.Transparency), P(frosted.Transparency), P(_current.Transparency) },
+                new[] { Loc.T("模糊"), P(liquid.Blur), P(frosted.Blur), P(_current.Blur) },
+                new[] { Loc.T("折射强度"), $"{liquid.Refraction:0} px", $"{frosted.Refraction:0} px", $"{_current.Refraction:0} px" },
+                new[] { Loc.T("折射边缘宽度"), $"{liquid.Edge:0} px", $"{frosted.Edge:0} px", $"{_current.Edge:0} px" },
+                new[] { Loc.T("色散"), P(liquid.Dispersion), P(frosted.Dispersion), P(_current.Dispersion) },
+                new[] { Loc.T("高光"), P(liquid.Highlight), P(frosted.Highlight), P(_current.Highlight) },
+                new[] { Loc.T("阴影"), P(liquid.Shadow), P(frosted.Shadow), P(_current.Shadow) },
+                new[] { Loc.T("染色"), Hex(liquid.Tint), Hex(frosted.Tint), Hex(_current.Tint) },
             })));
-        into.Children.Add(Section("排版参数", "字重从不合成：样式选择字体文件。MiSans 的字重比名称细一档：Medium 380 当作常规，Demibold 450 当作中等，Semibold 520 当作半粗。",
+        into.Children.Add(Section(Loc.T("排版参数"), Loc.T("字重从不合成：样式选择字体文件。MiSans 的字重比名称细一档：Medium 380 当作常规，Demibold 450 当作中等，Semibold 520 当作半粗。"),
             TypeCard(true)));
-        into.Children.Add(Section("圆角", "统一解析 G3 轮廓：直边接点的曲率、曲率变化率均为零。卡片 24，按钮按半高取值；正圆保留恒定曲率。",
-            Table(new[] { "元素", "圆角", "规则" }, new[] { 1.1, 1.3, 2.2 }, Corners.Select(c => new[] { c.Element, c.Radius, c.Rule }))));
+        into.Children.Add(Section(Loc.T("圆角"), Loc.T("统一解析 G3 轮廓：直边接点的曲率、曲率变化率均为零。卡片 24，按钮按半高取值；正圆保留恒定曲率。"),
+            Table(new[] { Loc.T("元素"), Loc.T("圆角"), Loc.T("规则") }, new[] { 1.1, 1.3, 2.2 }, Corners.Select(c => new[] { c.Element, c.Radius, c.Rule }))));
         into.Children.Add(RadiusCard());
-        into.Children.Add(Section("间距", null,
-            Table(new[] { "名称", "值", "用途" }, new[] { 0.6, 0.5, 2.6 }, Spacing.Select(s => new[] { s.Name, s.Value.ToString(), s.Use }))));
-        into.Children.Add(Section("尺寸", "先把分辨率换算成逻辑宽度（像素 ÷ 缩放），再查栏的尺寸。图标是栏高的一半，栏高约为逻辑屏幕高度的 6%。", SizeCard()));
-        into.Children.Add(Section("字色", "由玻璃背后的亮度决定：高于 0.50 用深色字，低于 0.42 换回浅色字，两者之间不切换；切换时 450 ms 缓出渐变。字色分三档透明度。", InkCard()));
+        into.Children.Add(Section(Loc.T("间距"), null,
+            Table(new[] { Loc.T("名称"), Loc.T("值"), Loc.T("用途") }, new[] { 0.6, 0.5, 2.6 }, Spacing.Select(s => new[] { s.Name, s.Value.ToString(), s.Use }))));
+        into.Children.Add(Section(Loc.T("尺寸"), Loc.T("先把分辨率换算成逻辑宽度（像素 ÷ 缩放），再查栏的尺寸。图标是栏高的一半，栏高约为逻辑屏幕高度的 6%。"), SizeCard()));
+        into.Children.Add(Section(Loc.T("字色"), Loc.T("由玻璃背后的亮度决定：高于 0.50 用深色字，低于 0.42 换回浅色字，两者之间不切换；切换时 450 ms 缓出渐变。字色分三档透明度。"), InkCard()));
         var link = new HyperlinkButton
         {
-            Content = "完整规范：docs/DESIGN.md",
+            Content = Loc.T("完整规范：docs/DESIGN.md"),
             NavigateUri = new Uri("https://github.com/wynter-yaxley/atrium-desktop/blob/main/docs/DESIGN.md"),
             Padding = new Thickness(0),
         };
@@ -294,9 +296,9 @@ public sealed partial class MainWindow
         var grid = new ResponsiveGrid { MinCellWidth = 240, Gap = 16, StretchLastRow = true };
         (string N, string Title, string Body)[] items =
         {
-            ("01", "让位于内容", "玻璃是承载内容的介质。字色跟随背后的亮度，装饰的强度以文字始终清晰为限。"),
-            ("02", "运动像真实物体", "可以中途改向，保持位置连续；弹簧保留速度，小组件缓出目前会重启。"),
-            ("03", "同类事物，同一种处理", "同一类元素用同一条曲线、同一个圆角、同一档字号。"),
+            ("01", Loc.T("让位于内容"), Loc.T("玻璃是承载内容的介质。字色跟随背后的亮度，装饰的强度以文字始终清晰为限。")),
+            ("02", Loc.T("运动像真实物体"), Loc.T("可以中途改向，保持位置连续；弹簧保留速度，小组件缓出目前会重启。")),
+            ("03", Loc.T("同类事物，同一种处理"), Loc.T("同一类元素用同一条曲线、同一个圆角、同一档字号。")),
         };
         foreach (var (n, title, body) in items)
         {
@@ -309,7 +311,7 @@ public sealed partial class MainWindow
             s.Children.Add(Text(body, "RowNoteStyle"));
             grid.Children.Add(Card(s));
         }
-        return Section("原则", null, grid);
+        return Section(Loc.T("原则"), null, grid);
     }
 
     // ---- Material: the two presets on one photo, split by a handle the pointer moves ----
@@ -342,10 +344,10 @@ public sealed partial class MainWindow
         stage.Children.Add(reveal);
         stage.Children.Add(split);
         stage.Children.Add(knob);
-        stage.Children.Add(Tag("液态玻璃", HorizontalAlignment.Left));
-        stage.Children.Add(Tag("磨砂玻璃", HorizontalAlignment.Right));
+        stage.Children.Add(Tag(Loc.T("液态玻璃"), HorizontalAlignment.Left));
+        stage.Children.Add(Tag(Loc.T("磨砂玻璃"), HorizontalAlignment.Right));
         stage.Children.Add(new Border { CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(Color.FromArgb(31, 0, 0, 0)), IsHitTestVisible = false });
-        AutomationProperties.SetName(stage, "材质对比");
+        AutomationProperties.SetName(stage, Loc.T("材质对比"));
 
         double at = 0.5, width = 0;
         void Place()
@@ -437,7 +439,7 @@ public sealed partial class MainWindow
         };
         var face = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
         face.Children.Add(outline);
-        var caption = Text("G3 大圆角", "RowTitleStyle");
+        var caption = Text(Loc.T("G3 大圆角"), "RowTitleStyle");
         caption.HorizontalAlignment = HorizontalAlignment.Center;
         caption.MinHeight = caption.LineHeight = 22;
         face.Children.Add(caption);
@@ -456,7 +458,7 @@ public sealed partial class MainWindow
         Canvas.SetLeft(inner, P);
         Canvas.SetTop(inner, P);
         demo.Children.Add(inner);
-        var label = Tabular(Text($"R {R} − 边距 {P} = r {R - P}", "RowTitleStyle"));
+        var label = Tabular(Text(Loc.F("R {0} − 边距 {1} = r {2}", R, P, R - P), "RowTitleStyle"));
         label.Width = Ww - 2 * P;
         label.TextAlignment = TextAlignment.Center;
         Canvas.SetLeft(label, P);
@@ -464,7 +466,7 @@ public sealed partial class MainWindow
         demo.Children.Add(label);
         var s = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
         s.Children.Add(demo);
-        var why = Text("嵌套：内圆角随边距缩小，保持一致的轮廓。", "RowNoteStyle");
+        var why = Text(Loc.T("嵌套：内圆角随边距缩小，保持一致的轮廓。"), "RowNoteStyle");
         why.HorizontalAlignment = HorizontalAlignment.Center;
         why.MinHeight = why.LineHeight = 22;
         s.Children.Add(why);
@@ -493,12 +495,12 @@ public sealed partial class MainWindow
         var colours = new ResponsiveGrid { MinCellWidth = 112, MaxColumns = 4, Gap = 12, DistributeRows = true };
         (string Key, string Name)[] tokens =
         {
-            ("AccentBrush", "强调色"), ("InkBrush", "主文字"), ("InkSecondaryBrush", "次文字"), ("InkTertiaryBrush", "弱文字"),
-            ("FillBrush", "填充"), ("SeparatorBrush", "分隔线"), ("CardBrush", "卡片"), ("PageBrush", "页面"),
+            ("AccentBrush", Loc.T("强调色")), ("InkBrush", Loc.T("主文字")), ("InkSecondaryBrush", Loc.T("次文字")), ("InkTertiaryBrush", Loc.T("弱文字")),
+            ("FillBrush", Loc.T("填充")), ("SeparatorBrush", Loc.T("分隔线")), ("CardBrush", Loc.T("卡片")), ("PageBrush", Loc.T("页面")),
         };
         foreach (var (key, name) in tokens) colours.Children.Add(Chip(Tokens.Brush(key), name));
         // The few colours widgets use (WidgetFaces.cs, widget_faces.cpp), as on macOS.
-        foreach (var (c, name) in new[] { (WidgetFaces.Green, "正常 · 绿"), (WidgetFaces.Orange, "提醒 · 橙"), (WidgetFaces.Red, "警示 · 红"), (WidgetFaces.Blue, "日历 · 蓝") })
+        foreach (var (c, name) in new[] { (WidgetFaces.Green, Loc.T("正常 · 绿")), (WidgetFaces.Orange, Loc.T("提醒 · 橙")), (WidgetFaces.Red, Loc.T("警示 · 红")), (WidgetFaces.Blue, Loc.T("日历 · 蓝")) })
             colours.Children.Add(Chip(new SolidColorBrush(c), name));
 
         var grid = new ResponsiveGrid { MinCellWidth = 300, Gap = 28, StretchLastRow = true };
@@ -641,8 +643,8 @@ public sealed partial class MainWindow
 
         var s = new StackPanel { Spacing = 10 };
         s.Children.Add(stage);
-        s.Children.Add(Text("悬停放大与启动轻跳", "RowTitleStyle"));
-        s.Children.Add(Text("波形：(1 + cos πd) / 2，d 为指针到图标的距离（以 2.3 个图标为半径）；放大倍数取“任务栏”页的设置。", "RowNoteStyle"));
+        s.Children.Add(Text(Loc.T("悬停放大与启动轻跳"), "RowTitleStyle"));
+        s.Children.Add(Text(Loc.T("波形：(1 + cos πd) / 2，d 为指针到图标的距离（以 2.3 个图标为半径）；放大倍数取“任务栏”页的设置。"), "RowNoteStyle"));
         return InteractionFrame(stage, s);
     }
 
@@ -656,21 +658,21 @@ public sealed partial class MainWindow
             BorderBrush = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)), BorderThickness = new Thickness(1),
         };
         var text = new StackPanel { Spacing = 2 };
-        text.Children.Add(new TextBlock { Text = "日历 · 现在", FontSize = 12, Foreground = new SolidColorBrush(Color.FromArgb(150, 0x1D, 0x1D, 0x1F)) });
-        text.Children.Add(new TextBlock { Text = "产品评审", FontSize = 14, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(240, 0x1D, 0x1D, 0x1F)) });
-        text.Children.Add(new TextBlock { Text = "点我，再弹出一次。", FontSize = 13, Foreground = new SolidColorBrush(Color.FromArgb(190, 0x1D, 0x1D, 0x1F)) });
+        text.Children.Add(new TextBlock { Text = Loc.T("日历 · 现在"), FontSize = 12, Foreground = new SolidColorBrush(Color.FromArgb(150, 0x1D, 0x1D, 0x1F)) });
+        text.Children.Add(new TextBlock { Text = Loc.T("产品评审"), FontSize = 14, FontFamily = (FontFamily)Application.Current.Resources["EmphasisFont"], Foreground = new SolidColorBrush(Color.FromArgb(240, 0x1D, 0x1D, 0x1F)) });
+        text.Children.Add(new TextBlock { Text = Loc.T("点我，再弹出一次。"), FontSize = 13, Foreground = new SolidColorBrush(Color.FromArgb(190, 0x1D, 0x1D, 0x1F)) });
         card.Child = text;
         var popup = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         popup.Children.Add(card);
         stage.Children.Add(popup);
         stage.PointerPressed += (_, _) => ReplayNotification(popup,
             new Vector2((float)(popup.ActualWidth - _current.Height / 2 - 4), (float)popup.ActualHeight), card);
-        AutomationProperties.SetName(stage, "通知弹出示例");
+        AutomationProperties.SetName(stage, Loc.T("通知弹出示例"));
 
         var s = new StackPanel { Spacing = 10 };
         s.Children.Add(stage);
-        s.Children.Add(Text("通知弹出", "RowTitleStyle"));
-        s.Children.Add(Text("弹簧 kPop：从 0.92 倍放大到 1，只越过一点点（峰值 1.0067），同时在 160 ms 内淡入。没有来回弹跳。", "RowNoteStyle"));
+        s.Children.Add(Text(Loc.T("通知弹出"), "RowTitleStyle"));
+        s.Children.Add(Text(Loc.T("弹簧 kPop：从 0.92 倍放大到 1，只越过一点点（峰值 1.0067），同时在 160 ms 内淡入。没有来回弹跳。"), "RowNoteStyle"));
         return InteractionFrame(stage, s);
     }
 
@@ -697,7 +699,7 @@ public sealed partial class MainWindow
             if (detailed) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
             var sample = new TextBlock
             {
-                Text = detailed ? name : "玻璃之下，内容优先 Aa 0123",
+                Text = detailed ? name : Loc.T("玻璃之下，内容优先 Aa 0123"),
                 FontFamily = (FontFamily)Application.Current.Resources[font],
                 FontSize = detailed ? 15 : size,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -839,7 +841,7 @@ public sealed partial class MainWindow
         Canvas.SetTop(inner, P);
         demo.Children.Add(outer);
         demo.Children.Add(inner);
-        var label = Text($"R {R} − 边距 {P} = r {R - P}", "RowTitleStyle");
+        var label = Text(Loc.F("R {0} − 边距 {1} = r {2}", R, P, R - P), "RowTitleStyle");
         label.Width = Ww - 2 * P;
         label.TextAlignment = TextAlignment.Center;
         Canvas.SetLeft(label, P);
@@ -847,12 +849,12 @@ public sealed partial class MainWindow
         demo.Children.Add(label);
         var left = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
         left.Children.Add(demo);
-        var why = Text("内圆角随边距缩小，直边间距一致。", "RowNoteStyle");
+        var why = Text(Loc.T("内圆角随边距缩小，直边间距一致。"), "RowNoteStyle");
         why.HorizontalAlignment = HorizontalAlignment.Center;
         left.Children.Add(why);
 
         var ladder = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20, VerticalAlignment = VerticalAlignment.Center };
-        (double R, string Use)[] steps = { (6, "最小"), (10, "悬停底板"), (22, "模块 · 小组件"), (30, "栏与面板") };
+        (double R, string Use)[] steps = { (6, Loc.T("最小")), (10, Loc.T("悬停底板")), (22, Loc.T("模块 · 小组件")), (30, Loc.T("栏与面板")) };
         foreach (var (r, use) in steps)
         {
             var s = new StackPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
@@ -887,7 +889,7 @@ public sealed partial class MainWindow
         var g = new Grid { ColumnSpacing = 12, RowSpacing = 0 };
         foreach (var w in new[] { 1.1, 2.6, 0.7, 0.7, 0.7, 0.8 })
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w, GridUnitType.Star) });
-        string[] head = { "逻辑宽度", "典型屏幕", "栏高", "图标", "底边距", "放大" };
+        string[] head = { Loc.T("逻辑宽度"), Loc.T("典型屏幕"), Loc.T("栏高"), Loc.T("图标"), Loc.T("底边距"), Loc.T("放大") };
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         for (int c = 0; c < head.Length; c++)
         {
@@ -923,7 +925,7 @@ public sealed partial class MainWindow
             }
         }
         var k0 = SizeClasses[mine];
-        var here = Text($"这块屏幕：{area.Width} × {area.Height} 像素，缩放 {scale * 100:0}% → 逻辑宽度 {logical:0}。建议栏高 {k0.Height}、图标 {k0.Icon}；当前设置为栏高 {_current.Height:0}、图标 {_current.IconSize:0}。",
+        var here = Text(Loc.F("这块屏幕：{0} × {1} 像素，缩放 {2:0}% → 逻辑宽度 {3:0}。建议栏高 {4}、图标 {5}；当前设置为栏高 {6:0}、图标 {7:0}。", area.Width, area.Height, scale * 100, logical, k0.Height, k0.Icon, _current.Height, _current.IconSize),
             "RowNoteStyle");
         here.Margin = new Thickness(10, 12, 10, 0);
         var s = new StackPanel();
@@ -946,7 +948,7 @@ public sealed partial class MainWindow
                 {
                     Text = $"{name} · {a * 100:0}%",
                     FontSize = 13.5,
-                    FontFamily = (FontFamily)Application.Current.Resources[name == "主文字" ? "EmphasisFont" : "TextFont"],
+                    FontFamily = (FontFamily)Application.Current.Resources[name == Loc.T("主文字") ? "EmphasisFont" : "TextFont"],
                     Foreground = new SolidColorBrush(Color.FromArgb((byte)Math.Round(a * 255), ink.R, ink.G, ink.B)),
                 });
             var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 6, 0, 0) };
@@ -960,10 +962,10 @@ public sealed partial class MainWindow
             return new Border { Background = new SolidColorBrush(bg), CornerRadius = new CornerRadius(12), Padding = new Thickness(18, 14, 18, 16), Child = s };
         }
         var grid = new ResponsiveGrid { MinCellWidth = 280, Gap = 16, StretchLastRow = true };
-        grid.Children.Add(Panel(Color.FromArgb(255, 0x24, 0x2A, 0x3A), Colors.White, new[] { ("主文字", 0.96), ("次文字", 0.76), ("弱文字", 0.56) },
-            Color.FromArgb(255, 0xFF, 0x45, 0x3A), "浅色字 · 暗背景"));
-        grid.Children.Add(Panel(Color.FromArgb(255, 0xEC, 0xEE, 0xF3), Color.FromArgb(255, 0x11, 0x13, 0x17), new[] { ("主文字", 0.92), ("次文字", 0.66), ("弱文字", 0.46) },
-            Color.FromArgb(255, 0xE0, 0x35, 0x2B), "深色字 · 亮背景"));
+        grid.Children.Add(Panel(Color.FromArgb(255, 0x24, 0x2A, 0x3A), Colors.White, new[] { (Loc.T("主文字"), 0.96), (Loc.T("次文字"), 0.76), (Loc.T("弱文字"), 0.56) },
+            Color.FromArgb(255, 0xFF, 0x45, 0x3A), Loc.T("浅色字 · 暗背景")));
+        grid.Children.Add(Panel(Color.FromArgb(255, 0xEC, 0xEE, 0xF3), Color.FromArgb(255, 0x11, 0x13, 0x17), new[] { (Loc.T("主文字"), 0.92), (Loc.T("次文字"), 0.66), (Loc.T("弱文字"), 0.46) },
+            Color.FromArgb(255, 0xE0, 0x35, 0x2B), Loc.T("深色字 · 亮背景")));
         return grid;
     }
 }

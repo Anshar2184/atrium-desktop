@@ -4,6 +4,7 @@
 
 #include "bar.h"
 #include "clock.h"
+#include "localization.h"
 #include "log.h"
 #include "resource.h"
 #include "settings.h"
@@ -177,7 +178,7 @@ void OpenSettings(const wchar_t* page = nullptr)
             return;
     }
     Log(L"settings: Atrium.Settings.exe not found next to %s", dir.c_str());
-    MessageBoxW(nullptr, L"没有找到 Atrium.Settings.exe。请确认安装目录中的 Settings 文件夹完整。", L"Atrium", MB_ICONWARNING);
+    MessageBoxW(nullptr, Tr(L"没有找到 Atrium.Settings.exe。请确认安装目录中的 Settings 文件夹完整。"), L"Atrium", MB_ICONWARNING);
 }
 
 void AddTrayIcon()
@@ -376,16 +377,16 @@ void SetStageManager(bool on)
 
 void ShowMenu(POINT pt)
 {
-    std::vector<MenuEntry> entries = {{L"外观设置…", kCmdSettings}, {}, {L"显示桌面", kCmdDesktop}, {L"任务管理器", kCmdTaskManager}};
+    std::vector<MenuEntry> entries = {{Tr(L"外观设置…"), kCmdSettings}, {}, {Tr(L"显示桌面"), kCmdDesktop}, {Tr(L"任务管理器"), kCmdTaskManager}};
     if (g_app.widgetsOn)
-        entries.push_back({L"添加小组件…", kCmdWidgets});
+        entries.push_back({Tr(L"添加小组件…"), kCmdWidgets});
     // The three modules, each on its own.
     entries.push_back({});
-    entries.push_back({L"任务栏", kCmdToggle, g_app.barOn.value_or(true)});
-    entries.push_back({L"桌面小组件", kCmdWidgetsModule, g_app.widgetsOn});
-    entries.push_back({L"台前调度", kCmdStage, g_app.stage->Enabled()});
+    entries.push_back({Tr(L"任务栏"), kCmdToggle, g_app.barOn.value_or(true)});
+    entries.push_back({Tr(L"桌面小组件"), kCmdWidgetsModule, g_app.widgetsOn});
+    entries.push_back({Tr(L"台前调度"), kCmdStage, g_app.stage->Enabled()});
     entries.push_back({});
-    entries.push_back({L"退出 Atrium", kCmdExit});
+    entries.push_back({Tr(L"退出 Atrium"), kCmdExit});
     g_app.menu->Open(std::move(entries), pt, MenuPlace::Above, [](int cmd) {
         switch (cmd) {
         case kCmdSettings:
@@ -497,6 +498,8 @@ void EnsureGuard();
 
 void ApplySettings(const Settings& s)
 {
+    if (SetLanguage(s.language) && g_app.widgets)
+        g_app.widgets->ReloadLanguage();
     g_app.desktopDisplay = s.desktopDisplay;
     g_app.displaySettings = s;
     // Popups share the bar's material and corner radius (concentric inside).
@@ -759,12 +762,12 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     }
 
     std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
-    entries.push_back({it->windows.empty() || !it->multipleWindows ? L"打开" : L"打开新窗口", kCmdNewWindow});
+    entries.push_back({it->windows.empty() || !it->multipleWindows ? Tr(L"打开") : Tr(L"打开新窗口"), kCmdNewWindow});
     size_t command = 0;
     for (auto& [title, rows] : sections) {
         if (rows.empty())
             continue;
-        entries.push_back({title, 0, false, false, true});
+        entries.push_back({Tr(title.c_str()), 0, false, false, true});
         // A jump list can hold hundreds of entries; a menu shows the first few.
         int shown = 0;
         for (JumpItem& item : rows) {
@@ -782,16 +785,16 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     const bool canRunAs =
         windowsEntries && !appPath.empty() && appPath.find(L"\\WindowsApps\\") == std::wstring::npos;
     if (canRunAs)
-        entries.push_back({L"以管理员身份运行", kCmdRunAs});
+        entries.push_back({Tr(L"以管理员身份运行"), kCmdRunAs});
     std::wstring location = g_app.tasks->FileLocation(key);
     if (!location.empty())
-        entries.push_back({L"打开文件所在的位置", kCmdOpenLocation});
-    entries.push_back({it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium", int(it->pinned ? kCmdUnpin : kCmdPin)});
+        entries.push_back({Tr(L"打开文件所在的位置"), kCmdOpenLocation});
+    entries.push_back({it->pinned ? Tr(L"从 Atrium 取消固定") : Tr(L"固定到 Atrium"), int(it->pinned ? kCmdUnpin : kCmdPin)});
     if (windowsEntries && !appPath.empty())
-        entries.push_back({L"属性", kCmdProperties});
+        entries.push_back({Tr(L"属性"), kCmdProperties});
     if (!it->windows.empty())
-        entries.push_back({it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口", kCmdClose});
-    entries.push_back({L"关闭程序", kCmdTerminate, false, !g_app.tasks->CanTerminate(key)});
+        entries.push_back({it->windows.size() > 1 ? Tr(L"关闭所有窗口") : Tr(L"关闭窗口"), kCmdClose});
+    entries.push_back({Tr(L"关闭程序"), kCmdTerminate, false, !g_app.tasks->CanTerminate(key)});
     int pinIndex = it->pinIndex;
     auto windows = it->windows;
     std::wstring name = it->name;
@@ -823,10 +826,10 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             break;
         case kCmdTerminate: {
             // Ending the processes loses what is not saved: asked once more, in place.
-            std::vector<MenuEntry> confirm = {{L"强制关闭“" + name + L"”？未保存的内容会丢失", 0, false, false, true},
+            std::vector<MenuEntry> confirm = {{TrFormat(L"强制关闭“%s”？未保存的内容会丢失", name.c_str()), 0, false, false, true},
                                               {L"", 0},
-                                              {L"强制关闭", kCmdTerminateConfirm},
-                                              {L"取消", 0}};
+                                              {Tr(L"强制关闭"), kCmdTerminateConfirm},
+                                              {Tr(L"取消"), 0}};
             g_app.menu->Open(std::move(confirm), pt, MenuPlace::AboveCentered, [key](int answer) {
                 if (answer == kCmdTerminateConfirm)
                     g_app.tasks->Terminate(key);
@@ -1283,6 +1286,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
 {
+    SetLanguage(L"auto"); // before any message; the saved choice follows with LoadSettings
     // Never in the install folder (started from it in Explorer, or by the updater): the apps started
     // from the bar would inherit it, and a folder some process is in cannot be replaced by an update.
     if (PWSTR profile = nullptr; SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Profile, 0, nullptr, &profile))) {
@@ -1296,7 +1300,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
             g_readyEvent = startupArguments[i + 1];
     LocalFree(startupArguments);
     if (wcscmp(cmdLine, L"--uninstall") == 0) {
-        if (MessageBoxW(nullptr, L"卸载 Atrium？个人设置和桌面小组件布局将会保留。", L"Atrium",
+        if (MessageBoxW(nullptr, Tr(L"卸载 Atrium？个人设置和桌面小组件布局将会保留。"), L"Atrium",
                         MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
             return 0;
         wchar_t system[MAX_PATH]{};
@@ -1339,7 +1343,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         // Already running: launching it again opens the settings instead.
         if (HWND other = FindWindowW(kHostClass, nullptr)) {
             if (SameCoreExecutable(other)) PostMessageW(other, WM_OPEN_SETTINGS, 0, 0);
-            else MessageBoxW(nullptr, L"另一位置的 Atrium 正在运行。请先退出该实例，再启动本目录中的版本。", L"Atrium", MB_OK | MB_ICONINFORMATION);
+            else MessageBoxW(nullptr, Tr(L"另一位置的 Atrium 正在运行。请先退出该实例，再启动本目录中的版本。"), L"Atrium", MB_OK | MB_ICONINFORMATION);
         }
         CloseHandle(mutex);
         return 0;
@@ -1369,6 +1373,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     ChangeWindowMessageFilterEx(g_app.host, g_app.taskbarCreated, MSGFLT_ALLOW, nullptr);
 
     Settings settings = LoadSettings();
+    SetLanguage(settings.language);
     // Also on every start while it is on: an update from a version that started from the
     // Run key moves to the logon task, unless that entry was turned off in Task Manager.
     // Off this thread: Task Scheduler is slow while the session is starting.
@@ -1434,6 +1439,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     g_app.start->onStatusRequest = UpdateStatus;
     g_app.calendar = std::make_unique<CalendarPanel>(instance);
     g_app.widgets = std::make_unique<DesktopWidgets>(instance);
+    g_app.widgets->ReloadLanguage(); // cached weather labels follow the saved language
     g_app.stage = std::make_unique<StageManager>(instance, *g_app.tasks);
     g_app.control->onStage = SetStageManager;
     g_app.widgets->onStatusRequest = UpdateStatus;

@@ -54,6 +54,7 @@ public:
     WeatherSource& operator=(const WeatherSource&) = delete;
 
     void SetActive(bool on);                // fetch only while a weather widget shows
+    void Refresh();                         // the labels are language-specific: fetch again after a language change
     Weather Latest();
 
 private:

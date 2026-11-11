@@ -1,5 +1,7 @@
 #include "ui/notifications.h"
 
+#include "localization.h"
+
 #include "clock.h"
 #include "log.h"
 #include "motion.h"
@@ -50,10 +52,10 @@ std::wstring Ago(ULONGLONG t)
 {
     ULONGLONG s = (GetTickCount64() - t) / 1000;
     if (s < 60)
-        return L"刚刚"; // 刚刚
+        return Tr(L"刚刚"); // 刚刚
     if (s < 3600)
-        return std::to_wstring(s / 60) + L" 分钟前"; // N 分钟前
-    return std::to_wstring(s / 3600) + L" 小时前"; // N 小时前
+        return std::to_wstring(s / 60) + Tr(L" 分钟前"); // N 分钟前
+    return std::to_wstring(s / 3600) + Tr(L" 小时前"); // N 小时前
 }
 
 
@@ -653,14 +655,14 @@ void Notifications::PaintCard(Canvas& c, const Notice& n, D2D1_RECT_F r, int ind
     float nameX = tx + (n.unread ? 12 : 0);
     std::wstring app = n.app.empty() ? L"Atrium" : n.app;
     if (n.count > 1)
-        app += L"  ·  " + std::to_wstring(n.count) + L" 条";
+        app += L"  ·  " + std::to_wstring(n.count) + Tr(L" 条");
     c.Text(app, D2D1::RectF(nameX, ty, x + w - 170, ty + 16), 12, t.subtext, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     std::wstring when = Ago(n.time);
     if (v.stacked && v.count > 1 && index == v.front) // which card of the stack is in front (the wheel turns it)
         when = std::to_wstring(index + 1) + L"/" + std::to_wstring(v.count) + L"  ·  " + when;
     c.Text(when, D2D1::RectF(x + w - 170, ty, x + w - 50, ty + 16), 12, t.faint, DWRITE_FONT_WEIGHT_NORMAL, 2);
     c.Text(n.title, D2D1::RectF(tx, ty + 22, x + w - 20, ty + 42), 14, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    std::wstring body = hideBody ? L"内容已隐藏" : n.body;
+    std::wstring body = hideBody ? Tr(L"内容已隐藏") : n.body;
     c.Text(body, D2D1::RectF(tx, ty + 46, x + w - 20, ty + 46 + 36), 13, hideBody ? t.faint : t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 0, true);
     // Dismiss: a round button in the top-right corner, shown with the pointer on the card.
     D2D1_RECT_F close = D2D1::RectF(x + w - 44, y + 10, x + w - 16, y + 38);
@@ -844,7 +846,7 @@ void Notifications::Paint(Mode mode, Canvas& c)
         if (c.panel)
             c.Fill(pill, pr, t.panel);
         size_t live = shown.size() - std::min(shown.size(), leaving_.size());
-        std::wstring label = live ? L"通知  ·  " + std::to_wstring(live) : L"没有新通知";
+        std::wstring label = live ? Tr(L"通知  ·  ") + std::to_wstring(live) : Tr(L"没有新通知");
         c.Text(label, D2D1::RectF(pill.left + 20, pill.top, w / 2 + 40, pill.bottom), 13.5f, live ? t.text : t.subtext,
                live ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
         float x = pill.right - 6;
@@ -858,9 +860,9 @@ void Notifications::Paint(Mode mode, Canvas& c)
             x = b.left - 6;
         };
         if (live)
-            button(L"clear", L"全部清除");
+            button(L"clear", Tr(L"全部清除"));
         if (!column && expanded_ && shown.size() > 1)
-            button(L"collapse", L"收起");
+            button(L"collapse", Tr(L"收起"));
     }
     v.surface->SetShapes(shapes, moving);
     v.lastPaint = c.now;
