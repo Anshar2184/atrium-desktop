@@ -9,6 +9,7 @@
 #include <sddl.h>
 #include <shellscalingapi.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <windowsx.h>
 #define SECURITY_WIN32
 #include <security.h>
@@ -107,7 +108,8 @@ StartTile* Find(std::vector<StartTile>& tiles, const std::wstring& id)
     return it == tiles.end() ? nullptr : &*it;
 }
 
-enum MenuCommand { kOpen = 1, kPinBar, kPinStart, kRemove, kOutOfFolder, kRename, kUngroup, kReset, kHide, kUnhide, kShowHidden, kSize /* + the size */ };
+enum MenuCommand { kOpen = 1, kPinBar, kPinStart, kRemove, kOutOfFolder, kRename, kUngroup, kReset, kHide, kUnhide, kShowHidden, kAdmin,
+                   kLocation, kSize /* + the size */ };
 
 } // namespace
 
@@ -1850,6 +1852,12 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
     }
     if (isApp) {
         entries.push_back({L"打开", kOpen});
+        // As in Windows' start menu, for desktop apps.
+        if (!AppCatalog::FileLocation(app).empty()) {
+            entries.push_back({L"以管理员身份运行", kAdmin});
+            entries.push_back({L"打开文件所在的位置", kLocation});
+        }
+        entries.push_back({});
         entries.push_back({L"固定到任务栏", kPinBar});
         if (!OnStart(app.id))
             entries.push_back({L"固定到开始菜单", kPinStart});
@@ -1891,6 +1899,17 @@ void StartMenu::ContextMenu(const std::wstring& id, POINT screen)
                            OpenFolder(tileOf(folderKey));
                        else
                            Launch(app);
+                       break;
+                   case kAdmin:
+                       Close(true);
+                       AppCatalog::LaunchAsAdmin(app);
+                       break;
+                   case kLocation:
+                       Close(true);
+                       if (PIDLIST_ABSOLUTE item = ILCreateFromPathW(AppCatalog::FileLocation(app).c_str())) {
+                           SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
+                           ILFree(item);
+                       }
                        break;
                    case kPinBar:
                        if (onPin)

@@ -504,6 +504,39 @@ bool AppCatalog::Launch(const CatalogApp& app)
     return true;
 }
 
+std::wstring AppCatalog::FileLocation(const CatalogApp& app)
+{
+    for (const std::wstring& file : {app.target, IsPath(app.id) ? app.id : std::wstring()})
+        if (!file.empty() && GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES)
+            return file;
+    return {};
+}
+
+bool AppCatalog::LaunchAsAdmin(const CatalogApp& app)
+{
+    // The shortcut keeps its arguments and working folder; without one, the exe with the link's arguments.
+    const bool link = IsPath(app.id) && GetFileAttributesW(app.id.c_str()) != INVALID_FILE_ATTRIBUTES;
+    const std::wstring file = link ? app.id : app.target;
+    if (file.empty() || GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return false;
+    const std::wstring dir = link ? std::wstring() : file.substr(0, file.find_last_of(L"\\/"));
+    SHELLEXECUTEINFOW sei{sizeof(sei)};
+    sei.fMask = SEE_MASK_FLAG_NO_UI;
+    sei.lpVerb = L"runas";
+    sei.lpFile = file.c_str();
+    sei.lpParameters = link || app.args.empty() ? nullptr : app.args.c_str();
+    sei.lpDirectory = dir.empty() ? nullptr : dir.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_CANCELLED) // the user said no at the prompt
+            Log(L"catalog: elevated launch of %s failed (%lu)", file.c_str(), error);
+        return false;
+    }
+    Log(L"catalog: launched %s as administrator", file.c_str());
+    return true;
+}
+
 PinnedApp AppCatalog::PinFor(const CatalogApp& app)
 {
     PinnedApp p;

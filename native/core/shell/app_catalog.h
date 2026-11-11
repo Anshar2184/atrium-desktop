@@ -49,6 +49,10 @@ public:
     void SetVisibleIcons(std::vector<std::pair<std::wstring, int>> icons);
 
     static bool Launch(const CatalogApp& app);
+    // Desktop apps only (a packaged app has no exe to elevate or to show): run elevated (the
+    // UAC prompt), and the file to select in File Explorer (the exe, else the shortcut); empty: none.
+    static bool LaunchAsAdmin(const CatalogApp& app);
+    static std::wstring FileLocation(const CatalogApp& app);
     static PinnedApp PinFor(const CatalogApp& app);
     // Case-insensitive match of `query` against the name (and words in it), or the start of
     // its initials (NameInitials: "wx" finds 微信).
