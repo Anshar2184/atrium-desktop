@@ -118,6 +118,15 @@ The app you are using stays in the middle of the screen; the others move to one 
 
 Requirements: Windows 10 19041 or later; Windows 11 recommended. The interface is in Simplified Chinese.
 
+### If Windows blocks it
+
+Atrium's releases are not code-signed, so each new version's files have no reputation with Windows yet.
+
+- **SmartScreen says "Windows protected your PC"**: choose *More info* › *Run anyway*.
+- **"An Application Control policy has blocked this file"** (when starting Atrium, or as "更新未安装", update not installed): Smart App Control or an organisation's App Control policy refused the new files. An update puts the previous version back, and your settings are kept. Run `(Get-MpComputerStatus).SmartAppControlState` in PowerShell:
+  - If it says `On`: you can turn it off under Windows Security › App & browser control › Smart App Control. On some Windows versions it cannot be turned back on without reinstalling Windows.
+  - If it says `Off` and Atrium is still blocked: an organisation's policy is the likely cause. Ask the administrator to allow Atrium's folder.
+
 ## Status
 
 | | |

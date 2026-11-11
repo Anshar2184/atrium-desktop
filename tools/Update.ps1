@@ -72,12 +72,29 @@ function Get-CrashCause([datetime]$Since) {
     } catch { return '' }
 }
 
+# Smart App Control or an App Control (WDAC) policy refused a file: ERROR_SYSTEM_INTEGRITY_* 4550-4559 and
+# 4580-4582. Windows PowerShell's Start-Process keeps only the system message, not the code, so compare that.
+function Test-AppControlBlock([string]$Message) {
+    foreach ($code in @(4550..4559) + @(4580..4582)) {
+        $text = ([ComponentModel.Win32Exception]::new($code)).Message.Trim().TrimEnd('。', '.')
+        if ($text -and $Message.Contains($text)) { return $true }
+    }
+    return $false
+}
+
 function Start-Verified([string]$Executable, [string]$Kind, [string]$Arguments) {
     $eventName = "Local\Atrium.Update.$Kind.$suffix"
     $ready = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $eventName)
     try {
         $startedAt = (Get-Date).AddSeconds(-1)
-        $process = Start-Process -FilePath $Executable -ArgumentList "$Arguments --ready-event $eventName" -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
+        try {
+            $process = Start-Process -FilePath $Executable -ArgumentList "$Arguments --ready-event $eventName" -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
+        } catch {
+            if (!(Test-AppControlBlock $_.Exception.Message)) { throw }
+            # The release is not code-signed; each version's new files have no reputation yet.
+            throw ("Windows 应用程序控制阻止了新版 $Kind 运行，已保留旧版本。新版文件没有代码签名，可能被智能应用控制或单位的应用控制策略拦截：" +
+                   "可在 Windows 安全中心 › 应用和浏览器控制 › 智能应用控制中查看；单位电脑请联系管理员放行 Atrium 所在目录。（$($_.Exception.Message.Trim())）")
+        }
         $started.Add($process)
         $until = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
         do {
