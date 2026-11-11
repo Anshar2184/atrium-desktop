@@ -423,6 +423,8 @@ JumpItem ItemForPath(const std::wstring& parsingName)
 struct FileIndex {
     std::mutex lock;
     bool ready = false;
+    bool building = false;
+    ULONGLONG builtAt = 0;
     std::map<std::wstring, std::wstring> byExe;  // lower-case program -> file hash
     std::map<std::wstring, std::wstring> byPath; // lower-case item path -> file hash
 };
@@ -490,6 +492,7 @@ void BuildIndex()
     index.byExe = std::move(byExe);
     index.byPath = std::move(byPath);
     index.ready = true;
+    index.builtAt = GetTickCount64();
     Log(L"jump list: indexed %zu programs, %zu items", index.byExe.size(), index.byPath.size());
 }
 
@@ -527,6 +530,13 @@ void StartJumpListIndex(bool enabled)
 {
     if (!enabled)
         return; // the menus that read the index are off
+    {
+        FileIndex& index = Index();
+        std::lock_guard<std::mutex> guard(index.lock);
+        if (index.building)
+            return;
+        index.building = true;
+    }
     std::thread([] {
         // A worker without a message pump must not own an STA: the UI thread's
         // shell calls would have to marshal into it and wait for a timeout.
@@ -538,6 +548,9 @@ void StartJumpListIndex(bool enabled)
         }
         if (SUCCEEDED(com))
             CoUninitialize();
+        FileIndex& index = Index();
+        std::lock_guard<std::mutex> guard(index.lock);
+        index.building = false; // also after a failed build
     }).detach();
 }
 
@@ -551,11 +564,23 @@ std::shared_ptr<const JumpListData> LoadJumpList(const std::wstring& appId, cons
         hash = cached->second;
     } else {
         hash = FindIndexedHash(appId, exePath);
-        hashByAppId[cacheKey] = hash;
         Log(L"jump list: '%s' -> %s", exePath.c_str(), hash.empty() ? L"(none)" : hash.c_str());
+        if (!hash.empty())
+            hashByAppId[cacheKey] = hash;
     }
-    if (hash.empty())
+    if (hash.empty()) {
+        // Not found: the index may be older than the app's first jump list (or still being built).
+        // Indexed again in the background, at most once a minute; a later click finds it.
+        bool stale = false;
+        {
+            FileIndex& index = Index();
+            std::lock_guard<std::mutex> guard(index.lock);
+            stale = index.ready && GetTickCount64() - index.builtAt > 60000;
+        }
+        if (stale)
+            StartJumpListIndex(true);
         return nullptr;
+    }
 
     const std::wstring recent = RecentFolder();
     auto data = std::make_shared<JumpListData>();
