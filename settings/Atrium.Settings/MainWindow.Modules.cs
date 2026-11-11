@@ -154,7 +154,7 @@ public sealed partial class MainWindow
     private static TextBlock Symbol(string glyph, double size, Brush brush) => new()
     {
         Text = glyph, FontSize = size, Foreground = brush, TextAlignment = TextAlignment.Center, IsTextScaleFactorEnabled = false, IsHitTestVisible = false,
-        FontFamily = new FontFamily("Segoe Fluent Icons"),
+        FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
     };
 
     // In the box (x, y, w, h): one line centred on its height (DWrite's centred paragraph); wrapping
@@ -197,7 +197,7 @@ public sealed partial class MainWindow
         fill.GradientStops.Add(new GradientStop { Color = Rgb(bottom), Offset = 1 });
         var g = new Grid { Width = 40, Height = 40, IsHitTestVisible = false };
         g.Children.Add(new Border { Background = fill, CornerRadius = new CornerRadius(10) });
-        g.Children.Add(new FontIcon { Glyph = glyph, FontSize = 19, Foreground = WhiteInk, FontFamily = new FontFamily("Segoe Fluent Icons") });
+        g.Children.Add(new FontIcon { Glyph = glyph, FontSize = 19, Foreground = WhiteInk, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") });
         return g;
     }
 

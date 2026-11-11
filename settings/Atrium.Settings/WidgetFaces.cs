@@ -520,7 +520,7 @@ internal static partial class WidgetFaces
 
     private static void Glyph(Canvas c, string g, double l, double t, double r, double b, double size, Color ink)
     {
-        var f = new FontIcon { Glyph = g, FontSize = size, Foreground = new SolidColorBrush(ink), Width = r - l, Height = b - t, FontFamily = new FontFamily("Segoe Fluent Icons") };
+        var f = new FontIcon { Glyph = g, FontSize = size, Foreground = new SolidColorBrush(ink), Width = r - l, Height = b - t, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") };
         Canvas.SetLeft(f, l);
         Canvas.SetTop(f, t);
         c.Children.Add(f);

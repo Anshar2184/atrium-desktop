@@ -526,7 +526,7 @@ public sealed partial class MainWindow
         titleBar.Children.Add(name);
         titleBar.Children.Add(new TextBlock
         {
-            Text = "\uE921   \uE922   \uE8BB", FontFamily = new FontFamily("Segoe Fluent Icons"), FontSize = 8, Foreground = new SolidColorBrush(faint),
+            Text = "\uE921   \uE922   \uE8BB", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 8, Foreground = new SolidColorBrush(faint),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, IsTextScaleFactorEnabled = false,
         });
         body.Children.Add(titleBar);

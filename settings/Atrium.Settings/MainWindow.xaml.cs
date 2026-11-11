@@ -124,6 +124,7 @@ public sealed partial class MainWindow : Window
             _updateCheck?.Cancel();
             _updatesClosed = true;
             _downloadTimer?.Stop();
+            _reconnectTimer?.Stop();
             _coreProcess?.Dispose();
             _widgetWatcher?.Dispose();
             _settingsWatcher?.Dispose();
@@ -570,6 +571,42 @@ public sealed partial class MainWindow : Window
         UpdateButtons();
         if (Content is FrameworkElement { IsLoaded: true }) App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
         else if (Content is FrameworkElement root) root.Loaded += (_, _) => App.SignalStartupReady(_client.Connected && _client.StateConfirmed);
+        if (_reconnectTimer == null && !_updatesClosed)
+        {
+            _reconnectTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            _reconnectTimer.Tick += async (_, _) => await ReconnectAsync();
+            _reconnectTimer.Start();
+        }
+    }
+
+    // The core started again on its own (an update, the guard after a crash, a launch from
+    // elsewhere): this window connects to it by itself. Edits made meanwhile stay and are previewed.
+    private DispatcherTimer? _reconnectTimer;
+    private bool _reconnecting;
+
+    private async Task ReconnectAsync()
+    {
+        if (_reconnecting || _coreChanging || _updatesClosed || _client.Connected) return;
+        _reconnecting = true;
+        try
+        {
+            if (!await _client.ConnectAsync(300) || _updatesClosed)
+            {
+                if (!_updatesClosed && !_coreChanging) ShowStatus(_client.Connected);
+                return;
+            }
+            bool dirty = !_current.SameAs(_saved);
+            var (saved, current) = await _client.GetAsync();
+            if (_updatesClosed) return;
+            _saved = saved;
+            if (!dirty) _current = current;
+            LoadIntoControls();
+            UpdateButtons();
+            if (dirty) SchedulePreview();
+            WatchCore();
+            ShowStatus(_client.Connected);
+        }
+        finally { _reconnecting = false; }
     }
 
     private static readonly SolidColorBrush RunningBrush = new(Color.FromArgb(255, 76, 194, 106));

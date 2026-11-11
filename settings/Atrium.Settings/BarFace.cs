@@ -84,7 +84,7 @@ internal sealed class BarFace
 
     private static FontIcon Glyph(string glyph) => new()
     {
-        Glyph = glyph, IsHitTestVisible = false, FontFamily = new FontFamily("Segoe Fluent Icons"),
+        Glyph = glyph, IsHitTestVisible = false, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
     };
 
@@ -335,7 +335,7 @@ internal sealed class StatusGlyph : Canvas
 
     internal static TextBlock Symbol() => new()
     {
-        IsHitTestVisible = false, FontFamily = new FontFamily("Segoe Fluent Icons"), TextAlignment = TextAlignment.Center, IsTextScaleFactorEnabled = false,
+        IsHitTestVisible = false, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), TextAlignment = TextAlignment.Center, IsTextScaleFactorEnabled = false,
     };
 
     // A glyph centred in the w x w square at (x, y).
