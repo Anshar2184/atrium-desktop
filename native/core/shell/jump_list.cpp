@@ -523,8 +523,10 @@ bool IsRemotePath(const std::wstring& path)
     return IsRemoteShare(path);
 }
 
-void StartJumpListIndex()
+void StartJumpListIndex(bool enabled)
 {
+    if (!enabled)
+        return; // the menus that read the index are off
     std::thread([] {
         // A worker without a message pump must not own an STA: the UI thread's
         // shell calls would have to marshal into it and wait for a timeout.

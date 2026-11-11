@@ -105,6 +105,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"desktopDisplay", json::JsonValue::CreateStringValue(desktopDisplay));
     o.SetNamedValue(L"taskbarApps", json::JsonValue::CreateStringValue(taskbarApps));
     o.SetNamedValue(L"taskbarRightPrimaryOnly", json::JsonValue::CreateBooleanValue(taskbarRightPrimaryOnly));
+    o.SetNamedValue(L"windowsContextMenu", json::JsonValue::CreateBooleanValue(windowsContextMenu));
     num(L"notifyTimeout", notifyTimeout);
     o.SetNamedValue(L"notifyPlacement", json::JsonValue::CreateStringValue(notifyPlacement));
     o.SetNamedValue(L"notifyHideBody", json::JsonValue::CreateBooleanValue(notifyHideBody));
@@ -230,6 +231,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     display(L"desktopDisplay", s.desktopDisplay);
     display(L"taskbarApps", s.taskbarApps);
     flag(L"taskbarRightPrimaryOnly", s.taskbarRightPrimaryOnly);
+    flag(L"windowsContextMenu", s.windowsContextMenu);
     display(L"notifyPlacement", s.notifyPlacement);
     if (o.HasKey(L"pins") && o.GetNamedValue(L"pins").ValueType() == json::JsonValueType::Array) {
         std::vector<PinnedApp> pins;

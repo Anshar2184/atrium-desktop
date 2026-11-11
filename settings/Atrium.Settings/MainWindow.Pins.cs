@@ -193,6 +193,13 @@ public sealed partial class MainWindow
         }
     }
 
+    private void OnWindowsContextMenuToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _current.WindowsContextMenu = WindowsContextMenuSwitch.IsOn;
+        Changed();
+    }
+
     // Drag and drop reordered the collection; write the new order back.
     private void OnPinsDragCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {

@@ -56,6 +56,9 @@ internal sealed class BarSettings
     public string DesktopDisplay { get; set; } = ""; // empty follows the system primary
     public string TaskbarApps { get; set; } = "all"; // all | primaryAndWindow | window
     public bool TaskbarRightPrimaryOnly { get; set; } // hide the right-side group on non-primary displays
+    // An icon's right-click menu lists the app's own jump list entries and the
+    // system's ("run as administrator", "properties").
+    public bool WindowsContextMenu { get; set; } = true;
     public double NotifyTimeout { get; set; } = 6;    // seconds a popup stays
     public string NotifyPlacement { get; set; } = "dock"; // dock (default) | topRight
     public bool NotifyHideBody { get; set; }           // privacy: no message text, excluded from capture
@@ -145,6 +148,7 @@ internal sealed class BarSettings
             ["desktopDisplay"] = DesktopDisplay,
             ["taskbarApps"] = TaskbarApps,
             ["taskbarRightPrimaryOnly"] = TaskbarRightPrimaryOnly,
+            ["windowsContextMenu"] = WindowsContextMenu,
             ["notifyTimeout"] = NotifyTimeout,
             ["notifyPlacement"] = NotifyPlacement,
             ["notifyHideBody"] = NotifyHideBody,
@@ -250,6 +254,7 @@ internal sealed class BarSettings
         string apps = Display("taskbarApps", f.TaskbarApps);
         s.TaskbarApps = apps is "primaryAndWindow" or "window" ? apps : "all";
         s.TaskbarRightPrimaryOnly = Flag("taskbarRightPrimaryOnly", f.TaskbarRightPrimaryOnly);
+        s.WindowsContextMenu = Flag("windowsContextMenu", f.WindowsContextMenu);
         s.NotifyPlacement = Display("notifyPlacement", f.NotifyPlacement) == "topRight" ? "topRight" : "dock";
         s.TextColor = o?["textColor"] is JsonValue tc && tc.TryGetValue(out string? tcs) && tcs != null
             ? (tcs is "light" or "dark" ? tcs : "auto")
@@ -289,6 +294,7 @@ internal sealed class BarSettings
         StartOnLogin == o.StartOnLogin &&
         DockDisplayMode == o.DockDisplayMode && DockDisplayDelay == o.DockDisplayDelay && DockDisplay == o.DockDisplay && DesktopDisplay == o.DesktopDisplay &&
         TaskbarApps == o.TaskbarApps && TaskbarRightPrimaryOnly == o.TaskbarRightPrimaryOnly &&
+        WindowsContextMenu == o.WindowsContextMenu &&
         NotifyPlacement == o.NotifyPlacement &&
         (Pins == o.Pins || (Pins != null && o.Pins != null && Pins.SequenceEqual(o.Pins)));
 

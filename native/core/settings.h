@@ -56,6 +56,9 @@ struct Settings {
     std::wstring desktopDisplay;     // widgets and Stage Manager; empty follows the system primary
     std::wstring taskbarApps = L"all"; // all | primaryAndWindow | window
     bool taskbarRightPrimaryOnly = false; // hide the right-side group on non-primary displays
+    // An icon's right-click menu lists the app's own jump list entries (recent
+    // places, tasks) and the system's ("run as administrator", "properties").
+    bool windowsContextMenu = true;
     // Notifications (Atrium's own cards above the bell).
     double notifyTimeout = 6;        // seconds a popup stays (3..30)
     std::wstring notifyPlacement = L"dock"; // dock (default) | topRight (system primary)

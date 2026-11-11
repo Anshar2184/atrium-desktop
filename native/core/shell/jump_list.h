@@ -46,6 +46,6 @@ bool IsRemotePath(const std::wstring& path);
 
 // Indexes the jump list files of the profile once, on a worker thread: telling
 // an app's file apart means reading them, which must not happen on a click.
-void StartJumpListIndex();
+void StartJumpListIndex(bool enabled);
 
 } // namespace atrium

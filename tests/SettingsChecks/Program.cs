@@ -63,7 +63,8 @@ settings.ApplyMaterial(BarSettings.Frosted());
 Require(settings.DockDisplayMode == original.DockDisplayMode && settings.DockDisplay == original.DockDisplay &&
     settings.DesktopDisplay == original.DesktopDisplay && settings.DockDisplayDelay == original.DockDisplayDelay &&
     settings.TaskbarApps == original.TaskbarApps && settings.TaskbarRightPrimaryOnly == original.TaskbarRightPrimaryOnly &&
-    settings.NotifyPlacement == original.NotifyPlacement && settings.HoverRise == original.HoverRise,
+    settings.NotifyPlacement == original.NotifyPlacement && settings.HoverRise == original.HoverRise &&
+    settings.WindowsContextMenu == original.WindowsContextMenu,
     "Material presets must preserve monitor, notification and hover-rise choices.");
 foreach (Action<BarSettings> edit in new Action<BarSettings>[]
 {
@@ -77,6 +78,12 @@ foreach (Action<BarSettings> edit in new Action<BarSettings>[]
     edit(changed);
     Require(!settings.SameAs(changed), "Every display preference must participate in the Save/Revert dirty state.");
 }
+var menuOff = BarSettings.FromJson(JsonNode.Parse("""{"windowsContextMenu":false}""")!.AsObject(), new());
+Require(!menuOff.WindowsContextMenu && BarSettings.FromJson(menuOff.ToJson(), new()).SameAs(menuOff),
+    "The Windows-style context menu must turn off and survive a round trip.");
+Require(new BarSettings().WindowsContextMenu && BarSettings.FromJson(new JsonObject(), new()).WindowsContextMenu,
+    "The Windows-style context menu is on by default, also for files written before it existed.");
+Require(!new BarSettings().SameAs(menuOff), "The Windows-style context menu must participate in the Save/Revert dirty state.");
 var displays = DesktopDisplay.Read();
 Require(displays.Count > 0 && displays.Any(d => d.Primary), "Connected displays and system primary must be discoverable.");
 Require(displays.All(d => d.Id.Length > 0 && d.Scale > 0 && d.Width > 0 && d.WorkWidth > 0), "Display IDs, geometry and scale must be valid.");

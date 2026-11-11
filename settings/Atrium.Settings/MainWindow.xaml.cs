@@ -753,6 +753,7 @@ public sealed partial class MainWindow : Window
         (_current.TextColor switch { "light" => TextLight, "dark" => TextDark, _ => TextAuto }).IsChecked = true;
         UpdateGallery();
         RebuildPins();
+        WindowsContextMenuSwitch.IsOn = _current.WindowsContextMenu;
         TintPicker.Color = TintColor(_current.Tint);
         ShowTint();
         _loading = false;
