@@ -293,6 +293,9 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
+                        <local:ToggleTile x:Name="WindowsContextMenuSwitch" Title="Windows 风格上下文菜单" Margin="0,12,0,0"
+                                          Note="图标右键菜单显示程序自己的跳转列表（最近的文件夹、工作区、任务），以及“以管理员身份运行”和“属性”。"
+                                          SwitchName="Windows 风格上下文菜单" Toggled="OnWindowsContextMenuToggled" />
                     </StackPanel>
 
                     <!-- ==== Notifications: the cards as they pop up ==== -->

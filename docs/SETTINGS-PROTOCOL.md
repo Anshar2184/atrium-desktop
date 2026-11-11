@@ -43,6 +43,7 @@
 | `desktopDisplay` | string | 显示器设备接口 ID，或空字符串 | `""` | 小组件与台前调度的屏幕，独立于 Dock；空值跟随系统主屏；切换前恢复原屏幕中台前调度收起的窗口 |
 | `taskbarApps` | string | `all` / `primaryAndWindow` / `window` | `all` | 运行中的应用分别显示在所有任务栏、系统主屏和窗口所在屏、或仅窗口所在屏；固定应用保留，运行标记和预览只使用符合规则的窗口 |
 | `taskbarRightPrimaryOnly` | bool | | false | 仅在系统主屏显示任务栏右侧元素；副屏隐藏托盘、状态圆环、时钟日期、通知入口及分隔线，不保留占位；各元素原有的显示开关保持不变，也适用于跨屏唤出和固定显示器模式 |
+| `windowsContextMenu` | bool | | true | 图标右键菜单显示 Windows 风格的内容：程序自己的跳转列表（已固定、常用、最近使用的文件夹和工作区、任务），以及“以管理员身份运行”“属性”；关闭后恢复 Atrium 原来的菜单。旧配置没有这一项时为开启 |
 | `notifyTimeout` | number | 3–30 s | 6 | 通知弹出后停留的时间（指针停在卡片上时不计时） |
 | `notifyPlacement` | string | `dock` / `topRight` | `dock` | 默认在任务栏上方堆叠；右上角模式下，弹窗和铃铛打开的通知中心均固定在系统主屏工作区右上角，新通知从右侧淡入，已有通知平滑下移；通知中心的操作区在列表上方，超出屏幕高度可滚动 |
 | `notifyHideBody` | bool | | false | 隐藏通知正文；同时把通知窗口排除在截图和屏幕共享之外 |

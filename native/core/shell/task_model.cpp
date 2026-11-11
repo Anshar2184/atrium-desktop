@@ -1409,6 +1409,12 @@ struct TaskModel::Impl {
         return {{found->second.exePath, found->second.aumid}};
     }
 
+    std::wstring PinTarget(const std::wstring& key) const
+    {
+        auto m = meta.find(key);
+        return m == meta.end() ? std::wstring{} : m->second.pinPath;
+    }
+
     PinnedApp PinFor(const std::wstring& key) const
     {
         PinnedApp p;
@@ -1721,6 +1727,15 @@ bool TaskModel::OpenFiles(const std::wstring& key, const std::vector<std::wstrin
     } catch (...) {
         Log(L"tasks: OpenFiles failed");
         return false;
+    }
+}
+
+std::wstring TaskModel::PinTarget(const std::wstring& key) const
+{
+    try {
+        return impl_->PinTarget(key);
+    } catch (...) {
+        return {};
     }
 }
 
