@@ -59,15 +59,32 @@ function Move-Tree([string]$From, [string]$To, [switch]$Keep) {
     }
 }
 
+# What settings wrote to its crash log since $Since (its exception's first line), for the message.
+function Get-CrashCause([datetime]$Since) {
+    $log = Join-Path $env:LOCALAPPDATA 'Atrium\logs\settings.log'
+    try {
+        if (!(Test-Path -LiteralPath $log) -or (Get-Item -LiteralPath $log).LastWriteTime -lt $Since) { return '' }
+        $last = Get-Content -LiteralPath $log -Tail 60 -Encoding UTF8 | Where-Object { $_ -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ' } | Select-Object -Last 1
+        if (!$last) { return '' }
+        $cause = $last.Substring(20).Trim()
+        if ($cause.Length -gt 200) { $cause = $cause.Substring(0, 200) + '...' }
+        return "：$cause"
+    } catch { return '' }
+}
+
 function Start-Verified([string]$Executable, [string]$Kind, [string]$Arguments) {
     $eventName = "Local\Atrium.Update.$Kind.$suffix"
     $ready = New-Object System.Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $eventName)
     try {
+        $startedAt = (Get-Date).AddSeconds(-1)
         $process = Start-Process -FilePath $Executable -ArgumentList "$Arguments --ready-event $eventName" -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
         $started.Add($process)
         $until = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
         do {
-            if ($process.HasExited) { throw "$Kind 启动失败（退出码 $($process.ExitCode)）。" }
+            if ($process.HasExited) {
+                $cause = if ($Kind -eq 'Settings') { Get-CrashCause $startedAt } else { '' }
+                throw ("$Kind 启动失败（退出码 0x{0:X8}）{1}。" -f $process.ExitCode, $cause)
+            }
             if ($ready.WaitOne(100)) {
                 if ($process.HasExited) { throw "$Kind 在就绪后退出。" }
                 return
