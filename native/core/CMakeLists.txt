@@ -47,6 +47,7 @@ add_executable(atrium_core WIN32
     shell/displays.cpp
     shell/tray_model.cpp
     shell/shell_verbs.cpp
+    shell/jump_list.cpp
     shell/wechat_source.cpp
     shell/feishu_source.cpp
     ui/surface.cpp

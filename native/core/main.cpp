@@ -17,6 +17,7 @@
 #include "shell/system_status.h"
 #include "shell/tray_model.h"
 #include "shell/shell_verbs.h"
+#include "shell/jump_list.h"
 #include "shell/win_key.h"
 #include "shell/feishu_source.h"
 #include "shell/wechat_source.h"
@@ -650,13 +651,18 @@ int RunGuard(DWORD pid)
     return 0;
 }
 
-// Whether a recent entry is something an editor opens as a workspace (a folder
-// or a project/workspace file), as the system menu's "recent workspaces" list shows.
-bool IsWorkspaceEntry(const std::wstring& path)
+// Folders and project/workspace files: what the taskbar menu shows above a
+// program's documents (its places, then its recent list).
+bool IsDirectoryPath(const std::wstring& path)
 {
+    if (IsRemotePath(path))
+        return false; // an offline share would answer in tens of seconds
     const DWORD attr = GetFileAttributesW(path.c_str());
-    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
-        return true;
+    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+bool IsWorkspaceFile(const std::wstring& path)
+{
     const size_t dot = path.find_last_of(L'.');
     const size_t slash = path.find_last_of(L"\\/");
     if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
@@ -672,6 +678,7 @@ bool IsWorkspaceEntry(const std::wstring& path)
 
 void ShowItemMenu(const std::wstring& key, POINT pt)
 {
+    const ULONGLONG startedAt = GetTickCount64();
     std::vector<TaskItem> items = ActiveBar().Items();
     auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
@@ -681,40 +688,92 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     PinnedApp pin = g_app.tasks->PinFor(key);
     const std::wstring pinTarget = g_app.tasks->PinTarget(key);
     const std::wstring appPath = pinTarget.empty() ? pin.path : pinTarget;
-    std::shared_ptr<ShellVerbs> shell = appPath.empty() ? nullptr : ShellVerbs::For(appPath, g_app.host);
-    const ShellVerb* runAs = shell ? shell->Find(L"runas") : nullptr;
-    // The program's own "recent" list, as the system menu shows it above its entries.
+    // The app's own jump list: what the Windows taskbar shows above its entries
+    // (pinned places, the app's categories and tasks, its recent items).
     std::wstring appId = pin.aumid;
     if (appId.empty())
         appId = ShellAppId(appPath);
-    std::vector<ShellRecent> recent = ShellRecentDocuments(appId, 24);
-    // Workspaces first (as the taskbar's menu shows them), then recent files.
-    std::vector<ShellRecent> workspaces, files;
-    for (const ShellRecent& entry : recent) {
-        std::vector<ShellRecent>& into = IsWorkspaceEntry(entry.path) ? workspaces : files;
-        if (into.size() < 5)
-            into.push_back(entry);
+    if (appId.empty())
+        appId = ShellAppIdOfProcess(pin.path.empty() ? appPath : pin.path);
+    if (appId.empty()) {
+        // Explorer files its quick access list under the shell's own AppID: the
+        // program carries none, and its windows do not either.
+        const size_t slash = appPath.find_last_of(L"\\/");
+        const std::wstring exe = slash == std::wstring::npos ? appPath : appPath.substr(slash + 1);
+        if (_wcsicmp(exe.c_str(), L"explorer.exe") == 0)
+            appId = L"Microsoft.Windows.Explorer";
     }
-    recent = std::move(workspaces);
-    recent.insert(recent.end(), files.begin(), files.end());
+    std::vector<JumpItem> listed; // the rows below the app's name, in menu order
+    std::vector<std::pair<std::wstring, std::vector<JumpItem>>> sections;
+    if (std::shared_ptr<const JumpListData> jump = LoadJumpList(appId, pin.path)) {
+        if (!jump->pinned.empty())
+            sections.push_back({L"已固定", jump->pinned});
+        for (const JumpCategory& category : jump->categories)
+            sections.push_back({category.title, category.items});
+        if (!jump->recent.empty())
+            sections.push_back({L"最近", jump->recent});
+    } else {
+        // No jump list file: the shell's own document lists are the next best thing.
+        std::vector<ShellRecent> places, workspaces, files;
+        std::set<std::wstring> seen;
+        const auto take = [&](std::vector<ShellRecent>& into, const ShellRecent& entry) {
+            // A place that is gone is not listed: the shell would open the default
+            // folder instead, which reads as a wrong pick.
+            if (!IsRemotePath(entry.path) && GetFileAttributesW(entry.path.c_str()) == INVALID_FILE_ATTRIBUTES)
+                return;
+            std::wstring id = entry.path;
+            for (wchar_t& c : id)
+                c = wchar_t(towlower(c));
+            if (into.size() >= 5 || !seen.insert(id).second)
+                return;
+            into.push_back(entry);
+        };
+        if (!appId.empty()) {
+            for (const ShellRecent& entry : ShellDocumentList(appId, ADLT_FREQUENT, 24))
+                if (IsDirectoryPath(entry.path))
+                    take(places, entry);
+            for (const ShellRecent& entry : ShellDocumentList(appId, ADLT_RECENT, 24))
+                take(IsDirectoryPath(entry.path) ? places : IsWorkspaceFile(entry.path) ? workspaces : files, entry);
+        }
+        const auto toItems = [](const std::vector<ShellRecent>& list) {
+            std::vector<JumpItem> items;
+            for (const ShellRecent& entry : list) {
+                JumpItem item;
+                item.name = entry.name;
+                item.target = entry.path;
+                item.folder = IsDirectoryPath(entry.path);
+                items.push_back(std::move(item));
+            }
+            return items;
+        };
+        if (!places.empty())
+            sections.push_back({L"文件夹", toItems(places)});
+        if (!workspaces.empty())
+            sections.push_back({L"工作区", toItems(workspaces)});
+        if (!files.empty())
+            sections.push_back({L"最近", toItems(files)});
+    }
 
     std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
     entries.push_back({it->windows.empty() || !it->multipleWindows ? L"打开" : L"打开新窗口", kCmdNewWindow});
-    const size_t workspaceCount = recent.size() - files.size();
-    Log(L"menu: '%s' path='%s' appid='%s' verbs=%zu recent=%zu workspaces=%zu files=%zu", it->name.c_str(), appPath.c_str(),
-        appId.c_str(), shell ? shell->All().size() : size_t(0), recent.size(), workspaceCount, files.size());
-    if (workspaceCount) {
-        entries.push_back({L"工作区", 0, false, false, true});
-        for (size_t i = 0; i < workspaceCount; ++i)
-            entries.push_back({recent[i].name, int(kCmdRecent + i)});
+    size_t command = 0;
+    for (auto& [title, rows] : sections) {
+        if (rows.empty())
+            continue;
+        entries.push_back({title, 0, false, false, true});
+        for (JumpItem& item : rows) {
+            entries.push_back({item.name, int(kCmdRecent + command++)});
+            listed.push_back(std::move(item));
+        }
     }
-    if (!files.empty()) {
-        entries.push_back({L"最近", 0, false, false, true});
-        for (size_t i = 0; i < files.size(); ++i)
-            entries.push_back({files[i].name, int(kCmdRecent + workspaceCount + i)});
-    }
-    if (runAs)
-        entries.push_back({L"以管理员身份运行", kCmdRunAs, false, runAs->disabled});
+    std::wstring shape;
+    for (const auto& [title, rows] : sections)
+        shape += (shape.empty() ? L"" : L"; ") + title + L"(" + std::to_wstring(rows.size()) + L")";
+    Log(L"menu: '%s' path='%s' appid='%s' items=%zu [%s] in %llu ms", it->name.c_str(), appPath.c_str(), appId.c_str(),
+        listed.size(), shape.c_str(), GetTickCount64() - startedAt);
+    const bool canRunAs = !appPath.empty() && appPath.find(L"\\WindowsApps\\") == std::wstring::npos;
+    if (canRunAs)
+        entries.push_back({L"以管理员身份运行", kCmdRunAs});
     std::wstring location = g_app.tasks->FileLocation(key);
     if (!location.empty())
         entries.push_back({L"打开文件所在的位置", kCmdOpenLocation});
@@ -727,7 +786,7 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
     int pinIndex = it->pinIndex;
     auto windows = it->windows;
     std::wstring name = it->name;
-    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex, windows, name, pt, shell, appPath, recent](int cmd) {
+    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex, windows, name, pt, appPath, listed](int cmd) {
         switch (cmd) {
         case kCmdNewWindow:
             g_app.tasks->Launch(key);
@@ -772,19 +831,37 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             }
             break;
         case kCmdRunAs:
-            if (shell) {
-                if (const ShellVerb* verb = shell->Find(L"runas"))
-                    shell->Invoke(*verb);
+            if (!appPath.empty()) {
+                // Elevation is the shell's "runas" verb; no context menu is needed for it.
+                const HINSTANCE opened =
+                    ShellExecuteW(nullptr, L"runas", appPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                if (reinterpret_cast<INT_PTR>(opened) <= 32)
+                    Log(L"menu: runas '%s' failed (%ld)", appPath.c_str(), GetLastError());
             }
             break;
         case kCmdProperties:
             ShowShellProperties(g_app.host, appPath);
             break;
         default:
-            if (cmd >= kCmdRecent && cmd < kCmdRecent + int(recent.size())) {
-                const std::wstring path = recent[size_t(cmd - kCmdRecent)].path;
-                ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            if (cmd >= kCmdRecent && size_t(cmd - kCmdRecent) < listed.size()) {
+                const JumpItem& item = listed[size_t(cmd - kCmdRecent)];
+                HINSTANCE opened = nullptr;
+                if (!item.program.empty()) {
+                    // The system's own entries are shortcuts to the program with the
+                    // item as an argument: a workspace file has no association of its own.
+                    opened = ShellExecuteW(nullptr, L"open", item.program.c_str(), item.args.c_str(), nullptr,
+                                           SW_SHOWNORMAL);
+                } else if (item.folder && !item.target.empty()) {
+                    const std::wstring args = L"\"" + item.target + L"\"";
+                    opened = ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+                } else if (!item.target.empty()) {
+                    opened = ShellExecuteW(nullptr, L"open", item.target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+                Log(L"menu: jump cmd=%d '%s' program='%s' -> %p (error %lu)", cmd, item.target.c_str(),
+                    item.program.c_str(), reinterpret_cast<void*>(opened),
+                    opened > reinterpret_cast<HINSTANCE>(32) ? 0ul : GetLastError());
             }
+
             break;
         }
     });
@@ -1304,6 +1381,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
     Surface::SetGlassHost(g_app.bar.get());
     Surface::SetCapturable(capturable);
     g_app.menu = std::make_unique<GlassMenu>(instance);
+    StartJumpListIndex(); // the profile's jump list files, read off the UI thread
     g_app.tasks = std::make_unique<TaskModel>(g_app.host, [] {
         const double t0 = ClockMs();
         if (g_app.stage)

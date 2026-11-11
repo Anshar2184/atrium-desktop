@@ -1,46 +1,14 @@
-// The shell's own verbs for one file (the system's entries in Atrium's menus).
-// A program's context menu in Explorer holds entries only the shell can run --
-// "run as administrator", "properties", a program's own shell extensions -- so
-// that menu is built once per right click and kept alive while Atrium shows the
-// chosen verbs in its glass menu and runs the pick.
+// What the shell knows about a program that Atrium's menus need: its
+// AppUserModelID (to find the jump list it files its entries under) and the
+// document lists it publishes when it has no jump list of its own.
 #pragma once
 
 #include <windows.h>
 
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace atrium {
-
-struct ShellVerb {
-    std::wstring verb; // the shell's name for it, e.g. L"runas"
-    std::wstring text; // the label the shell gives it, accelerators removed
-    UINT command = 0;  // offset inside the shell menu: what InvokeCommand takes
-    bool disabled = false;
-};
-
-class ShellVerbs {
-public:
-    ~ShellVerbs();
-    ShellVerbs(const ShellVerbs&) = delete;
-    ShellVerbs& operator=(const ShellVerbs&) = delete;
-
-    // Builds the shell's menu for `path` (an exe, a shortcut or a shell: name).
-    // Null when the path does not resolve or the shell offers no verbs.
-    static std::shared_ptr<ShellVerbs> For(const std::wstring& path, HWND owner);
-
-    const std::vector<ShellVerb>& All() const { return verbs_; }
-    const ShellVerb* Find(const wchar_t* verb) const;
-    // Runs one verb through the shell; the object must stay alive until it returns.
-    bool Invoke(const ShellVerb& verb);
-
-private:
-    ShellVerbs() = default;
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
-    std::vector<ShellVerb> verbs_;
-};
 
 // The standard property sheet of a file (the shell's "properties" entry).
 bool ShowShellProperties(HWND owner, const std::wstring& path);
@@ -56,5 +24,10 @@ struct ShellRecent {
 std::wstring ShellAppId(const std::wstring& path);
 // The app's recent documents, newest first; empty when it publishes none.
 std::vector<ShellRecent> ShellRecentDocuments(const std::wstring& appId, int max);
+// The same list of another kind: ADLT_RECENT (documents) or ADLT_FREQUENT (places).
+std::vector<ShellRecent> ShellDocumentList(const std::wstring& appId, int kind, int max);
+// The AppUserModelID of the running process whose image is `exePath` (Explorer and
+// other programs that set theirs at run time only).
+std::wstring ShellAppIdOfProcess(const std::wstring& exePath);
 
 } // namespace atrium
