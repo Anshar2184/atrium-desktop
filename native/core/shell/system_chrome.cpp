@@ -3,9 +3,11 @@
 #include "log.h"
 #include "settings.h"
 
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <objbase.h>
 
+#include <thread>
 #include <vector>
 
 namespace atrium {
@@ -63,6 +65,31 @@ void SetAutoHide(bool on)
     abd.hWnd = FindWindowW(L"Shell_TrayWnd", nullptr);
     abd.lParam = on ? ABS_AUTOHIDE : ABS_ALWAYSONTOP;
     SHAppBarMessage(ABM_SETSTATE, &abd);
+}
+
+// Windows maximized while the taskbar still held its strip of the work area keep that gap when the
+// area grows: not every app lays itself out again. Each one is stretched to its work area, its
+// invisible borders outside it as Windows places a maximized window. A moment later: the shell
+// moves the work area after the call returns.
+void RefitMaximizedLater()
+{
+    std::thread([] {
+        Sleep(500);
+        EnumWindows([](HWND w, LPARAM) -> BOOL {
+            MONITORINFO mi{sizeof(mi)};
+            RECT r{}, f{};
+            if (!IsWindowVisible(w) || !IsZoomed(w) || !GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mi) ||
+                !GetWindowRect(w, &r) || FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &f, sizeof(f))))
+                return TRUE;
+            const RECT& a = mi.rcWork;
+            if (f.left <= a.left + 1 && f.top <= a.top + 1 && f.right >= a.right - 1 && f.bottom >= a.bottom - 1)
+                return TRUE;
+            Log(L"chrome: a maximized window stopped short of the work area (%ld,%ld,%ld,%ld); fitted", f.left, f.top, f.right, f.bottom);
+            SetWindowPos(w, nullptr, r.left + a.left - f.left, r.top + a.top - f.top, (r.right + a.right - f.right) - (r.left + a.left - f.left),
+                         (r.bottom + a.bottom - f.bottom) - (r.top + a.top - f.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+            return TRUE;
+        }, 0);
+    }).detach();
 }
 
 void ShowTaskbars()
@@ -151,6 +178,7 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
         if (!AutoHide()) {
             SetAutoHide(true);
             autoHideOurs_ = true;
+            RefitMaximizedLater();
         }
         Save();
         HideTaskbars();
@@ -199,6 +227,16 @@ void SystemChrome::Enforce()
 {
     if (exiting_) return;
     if (taskbarHidden_) {
+        // Hidden but not auto-hide, the taskbar keeps its strip of the work area and maximized
+        // windows stop its height short of the bottom. Auto-hide can be lost after it was set:
+        // set before Explorer's taskbar was ready at sign-in, Explorer restarted, another program.
+        if (FindWindowW(L"Shell_TrayWnd", nullptr) && !AutoHide()) {
+            SetAutoHide(true);
+            autoHideOurs_ = true;
+            Save();
+            Log(L"chrome: the taskbar was no longer auto-hide; set again");
+            RefitMaximizedLater();
+        }
         HideTaskbars();
         Watch(); // Explorer may have been restarted
     }
