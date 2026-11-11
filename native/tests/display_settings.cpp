@@ -118,19 +118,28 @@ void CheckFullscreenCoverage()
     const Window fullscreen{primary, screen}, normal{primary, {100, 100, 900, 700}}, other{external, {-2400, 0, -1000, 900}};
     auto covered = [&](std::initializer_list<Window> windows) {
         for (const Window& window : windows)
-            if (auto decision = WindowCoverOnMonitor(window.monitor, window.frame, window.maximized, primary, screen))
-                return *decision;
+            if (WindowCoverOnMonitor(window.monitor, window.frame, window.maximized, primary, screen).value_or(false))
+                return true;
         return false;
     };
     Require(covered({fullscreen}), "focused full-screen app hides its bar");
     Require(covered({other, fullscreen}), "focus on another monitor must not reveal the full-screen monitor's bar");
     Require(covered({{external, leftScreen}, fullscreen}), "each full-screen monitor hides its own bar independently");
-    Require(!covered({normal, fullscreen}), "a normal app in front on the same monitor restores its bar");
-    Require(!covered({other, normal, fullscreen}), "an unrelated foreground monitor does not override the local normal app");
+    Require(covered({normal, fullscreen}), "a smaller window opened over a full-screen app keeps its bar hidden");
+    Require(covered({other, normal, fullscreen}), "an unrelated foreground monitor does not reveal the bar either");
+    Require(!covered({normal}), "normal windows alone keep the bar");
     Require(!covered({other}), "minimizing or closing the local full-screen app restores its bar");
     Require(covered({other, {primary, {0, 0, 1920, 1040}, true}}), "an inactive maximized local app keeps auto-hide");
     Require(covered({{primary, {}}, fullscreen}), "empty frames do not override a full-screen app");
     Require(WindowCoverOnMonitor(external, leftScreen, false, external, leftScreen) == true, "full-screen detection supports negative display coordinates");
+
+    const RECT left{0, 0, 960, 1080}, right{960, 0, 1920, 1080}, gapRight{965, 0, 1920, 1080};
+    Require(IsTile(left, screen, 8) && IsTile({960, 540, 1920, 1080}, screen, 8), "halves and quarters are tiles");
+    Require(!IsTile({100, 100, 900, 700}, screen, 8) && !IsTile({-500, 0, 960, 1080}, screen, 8), "floating or off-screen windows are not tiles");
+    Require(TilesFill({left, right}, screen, 8) && TilesFill({left, gapRight}, screen, 8), "two snapped halves fill the screen, a seam allowed");
+    Require(!TilesFill({left}, screen, 8) && !TilesFill({left, {1200, 0, 1920, 1080}}, screen, 8), "a half or a gap leaves the screen open");
+    Require(TilesFill({left, {960, 0, 1920, 540}, {960, 540, 1920, 1080}}, screen, 8), "a half and two quarters fill the screen");
+    Require(TilesFill({{-2560, -200, -1280, 1240}, {-1280, -200, 0, 1240}}, leftScreen, 8), "tiles support negative display coordinates");
 
     Require(AtDisplayBottom({960, 1079}, screen) && AtDisplayBottom({960, 1078}, screen), "the local bottom edge can still reveal the bar");
     Require(!AtDisplayBottom({960, 1080}, screen) && !AtDisplayBottom({960, 1600}, screen), "a lower display must not repeatedly reveal the upper display's bar");

@@ -1253,6 +1253,9 @@ void CALLBACK Bar::WinEvent(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG idO
 // Focus may be on another screen; use this monitor's app Z-order instead.
 bool Bar::MonitorCoveredByApp() const
 {
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(hmonitor_, &mi);
+    std::vector<RECT> tiles; // snapped windows in front, filling the screen together
     for (HWND window = GetTopWindow(nullptr); window; window = GetWindow(window, GW_HWNDNEXT)) {
         if (!IsWindowVisible(window) || IsIconic(window))
             continue;
@@ -1279,10 +1282,19 @@ bool Bar::MonitorCoveredByApp() const
         if (!GetWindowRect(window, &frame))
             continue;
         if (auto covered = WindowCoverOnMonitor(windowMonitor, frame, IsZoomed(window) != FALSE, hmonitor_, monitor_)) {
-            // A small window kept above the others (a call's or lyrics' float) does not decide.
-            if (!*covered && (ex & WS_EX_TOPMOST))
-                continue;
-            return *covered; // a normal app in front of a full-screen one restores the bar
+            if (*covered)
+                return true;
+            // Snapped side by side, the windows fill the screen as a maximized one does.
+            RECT bounds = frame; // without the invisible resize borders
+            DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds));
+            const int slack = MulDiv(8, int(GetDpiForWindow(window)), 96);
+            if (IsTile(bounds, mi.rcWork, slack)) {
+                tiles.push_back(bounds);
+                if (TilesFill(tiles, mi.rcWork, slack))
+                    return true;
+            }
+            // A smaller window in front (a mail opened from a chat, a dialog, a float) does not
+            // decide: what fills the screen behind it still does.
         }
     }
     return false;

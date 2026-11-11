@@ -47,6 +47,46 @@ std::optional<bool> WindowCoverOnMonitor(HMONITOR windowMonitor, const RECT& fra
     return maximized || (frame.left <= bounds.left && frame.top <= bounds.top && frame.right >= bounds.right && frame.bottom >= bounds.bottom);
 }
 
+bool IsTile(const RECT& frame, const RECT& work, int slack)
+{
+    if (IsRectEmpty(&frame) || frame.left < work.left - slack || frame.top < work.top - slack ||
+        frame.right > work.right + slack || frame.bottom > work.bottom + slack)
+        return false;
+    const int edges = (frame.left <= work.left + slack) + (frame.top <= work.top + slack) +
+                      (frame.right >= work.right - slack) + (frame.bottom >= work.bottom - slack);
+    return edges >= 2;
+}
+
+bool TilesFill(const std::vector<RECT>& tiles, const RECT& work, int slack)
+{
+    if (tiles.empty() || IsRectEmpty(&work))
+        return false;
+    // The work area cut along every tile edge: each cell is inside a tile or not at all.
+    std::vector<RECT> grown;
+    std::vector<LONG> xs{work.left, work.right}, ys{work.top, work.bottom};
+    for (RECT t : tiles) {
+        InflateRect(&t, slack, slack);
+        grown.push_back(t);
+        for (LONG x : {t.left, t.right})
+            if (x > work.left && x < work.right)
+                xs.push_back(x);
+        for (LONG y : {t.top, t.bottom})
+            if (y > work.top && y < work.bottom)
+                ys.push_back(y);
+    }
+    std::sort(xs.begin(), xs.end());
+    std::sort(ys.begin(), ys.end());
+    for (size_t i = 0; i + 1 < xs.size(); ++i)
+        for (size_t j = 0; j + 1 < ys.size(); ++j) {
+            if (xs[i] == xs[i + 1] || ys[j] == ys[j + 1])
+                continue;
+            const POINT mid{(xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2};
+            if (std::none_of(grown.begin(), grown.end(), [&](const RECT& t) { return PtInRect(&t, mid) != FALSE; }))
+                return false;
+        }
+    return true;
+}
+
 bool AtDisplayBottom(POINT pointer, const RECT& bounds)
 {
     return PtInRect(&bounds, pointer) && pointer.y >= bounds.bottom - 2;

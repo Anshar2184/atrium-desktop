@@ -23,6 +23,11 @@ HMONITOR ResolveDisplay(const std::vector<DisplayInfo>& displays, const std::wst
 // No decision for other screens or empty frames; the first app on this screen decides.
 std::optional<bool> WindowCoverOnMonitor(HMONITOR windowMonitor, const RECT& frame, bool maximized,
     HMONITOR monitor, const RECT& bounds);
+// Windows snapped side by side (halves, thirds, quarters) fill a screen together as one maximized
+// window does. A tile lies in the work area and reaches at least two of its edges; tiles fill it
+// when no point is left uncovered, seams of up to `slack` pixels allowed.
+bool IsTile(const RECT& frame, const RECT& work, int slack);
+bool TilesFill(const std::vector<RECT>& tiles, const RECT& work, int slack);
 bool AtDisplayBottom(POINT pointer, const RECT& bounds); // bottom edge, strictly inside this display
 // The app in front on `monitor` fills the whole screen (a game, a video, F11), not just its work
 // area, or a game holds the screen exclusively: as with Windows' taskbar, the pointer at the
