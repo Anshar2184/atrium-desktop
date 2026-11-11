@@ -53,6 +53,7 @@ The glass bends what is behind it, with a touch of highlight and dispersion at t
 
 - A floating capsule of glass at the bottom of the screen. Icons swell like a wave under the pointer; rest for a moment and the app's name appears.
 - Rest on an open app to see a live preview of each of its windows, and switch to or close one from there.
+- Right-click an icon for the app's own jump list, as on the Windows taskbar: pinned and recent files, folders and workspaces, and the app's tasks (a browser's new or private window), plus run as administrator and properties. The settings can turn it off for the plain menu.
 - Drag pinned apps to reorder them. When the app in front goes full screen or maximised, the bar steps aside (or keep it up, or always hidden). While a game, video or anything else fills the whole screen, the pointer at the bottom edge does not bring the bar up, just like the Windows taskbar, so a full-screen game is never pushed back to the desktop. Optionally, Win + 1…9 open the bar's apps.
 
 ### Start menu
@@ -64,7 +65,7 @@ The glass bends what is behind it, with a touch of highlight and dispersion at t
   </tr>
 </table>
 
-Opened from the Windows logo at the left of the bar, or optionally the Windows key. The apps pinned in the Windows start menu are here; drag them around, drop one onto another to make a folder and name it. Three sizes: small, medium and large. Just start typing to search apps and folders, no need to click the search box first; pinyin initials work too (wx finds 微信). All apps lists them A to Z with a letter index to jump through, and apps you do not want to see can be hidden. The strip below holds your account, network, volume, battery and power; the settings pick the menu's size and can leave out its tray or status buttons.
+Opened from the Windows logo at the left of the bar, or optionally the Windows key. The apps pinned in the Windows start menu are here; drag them around, drop one onto another to make a folder and name it. Three sizes: small, medium and large. Just start typing to search apps and folders, no need to click the search box first; pinyin initials work too (wx finds 微信). All apps lists them A to Z with a letter index to jump through, and a right-click runs an app as administrator, opens its file location, or hides an app you do not want to see. The strip below holds your account, network, volume, battery and power; the settings pick the menu's size and can leave out its tray or status buttons.
 
 ### Status ring and control centre
 
