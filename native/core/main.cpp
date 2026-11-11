@@ -16,6 +16,7 @@
 #include "shell/system_chrome.h"
 #include "shell/system_status.h"
 #include "shell/tray_model.h"
+#include "shell/shell_verbs.h"
 #include "shell/win_key.h"
 #include "shell/feishu_source.h"
 #include "shell/wechat_source.h"
@@ -69,7 +70,8 @@ constexpr UINT kTrayId = 1;
 
 enum Command : UINT {
     kCmdSettings = 100, kCmdToggle, kCmdExit, kCmdNewWindow, kCmdPin, kCmdUnpin, kCmdClose, kCmdOpenLocation, kCmdDesktop, kCmdTaskManager, kCmdTerminate, kCmdTerminateConfirm,
-    kCmdWidgets, kCmdStage, kCmdWidgetsModule
+    kCmdWidgets, kCmdStage, kCmdWidgetsModule, kCmdRunAs, kCmdProperties,
+    kCmdRecent = 2000 // + index into the recent list (its length is bounded)
 };
 
 struct App {
@@ -648,25 +650,84 @@ int RunGuard(DWORD pid)
     return 0;
 }
 
+// Whether a recent entry is something an editor opens as a workspace (a folder
+// or a project/workspace file), as the system menu's "recent workspaces" list shows.
+bool IsWorkspaceEntry(const std::wstring& path)
+{
+    const DWORD attr = GetFileAttributesW(path.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
+        return true;
+    const size_t dot = path.find_last_of(L'.');
+    const size_t slash = path.find_last_of(L"\\/");
+    if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
+        return false;
+    const wchar_t* extension = path.c_str() + dot;
+    static const wchar_t* const kinds[] = {L".code-workspace", L".sln", L".slnx", L".vcxproj", L".uvprojx", L".workspace",
+                                           L".sublime-project", L".uproject", L".xcworkspace", L".pro", L".csproj"};
+    for (const wchar_t* kind : kinds)
+        if (_wcsicmp(extension, kind) == 0)
+            return true;
+    return false;
+}
+
 void ShowItemMenu(const std::wstring& key, POINT pt)
 {
     std::vector<TaskItem> items = ActiveBar().Items();
     auto it = std::find_if(items.begin(), items.end(), [&](const TaskItem& t) { return t.key == key; });
     if (it == items.end())
         return;
+    // The system's own entries for the program: the shell menu is built now so
+    // "run as administrator" and "properties" are the shell's, not a copy.
+    PinnedApp pin = g_app.tasks->PinFor(key);
+    const std::wstring pinTarget = g_app.tasks->PinTarget(key);
+    const std::wstring appPath = pinTarget.empty() ? pin.path : pinTarget;
+    std::shared_ptr<ShellVerbs> shell = appPath.empty() ? nullptr : ShellVerbs::For(appPath, g_app.host);
+    const ShellVerb* runAs = shell ? shell->Find(L"runas") : nullptr;
+    // The program's own "recent" list, as the system menu shows it above its entries.
+    std::wstring appId = pin.aumid;
+    if (appId.empty())
+        appId = ShellAppId(appPath);
+    std::vector<ShellRecent> recent = ShellRecentDocuments(appId, 24);
+    // Workspaces first (as the taskbar's menu shows them), then recent files.
+    std::vector<ShellRecent> workspaces, files;
+    for (const ShellRecent& entry : recent) {
+        std::vector<ShellRecent>& into = IsWorkspaceEntry(entry.path) ? workspaces : files;
+        if (into.size() < 5)
+            into.push_back(entry);
+    }
+    recent = std::move(workspaces);
+    recent.insert(recent.end(), files.begin(), files.end());
+
     std::vector<MenuEntry> entries = {{it->name, 0, false, false, true}, {L"", 0}};
     entries.push_back({it->windows.empty() || !it->multipleWindows ? L"打开" : L"打开新窗口", kCmdNewWindow});
+    const size_t workspaceCount = recent.size() - files.size();
+    Log(L"menu: '%s' path='%s' appid='%s' verbs=%zu recent=%zu workspaces=%zu files=%zu", it->name.c_str(), appPath.c_str(),
+        appId.c_str(), shell ? shell->All().size() : size_t(0), recent.size(), workspaceCount, files.size());
+    if (workspaceCount) {
+        entries.push_back({L"工作区", 0, false, false, true});
+        for (size_t i = 0; i < workspaceCount; ++i)
+            entries.push_back({recent[i].name, int(kCmdRecent + i)});
+    }
+    if (!files.empty()) {
+        entries.push_back({L"最近", 0, false, false, true});
+        for (size_t i = 0; i < files.size(); ++i)
+            entries.push_back({files[i].name, int(kCmdRecent + workspaceCount + i)});
+    }
+    if (runAs)
+        entries.push_back({L"以管理员身份运行", kCmdRunAs, false, runAs->disabled});
     std::wstring location = g_app.tasks->FileLocation(key);
     if (!location.empty())
         entries.push_back({L"打开文件所在的位置", kCmdOpenLocation});
     entries.push_back({it->pinned ? L"从 Atrium 取消固定" : L"固定到 Atrium", int(it->pinned ? kCmdUnpin : kCmdPin)});
+    if (!appPath.empty())
+        entries.push_back({L"属性", kCmdProperties});
     if (!it->windows.empty())
         entries.push_back({it->windows.size() > 1 ? L"关闭所有窗口" : L"关闭窗口", kCmdClose});
     entries.push_back({L"关闭程序", kCmdTerminate, false, !g_app.tasks->CanTerminate(key)});
     int pinIndex = it->pinIndex;
     auto windows = it->windows;
     std::wstring name = it->name;
-    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex, windows, name, pt](int cmd) {
+    g_app.menu->Open(std::move(entries), pt, MenuPlace::AboveCentered, [key, location, pinIndex, windows, name, pt, shell, appPath, recent](int cmd) {
         switch (cmd) {
         case kCmdNewWindow:
             g_app.tasks->Launch(key);
@@ -708,6 +769,21 @@ void ShowItemMenu(const std::wstring& key, POINT pt)
             if (PIDLIST_ABSOLUTE id = ILCreateFromPathW(location.c_str())) {
                 SHOpenFolderAndSelectItems(id, 0, nullptr, 0);
                 ILFree(id);
+            }
+            break;
+        case kCmdRunAs:
+            if (shell) {
+                if (const ShellVerb* verb = shell->Find(L"runas"))
+                    shell->Invoke(*verb);
+            }
+            break;
+        case kCmdProperties:
+            ShowShellProperties(g_app.host, appPath);
+            break;
+        default:
+            if (cmd >= kCmdRecent && cmd < kCmdRecent + int(recent.size())) {
+                const std::wstring path = recent[size_t(cmd - kCmdRecent)].path;
+                ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             }
             break;
         }

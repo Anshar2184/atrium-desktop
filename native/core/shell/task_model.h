@@ -98,6 +98,9 @@ public:
     static bool CloseWindow(HWND window);
     // A pin for a running unpinned item (to append to settings).
     PinnedApp PinFor(const std::wstring& key) const;
+    // The path a pinned item was pinned from (a shortcut when that is what was
+    // pinned): the shell's menus and AppUserModelID live there, not on the exe.
+    std::wstring PinTarget(const std::wstring& key) const;
     // Brings the group's most recent window to the front (never minimizes or
     // launches); used while files are dragged over the item.
     void Show(const std::wstring& key);
