@@ -32,6 +32,8 @@ public:
     // The bar's monitor: the widgets live in its work area, where its capture gives them glass.
     void SetMonitor(HMONITOR monitor, bool refresh = false);
     void SetMaterial(WidgetMaterial material);
+    // A language change: the weather's labels are fetched, so fetch them again and repaint.
+    void ReloadLanguage();
     // Adds a widget in the first free place; false when there is no room.
     bool Add(WidgetKind kind, WidgetSize size);
     // The same by name ("clock", "medium"; the settings app's gallery).
@@ -42,6 +44,10 @@ public:
     std::function<void()> onAddWidgets;  // "添加小组件…": the settings app's widget gallery
     std::function<void()> onStatusRequest;
     GlassMenu* menu = nullptr;           // a widget's menu (main's)
+
+    // A file box's drop target (desktop_widgets.cpp) reports through these; `widget` is the box.
+    void DropOnWidget(void* widget, const std::vector<std::wstring>& paths, bool copy);
+    void HoverWidget(void* widget, bool on);
 
 private:
     struct Widget;
@@ -89,6 +95,13 @@ private:
     void PlaceImeWindow(Widget& w);
     // Photos: a picture from the folder, read and scaled on a worker thread.
     void PickFolder(Widget& w);
+    // File boxes: what the folder holds, read on a worker thread; a drop moves (or copies) into it;
+    // a click opens the file or the folder; the folder is watched while the box shows it.
+    void LoadFiles(Widget& w);
+    void DropInto(Widget& w, const std::vector<std::wstring>& paths, bool copy);
+    void PickBoxFolder(Widget& w);
+    void WatchBox(Widget& w);
+    void AttachDrop(Widget& w);
     void PickCity(Widget& w, POINT at);
     void LoadPhoto(Widget& w, bool another);
     void SampleSystem();
@@ -107,10 +120,13 @@ private:
     WidgetMaterial material_ = WidgetMaterial::Glass;
     std::unique_ptr<WeatherSource> weather_;
     std::unique_ptr<BluetoothBatteries> bluetooth_;
+    std::unique_ptr<NetworkMonitor> network_;
     ChineseCalendar lunar_;
     int lastMinute_ = -1;
     uint64_t cpuIdle_ = 0, cpuTotal_ = 0; // the last GetSystemTimes
     unsigned photoGen_ = 0;
+    unsigned fileGen_ = 0; // the file-box read being served
+    bool oleReady_ = false; // this thread's OLE, for the boxes' drop targets
     bool restackPosted_ = false;
     // Only Restack may change a widget's place in the z-order: anything else
     // (showing the window, a click, the system) is held back in WM_WINDOWPOSCHANGING.

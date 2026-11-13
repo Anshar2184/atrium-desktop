@@ -5,6 +5,7 @@
 
 #include "shell/bluetooth_batteries.h"
 #include "shell/lunar.h"
+#include "shell/network_monitor.h"
 #include "shell/system_status.h"
 #include "shell/weather.h"
 #include "shell/task_model.h"
@@ -16,7 +17,9 @@
 
 namespace atrium {
 
-enum class WidgetKind { Clock, Calendar, Battery, Digital, System, Notes, Reminders, Photos, Weather, Bluetooth };
+// FileBox is appended last: main's WM_ATRIUM_ADD_WIDGET casts the settings app's number straight
+// to a WidgetKind, so the order of this list is the settings app's order.
+enum class WidgetKind { Clock, Calendar, Battery, Digital, System, Notes, Reminders, Photos, Weather, Bluetooth, Network, FileBox };
 enum class WidgetSize { Small, Medium, Large };
 // Glass: the bar's clear glass, its ink adapting to what shows through. Dusk: the same glass
 // dimmed by a dark veil, everything on it white (macOS's dimmed desktop widgets). Color: each
@@ -48,6 +51,16 @@ struct Reminder {
     bool done = false;
 };
 
+// A file box shows what one folder holds: a file or a subfolder of it, its icon read on a worker
+// thread and cached under `iconKey` in the canvas.
+struct FileEntry {
+    std::wstring name; // its name, without the folder
+    std::wstring path; // where it is (what a click opens)
+    bool folder = false;
+    std::shared_ptr<const IconImage> icon;
+    std::wstring iconKey;
+};
+
 // A widget's own content and its editing state.
 struct WidgetContent {
     std::wstring text;           // notes
@@ -57,6 +70,13 @@ struct WidgetContent {
     std::wstring photo;          // the photo shown
     std::shared_ptr<const IconImage> image; // it, cropped and scaled to the widget
     std::wstring imageKey;       // the canvas's cache key of `image`
+    // File box: the folder it shows (empty: the desktop), what that folder holds now, the extensions
+    // it keeps on its own when `autoFile` is on, and where its grid is scrolled to.
+    std::vector<FileEntry> files;
+    std::vector<std::wstring> rules;
+    bool autoFile = false;
+    float scrollRow = 0; // not saved
+    bool dropHover = false; // files are being dragged over it: not saved
     bool editing = false;
     int item = -1;     // reminders: the item being edited
     size_t caret = 0;  // in the text being edited
@@ -75,6 +95,7 @@ struct WidgetWorld {
     Weather weather; // the forecast (weather.ok false: none yet)
     std::vector<BluetoothBattery> bluetooth; // the connected devices' batteries
     bool bluetoothRead = false;              // false until the first reading
+    const NetworkMonitor* network = nullptr; // the link's rates and their minute of history
 };
 
 // Places in a widget that respond to the pointer (content DIP): "toggle:<i>"
@@ -87,6 +108,12 @@ struct WidgetHit {
 
 constexpr float kReminderTop = 42, kReminderRow = 27, kReminderBottom = 14;
 float ReminderScrollMax(const WidgetContent& content, WidgetSize size);
+
+// A file box's grid: icons across and down for a size (a small box holds four, a medium eight, a
+// large sixteen).
+int FileBoxCols(WidgetSize size);
+int FileBoxRows(WidgetSize size);
+inline int FileBoxCapacity(WidgetSize size) { return FileBoxCols(size) * FileBoxRows(size); }
 
 // Paints the content over the widget's glass (the face and the ink of `material` included).
 void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial material, const WidgetContent& content, const WidgetWorld& world, std::vector<WidgetHit>& hits);
