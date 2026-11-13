@@ -3,10 +3,14 @@
 #include "log.h"
 #include "settings.h"
 
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <objbase.h>
+#include <winreg.h>
 
+#include <thread>
 #include <vector>
+#include <mutex>
 
 namespace atrium {
 
@@ -21,10 +25,6 @@ struct IQuietHoursSettings : IUnknown {
     virtual HRESULT STDMETHODCALLTYPE get_UserSelectedProfile(LPWSTR* profile) = 0;
     virtual HRESULT STDMETHODCALLTYPE put_UserSelectedProfile(LPCWSTR profile) = 0;
 };
-
-constexpr wchar_t kUnrestricted[] = L"Microsoft.QuietHoursProfile.Unrestricted";
-// Only alarms break through: no app's banner shows (priority apps would).
-constexpr wchar_t kQuiet[] = L"Microsoft.QuietHoursProfile.AlarmsOnly";
 
 SystemChrome* g_chrome = nullptr;
 
@@ -65,6 +65,31 @@ void SetAutoHide(bool on)
     SHAppBarMessage(ABM_SETSTATE, &abd);
 }
 
+// Windows maximized while the taskbar still held its strip of the work area keep that gap when the
+// area grows: not every app lays itself out again. Each one is stretched to its work area, its
+// invisible borders outside it as Windows places a maximized window. A moment later: the shell
+// moves the work area after the call returns.
+void RefitMaximizedLater()
+{
+    std::thread([] {
+        Sleep(500);
+        EnumWindows([](HWND w, LPARAM) -> BOOL {
+            MONITORINFO mi{sizeof(mi)};
+            RECT r{}, f{};
+            if (!IsWindowVisible(w) || !IsZoomed(w) || !GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mi) ||
+                !GetWindowRect(w, &r) || FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &f, sizeof(f))))
+                return TRUE;
+            const RECT& a = mi.rcWork;
+            if (f.left <= a.left + 1 && f.top <= a.top + 1 && f.right >= a.right - 1 && f.bottom >= a.bottom - 1)
+                return TRUE;
+            Log(L"chrome: a maximized window stopped short of the work area (%ld,%ld,%ld,%ld); fitted", f.left, f.top, f.right, f.bottom);
+            SetWindowPos(w, nullptr, r.left + a.left - f.left, r.top + a.top - f.top, (r.right + a.right - f.right) - (r.left + a.left - f.left),
+                         (r.bottom + a.bottom - f.bottom) - (r.top + a.top - f.top), SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+            return TRUE;
+        }, 0);
+    }).detach();
+}
+
 void ShowTaskbars()
 {
     // Also used by the exception filter: enumerate without allocating.
@@ -72,6 +97,45 @@ void ShowTaskbars()
         ShowWindow(w, SW_SHOWNA);
     for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr;)
         ShowWindow(w, SW_SHOWNA);
+}
+
+// AutoPlay's "a drive was inserted" toast is one of the system notifications
+// Windows still shows in "alarms only" (that is why the USB banner survived Do
+// Not Disturb). Its per-app "show banners" switch still applies: with the banner
+// off the toast stays in the notification centre, where Atrium's listener reads
+// it for a card, but Windows shows no banner.
+constexpr wchar_t kAutoPlayKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\Windows.SystemToast.AutoPlay";
+constexpr wchar_t kShowBanner[] = L"ShowBanner";
+
+bool AutoPlayBannerShown()
+{
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kAutoPlayKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
+        return true; // no per-app override: Windows shows the banner
+    DWORD value = 1, size = sizeof(value), type = 0;
+    const LSTATUS status = RegQueryValueExW(key, kShowBanner, nullptr, &type, reinterpret_cast<BYTE*>(&value), &size);
+    RegCloseKey(key);
+    return status != ERROR_SUCCESS || type != REG_DWORD || value != 0;
+}
+
+bool SetAutoPlayBanner(bool shown)
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kAutoPlayKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return false;
+    LSTATUS status = ERROR_SUCCESS;
+    if (shown) {
+        // Absent is Windows' default; removing the override restores the banner.
+        status = RegDeleteValueW(key, kShowBanner);
+        if (status == ERROR_FILE_NOT_FOUND)
+            status = ERROR_SUCCESS;
+    } else {
+        const DWORD value = 0;
+        status = RegSetValueExW(key, kShowBanner, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+    }
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS;
 }
 
 } // namespace
@@ -117,13 +181,58 @@ bool SystemChrome::UndoLeftover()
     if (left.find(L"\"autoHide\":true") != std::wstring::npos)
         SetAutoHide(false);
     ShowTaskbars();
-    if (left.find(L"\"quiet\":true") != std::wstring::npos && QuietProfile() == kQuiet)
-        SetQuietProfile(kUnrestricted);
+    if (left.find(L"\"quiet\":true") != std::wstring::npos && QuietProfile() == kQuietProfile) {
+        // The profile Atrium changed it from. Files from before this field have
+        // no record and are restored to unrestricted, as they were then.
+        std::wstring restore = kQuietProfileOff;
+        const std::wstring key = L"\"quietRestore\":\"";
+        const size_t at = left.find(key);
+        if (at != std::wstring::npos) {
+            const size_t begin = at + key.size();
+            const size_t end = left.find(L'"', begin);
+            if (end != std::wstring::npos && end > begin)
+                restore.assign(left, begin, end - begin);
+        }
+        if (restore.empty() || restore == kQuietProfile)
+            restore = kQuietProfileOff;
+        SetQuietProfile(restore.c_str());
+        Log(L"chrome: Do Not Disturb restored (%s)", restore.c_str());
+    }
+    if (left.find(L"\"autoPlayBanner\":true") != std::wstring::npos) {
+        if (SetAutoPlayBanner(true))
+            Log(L"chrome: AutoPlay banners restored");
+        else
+            Log(L"chrome: could not restore AutoPlay banners");
+    }
     DeleteFileW(StatePath().c_str());
     return true;
 }
 
 void SystemChrome::ShowTaskbarsNow() { ShowTaskbars(); }
+
+// A real mouse click on a tray icon (its menu, its toggle) needs the taskbar
+// visible for the moment of the click. The shell's show-hook must stand still
+// in between; the bars go back only when Atrium had hidden them. The tray's
+// worker thread calls these while the main thread may be in the hook or in
+// OnShow, so every access to the shared state goes through one mutex.
+std::atomic_bool SystemChrome::suppressHide_ = false;
+static std::mutex clickMutex_;
+
+void SystemChrome::RevealForClick()
+{
+    std::lock_guard<std::mutex> guard(clickMutex_);
+    suppressHide_ = true;
+    ShowTaskbars();
+}
+
+void SystemChrome::ConcealAfterClick()
+{
+    std::lock_guard<std::mutex> guard(clickMutex_);
+    if (g_chrome && g_chrome->taskbarHidden_)
+        for (HWND w : Taskbars())
+            ShowWindow(w, SW_HIDE);
+    suppressHide_ = false;
+}
 
 SystemChrome::~SystemChrome()
 {
@@ -151,6 +260,7 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
         if (!AutoHide()) {
             SetAutoHide(true);
             autoHideOurs_ = true;
+            RefitMaximizedLater();
         }
         Save();
         HideTaskbars();
@@ -172,25 +282,80 @@ void SystemChrome::SetTaskbarHidden(bool hidden)
 void SystemChrome::SetBannersHidden(bool hidden)
 {
     if (hidden && exiting_) return;
-    if (hidden == quietOurs_)
-        return;
-    if (hidden) {
-        std::wstring now = QuietProfile();
-        if (now.empty()) {
-            Log(L"chrome: Do Not Disturb is not available; banners stay");
+    // The setting is idempotent. A failed attempt (the service was unavailable)
+    // or a setting the user changed since is retried on the next apply; turning
+    // it off retries a restore that failed.
+    if (hidden == bannersHidden_) {
+        if (hidden ? (quietReady_ && autoPlayBannerReady_) : (!quietOurs_ && !autoPlayBannerOurs_))
             return;
+    }
+    bannersHidden_ = hidden;
+    const std::wstring now = QuietProfile();
+    const QuietPlan plan = PlanQuiet(now, hidden, quietOurs_, quietBefore_);
+    if (plan.action == QuietAction::hide) {
+        if (SetQuietProfile(plan.profile.c_str())) {
+            quietBefore_ = now;
+            quietOurs_ = true;
+            quietReady_ = true;
+            // "Priority only" and "unrestricted" both let banners through; only
+            // alarms-only hides the system's own toasts as well as apps'.
+            Log(L"chrome: Do Not Disturb on (alarms only; was %s)", now.c_str());
+        } else {
+            quietReady_ = false;
+            Log(L"chrome: Do Not Disturb could not be turned on (was %s)", now.c_str());
         }
-        if (now != kUnrestricted) {
-            Log(L"chrome: Do Not Disturb is on already (%s); left as it is", now.c_str());
-            return; // the user's own: not ours to turn off later
+    } else if (plan.action == QuietAction::restore) {
+        quietReady_ = false;
+        if (now == kQuietProfile) {
+            if (SetQuietProfile(plan.profile.c_str()))
+                Log(L"chrome: Do Not Disturb restored (%s)", plan.profile.c_str());
+            else
+                Log(L"chrome: Do Not Disturb could not be restored (%s)", plan.profile.c_str());
+        } else if (!now.empty()) {
+            // The user chose another profile while it was Atrium's: leave theirs.
+            Log(L"chrome: Do Not Disturb changed by the user (%s); left as it is", now.c_str());
         }
-        quietOurs_ = SetQuietProfile(kQuiet);
-        Log(L"chrome: Do Not Disturb %s", quietOurs_ ? L"on (banners hidden)" : L"could not be turned on");
-    } else {
-        if (QuietProfile() == kQuiet)
-            SetQuietProfile(kUnrestricted);
         quietOurs_ = false;
+        quietBefore_.clear();
+    } else if (hidden) {
+        if (now.empty()) {
+            quietReady_ = false;
+            Log(L"chrome: Do Not Disturb is not available; banners stay");
+        } else {
+            quietReady_ = true;
+            Log(L"chrome: Do Not Disturb already hides banners (alarms only); left as it is");
+        }
+    } else {
+        quietReady_ = false;
         Log(L"chrome: Do Not Disturb off (banners shown)");
+    }
+
+    // AutoPlay's toast goes through "alarms only", so its own banner switch is
+    // what keeps the USB notification quiet.
+    if (hidden) {
+        if (!autoPlayBannerReady_) {
+            if (!AutoPlayBannerShown()) {
+                autoPlayBannerReady_ = true;
+                Log(L"chrome: AutoPlay banners already off; left as it is");
+            } else if (SetAutoPlayBanner(false)) {
+                autoPlayBannerOurs_ = true;
+                autoPlayBannerReady_ = true;
+                Log(L"chrome: AutoPlay banners off (the drive toast bypasses Do Not Disturb)");
+            } else {
+                Log(L"chrome: could not turn off AutoPlay banners");
+            }
+        }
+    } else {
+        autoPlayBannerReady_ = false;
+        if (autoPlayBannerOurs_) {
+            if (SetAutoPlayBanner(true)) {
+                autoPlayBannerOurs_ = false;
+                Log(L"chrome: AutoPlay banners restored");
+            } else {
+                // Keep the ownership so system.json (and the guard) retries it.
+                Log(L"chrome: could not restore AutoPlay banners");
+            }
+        }
     }
     Save();
 }
@@ -199,13 +364,35 @@ void SystemChrome::Enforce()
 {
     if (exiting_) return;
     if (taskbarHidden_) {
+        // Hidden but not auto-hide, the taskbar keeps its strip of the work area and maximized
+        // windows stop its height short of the bottom. Auto-hide can be lost after it was set:
+        // set before Explorer's taskbar was ready at sign-in, Explorer restarted, another program.
+        if (FindWindowW(L"Shell_TrayWnd", nullptr) && !AutoHide()) {
+            SetAutoHide(true);
+            autoHideOurs_ = true;
+            Save();
+            Log(L"chrome: the taskbar was no longer auto-hide; set again");
+            RefitMaximizedLater();
+        }
         HideTaskbars();
         Watch(); // Explorer may have been restarted
     }
-    if (quietOurs_ && QuietProfile() != kQuiet) {
-        // The user turned it off (or chose another mode): theirs from now on.
-        Log(L"chrome: Do Not Disturb changed by the user; no longer Atrium's");
-        quietOurs_ = false;
+    if (quietReady_) {
+        const std::wstring now = QuietProfile();
+        if (!now.empty() && now != kQuietProfile) {
+            // The user turned it off (or chose another mode): theirs from now on.
+            Log(L"chrome: Do Not Disturb changed by the user (%s); no longer hidden by Atrium", now.c_str());
+            quietReady_ = false;
+            quietOurs_ = false;
+            quietBefore_.clear();
+            Save();
+        }
+    }
+    if (autoPlayBannerOurs_ && AutoPlayBannerShown()) {
+        // The user turned AutoPlay banners back on: theirs from now on.
+        Log(L"chrome: AutoPlay banners changed by the user; no longer hidden by Atrium");
+        autoPlayBannerOurs_ = false;
+        autoPlayBannerReady_ = false;
         Save();
     }
 }
@@ -245,7 +432,7 @@ void SystemChrome::Watch()
 
 void CALLBACK SystemChrome::OnShow(HWINEVENTHOOK, DWORD, HWND w, LONG obj, LONG, DWORD, DWORD)
 {
-    if (obj == OBJID_WINDOW && g_chrome && g_chrome->taskbarHidden_ && w && IsTaskbar(w)) {
+    if (obj == OBJID_WINDOW && g_chrome && g_chrome->taskbarHidden_ && !suppressHide_ && w && IsTaskbar(w)) {
         ShowWindow(w, SW_HIDE);
         Log(L"chrome: Explorer showed its taskbar; hidden again");
     }
@@ -253,7 +440,7 @@ void CALLBACK SystemChrome::OnShow(HWINEVENTHOOK, DWORD, HWND w, LONG obj, LONG,
 
 void SystemChrome::Save() const
 {
-    if (!taskbarHidden_ && !quietOurs_) {
+    if (!taskbarHidden_ && !quietOurs_ && !autoPlayBannerOurs_) {
         DeleteFileW(StatePath().c_str());
         return;
     }
@@ -263,6 +450,15 @@ void SystemChrome::Save() const
     json += autoHideOurs_ ? L"true" : L"false";
     json += L",\"quiet\":";
     json += quietOurs_ ? L"true" : L"false";
+    if (quietOurs_ && !quietBefore_.empty()) {
+        // The profile to put back after a crash or a killed process. Profile names
+        // are plain ASCII identifiers, so they need no JSON escaping.
+        json += L",\"quietRestore\":\"";
+        json += quietBefore_;
+        json += L"\"";
+    }
+    if (autoPlayBannerOurs_)
+        json += L",\"autoPlayBanner\":true";
     json += L"}";
     WriteTextFile(StatePath(), json);
 }
