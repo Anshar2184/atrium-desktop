@@ -30,6 +30,7 @@ add_executable(atrium_core WIN32
     log.cpp
     settings.cpp
     settings_server.cpp
+    localization.cpp
     shell/task_model.cpp
     shell/app_processes.cpp
     shell/app_catalog.cpp
@@ -38,6 +39,7 @@ add_executable(atrium_core WIN32
     shell/app_registration.cpp
     shell/update_checker.cpp
     shell/system_chrome.cpp
+    shell/file_box_watch.cpp
     shell/system_status.cpp
     shell/wifi.cpp
     shell/radios.cpp
@@ -46,6 +48,8 @@ add_executable(atrium_core WIN32
     shell/projection.cpp
     shell/displays.cpp
     shell/tray_model.cpp
+    shell/shell_verbs.cpp
+    shell/jump_list.cpp
     shell/wechat_source.cpp
     shell/feishu_source.cpp
     ui/surface.cpp
@@ -60,10 +64,12 @@ add_executable(atrium_core WIN32
     ui/window_snapshot.cpp
     shell/weather.cpp
     shell/bluetooth_batteries.cpp
+    shell/network_monitor.cpp
     shell/logon_task.cpp
     ui/window_preview.cpp
     ui/widget_faces.cpp
     shell/notification_listener.cpp
+    shell/usb_volume.cpp
     render/bar_painter.cpp
     render/capture.cpp
     render/desktop_backdrop.cpp
@@ -94,4 +100,5 @@ endif()
 target_include_directories(atrium_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(atrium_core PRIVATE
     windowsapp d3d11 dxgi dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32
-    dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof wlanapi windowscodecs winhttp setupapi taskschd)
+    dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof wlanapi windowscodecs winhttp setupapi taskschd
+    iphlpapi advapi32)

@@ -1,12 +1,16 @@
 #include "ui/desktop_widgets.h"
 
+#include "localization.h"
+
 #include "clock.h"
 #include "log.h"
 #include "motion.h"
 #include "settings.h"
+#include "shell/file_box_watch.h"
 
 #include <dwmapi.h>
 #include <imm.h>
+#include <ole2.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -20,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <string.h>
 #include <thread>
 
 #pragma comment(lib, "dwmapi.lib")
@@ -42,6 +47,9 @@ constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2; // a burst of window events, one 
 constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;   // lParam PhotoRead*: a photo was read
 constexpr UINT WM_WIDGET_WEATHER = WM_APP + 4; // a new forecast (WeatherSource::Latest)
 constexpr UINT WM_WIDGET_BLUETOOTH = WM_APP + 5; // the Bluetooth batteries changed (BluetoothBatteries::Latest)
+constexpr UINT WM_WIDGET_FILES = WM_APP + 6;      // lParam FileRead*: a file box's folder was read
+constexpr UINT WM_WIDGET_WATCH = WM_APP + 7;      // a watched folder changed
+constexpr ULONGLONG kFilesMs = 1500;              // the least time between two reads of one box
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
 
@@ -52,7 +60,8 @@ struct KindName {
 const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},     {WidgetKind::Calendar, L"calendar"},   {WidgetKind::Battery, L"battery"},
                            {WidgetKind::Digital, L"digital"}, {WidgetKind::System, L"system"},       {WidgetKind::Notes, L"notes"},
                            {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"},  {WidgetKind::Weather, L"weather"},
-                           {WidgetKind::Bluetooth, L"bluetooth"}};
+                           {WidgetKind::Bluetooth, L"bluetooth"}, {WidgetKind::Network, L"network"},
+                           {WidgetKind::FileBox, L"filebox"}};
 
 const wchar_t* NameOf(WidgetKind k)
 {
@@ -160,6 +169,38 @@ void ListPhotos(const std::wstring& dir, std::vector<std::wstring>& out, int dep
     FindClose(h);
 }
 
+// What a folder holds: its subfolders then its files, each kind by name, hidden and system items
+// left out. `limit` caps how many are listed (a folder with thousands shows its first ones).
+void ListFiles(const std::wstring& dir, std::vector<FileEntry>& out, size_t limit)
+{
+    out.clear();
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    std::vector<FileEntry> folders, files;
+    do {
+        std::wstring name = fd.cFileName;
+        if (name == L"." || name == L".." || (fd.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)))
+            continue;
+        FileEntry f;
+        f.name = name;
+        f.path = dir + L"\\" + name;
+        f.folder = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        (f.folder ? folders : files).push_back(std::move(f));
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    auto byName = [](const FileEntry& a, const FileEntry& b) { return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0; };
+    std::sort(folders.begin(), folders.end(), byName);
+    std::sort(files.begin(), files.end(), byName);
+    out = std::move(folders);
+    for (FileEntry& f : files) {
+        if (out.size() >= limit)
+            break;
+        out.push_back(std::move(f));
+    }
+}
+
 // A photo cropped to fill w x h px (centred) and turned upright, premultiplied BGRA.
 IconImage ReadPhoto(const std::wstring& path, UINT w, UINT h)
 {
@@ -235,6 +276,12 @@ struct DesktopWidgets::Widget {
     std::vector<WidgetHit> hits; // of the last paint
     ULONGLONG photoAt = 0;       // when the photo was last changed
     unsigned photoGen = 0;       // the photo being read
+    // A file box: the thread that follows its folder, the drop target on its window, and how the
+    // last read is recognised.
+    std::unique_ptr<FileBoxWatch> watch;
+    winrt::com_ptr<IDropTarget> drop;
+    ULONGLONG filesAt = 0;
+    unsigned fileGen = 0;
 };
 
 namespace {
@@ -243,6 +290,14 @@ struct PhotoRead {
     unsigned gen;
     std::wstring path;
     IconImage image;
+};
+
+// A file box's folder, read on a worker thread: its entries, each with its icon already decoded.
+struct FileRead {
+    void* widget;
+    unsigned gen;
+    std::wstring folder;
+    std::vector<FileEntry> files;
 };
 } // namespace
 
@@ -262,6 +317,8 @@ DesktopWidgets::DesktopWidgets(HINSTANCE instance) : instance_(instance)
     weather_ = std::make_unique<WeatherSource>(host_, WM_WIDGET_WEATHER);
     world_.weather = weather_->Latest(); // the last one, until the first fetch
     bluetooth_ = std::make_unique<BluetoothBatteries>(host_, WM_WIDGET_BLUETOOTH);
+    network_ = std::make_unique<NetworkMonitor>();
+    world_.network = network_.get();
 }
 
 void DesktopWidgets::SetMaterial(WidgetMaterial material)
@@ -276,11 +333,24 @@ void DesktopWidgets::SetMaterial(WidgetMaterial material)
         }
 }
 
+void DesktopWidgets::ReloadLanguage()
+{
+    if (weather_)
+        weather_->Refresh();
+    for (auto& w : widgets_)
+        if (w->surface)
+            w->surface->Invalidate();
+}
+
 DesktopWidgets::~DesktopWidgets()
 {
     SetEnabled(false);
     if (host_)
         DestroyWindow(host_);
+    if (oleReady_) {
+        OleUninitialize();
+        oleReady_ = false;
+    }
     g_widgets = nullptr;
 }
 
@@ -315,6 +385,7 @@ void DesktopWidgets::SetEnabled(bool on)
         KillTimer(host_, kSafetyTimer);
         weather_->SetActive(false);
         bluetooth_->SetActive(false);
+        network_->SetActive(false);
         KillTimer(host_, kCaretTimer);
         if (KillTimer(host_, kSaveTimer))
             Save(); // typing not saved yet
@@ -459,6 +530,11 @@ void DesktopWidgets::Load()
                 WidgetContent content;
                 content.text = e.GetNamedString(L"text", L"");
                 content.folder = e.GetNamedString(L"folder", L"");
+                content.autoFile = e.GetNamedBoolean(L"autoFile", false);
+                if (e.HasKey(L"rules") && e.GetNamedValue(L"rules").ValueType() == json::JsonValueType::Array)
+                    for (const auto& rv : e.GetNamedArray(L"rules"))
+                        if (rv.ValueType() == json::JsonValueType::String)
+                            content.rules.emplace_back(rv.GetString());
                 if (e.HasKey(L"cities") && e.GetNamedValue(L"cities").ValueType() == json::JsonValueType::Array)
                     for (const auto& cv : e.GetNamedArray(L"cities"))
                         if (cv.ValueType() == json::JsonValueType::String)
@@ -510,8 +586,18 @@ void DesktopWidgets::Save() const
             }
             e.SetNamedValue(L"items", items);
         }
-        if (w->kind == WidgetKind::Photos && !c.folder.empty())
+        if ((w->kind == WidgetKind::Photos || w->kind == WidgetKind::FileBox) && !c.folder.empty())
             e.SetNamedValue(L"folder", json::JsonValue::CreateStringValue(c.folder));
+        if (w->kind == WidgetKind::FileBox) {
+            if (!c.rules.empty()) {
+                json::JsonArray rules;
+                for (const std::wstring& ext : c.rules)
+                    rules.Append(json::JsonValue::CreateStringValue(ext));
+                e.SetNamedValue(L"rules", rules);
+            }
+            if (c.autoFile)
+                e.SetNamedValue(L"autoFile", json::JsonValue::CreateBooleanValue(true));
+        }
         if (!c.cities.empty()) {
             json::JsonArray cities;
             for (const std::wstring& city : c.cities)
@@ -564,14 +650,24 @@ void DesktopWidgets::Build()
         Place(w, false);
         if (w.kind == WidgetKind::Photos)
             LoadPhoto(w, true);
+        if (w.kind == WidgetKind::FileBox) {
+            AttachDrop(w);
+            WatchBox(w);
+            LoadFiles(w);
+        }
     }
 }
 
 void DesktopWidgets::Clear()
 {
-    for (auto& w : widgets_)
+    for (auto& w : widgets_) {
+        if (w->watch)
+            w->watch->Stop();
+        if (w->drop && w->surface)
+            RevokeDragDrop(w->surface->Hwnd());
         if (w->surface)
             w->surface->Hide(false);
+    }
     widgets_.clear();
 }
 
@@ -667,6 +763,11 @@ void DesktopWidgets::RemoveNow(Widget& w)
         return;
     std::unique_ptr<Widget> gone = std::move(*it);
     widgets_.erase(it);
+    // A box's thread and its drop target go before its window does.
+    if (gone->watch)
+        gone->watch->Stop();
+    if (gone->drop && gone->surface)
+        RevokeDragDrop(gone->surface->Hwnd());
     if (gone->surface)
         gone->surface->Hide(false);
     Save();
@@ -687,6 +788,8 @@ void DesktopWidgets::Resize(Widget& w, WidgetSize size)
     w.surface->Invalidate();
     if (w.kind == WidgetKind::Photos)
         LoadPhoto(w, false); // the same photo, cropped for the new size
+    if (w.kind == WidgetKind::FileBox)
+        LoadFiles(w); // the same folder, its icons read at the new size
     Save();
 }
 
@@ -904,6 +1007,32 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             wd->surface->Invalidate();
             return 0;
         }
+        case WM_WIDGET_FILES: {
+            std::unique_ptr<FileRead> read(reinterpret_cast<FileRead*>(l));
+            auto* wd = static_cast<Widget*>(read->widget);
+            if (!self->Has(wd) || read->gen != wd->fileGen || !wd->surface)
+                return 0; // removed, or a newer read is on its way
+            for (const FileEntry& f : wd->content.files)
+                if (!f.iconKey.empty())
+                    wd->surface->ForgetImage(f.iconKey);
+            wd->content.files = std::move(read->files);
+            // A shorter folder may leave the grid scrolled past its end.
+            const int cols = FileBoxCols(wd->size), rows = FileBoxRows(wd->size);
+            const int rows2 = std::max(1, (int(wd->content.files.size()) + cols - 1) / cols);
+            wd->content.scrollRow = std::clamp(wd->content.scrollRow, 0.f, float(std::max(0, rows2 - rows)));
+            wd->surface->Invalidate();
+            return 0;
+        }
+        case WM_WIDGET_WATCH: {
+            auto* wd = reinterpret_cast<Widget*>(l);
+            if (!self->Has(wd) || wd->kind != WidgetKind::FileBox || !wd->surface)
+                return 0; // the box went away while the change was in flight
+            // A burst of changes is one read: wait for the folder to settle first.
+            if (GetTickCount64() - wd->filesAt < kFilesMs)
+                return 0;
+            self->LoadFiles(*wd);
+            return 0;
+        }
         case WM_WIDGET_WEATHER:
             self->world_.weather = self->weather_->Latest();
             for (auto& wd : self->widgets_)
@@ -942,10 +1071,15 @@ void DesktopWidgets::Tick()
     weather_->SetActive(std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Weather; }));
     // The Bluetooth batteries are read while a Bluetooth widget is.
     bluetooth_->SetActive(std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Bluetooth; }));
+    // The link's rates and the minute of them behind them, once a second while a network widget is up.
+    const bool watching = std::any_of(widgets_.begin(), widgets_.end(), [](const auto& w) { return w->kind == WidgetKind::Network; });
+    network_->SetActive(watching);
+    if (watching)
+        network_->Sample();
     for (auto& w : widgets_) {
         if (!w->surface)
             continue;
-        if (w->kind == WidgetKind::Clock || minute || (sample && w->kind == WidgetKind::System))
+        if (w->kind == WidgetKind::Clock || minute || (sample && w->kind == WidgetKind::System) || (watching && w->kind == WidgetKind::Network))
             w->surface->Invalidate();
         if (w->kind == WidgetKind::Photos && w->photoAt && now - w->photoAt > kPhotoMs)
             LoadPhoto(*w, true);
@@ -990,7 +1124,7 @@ void DesktopWidgets::PickFolder(Widget& w)
     FILEOPENDIALOGOPTIONS o = 0;
     dialog->GetOptions(&o);
     dialog->SetOptions(o | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
-    dialog->SetTitle(L"选择照片文件夹");
+    dialog->SetTitle(Tr(L"选择照片文件夹"));
     Widget* wp = &w;
     winrt::com_ptr<IShellItem> item;
     PWSTR path = nullptr;
@@ -1039,6 +1173,223 @@ void DesktopWidgets::LoadPhoto(Widget& w, bool another)
     }).detach();
 }
 
+// ---- file boxes ---------------------------------------------------------------
+
+namespace {
+
+// The paths a CF_HDROP data object carries.
+std::vector<std::wstring> DroppedPaths(IDataObject* data)
+{
+    std::vector<std::wstring> paths;
+    FORMATETC fmt{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM stg{};
+    if (!data || FAILED(data->GetData(&fmt, &stg)))
+        return paths;
+    if (HDROP drop = static_cast<HDROP>(GlobalLock(stg.hGlobal))) {
+        const UINT n = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        for (UINT i = 0; i < n && i < 256; ++i) {
+            const UINT len = DragQueryFileW(drop, i, nullptr, 0);
+            std::wstring path(size_t(len) + 1, L'\0');
+            if (DragQueryFileW(drop, i, path.data(), len + 1))
+                paths.emplace_back(path.c_str());
+        }
+        GlobalUnlock(stg.hGlobal);
+    }
+    ReleaseStgMedium(&stg);
+    return paths;
+}
+
+std::wstring NameOfPath(const std::wstring& path)
+{
+    const size_t i = path.find_last_of(L"\\/");
+    return i == std::wstring::npos ? path : path.substr(i + 1);
+}
+
+// Moves or copies what was dropped into `folder` through the shell: it handles a folder tree, name
+// clashes and the undo record, and the user can undo the move from Explorer.
+bool TransferInto(const std::vector<std::wstring>& paths, const std::wstring& folder, bool copy)
+{
+    std::wstring from;
+    for (const std::wstring& p : paths) {
+        from += p;
+        from += L'\0';
+    }
+    if (from.empty())
+        return false;
+    from += L'\0';
+    std::wstring to = folder;
+    to += L'\0';
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = copy ? FO_COPY : FO_MOVE;
+    op.pFrom = from.c_str();
+    op.pTo = to.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR | FOF_RENAMEONCOLLISION | FOF_WANTNUKEWARNING;
+    const int rc = SHFileOperationW(&op);
+    if (rc != 0 || op.fAnyOperationsAborted) {
+        Log(L"files: could not %s into %s (%d)", copy ? L"copy" : L"move", folder.c_str(), rc);
+        return false;
+    }
+    return true;
+}
+
+// A box's window takes dropped files: Ctrl copies them, otherwise they move.
+class BoxDrop : public winrt::implements<BoxDrop, IDropTarget> {
+public:
+    BoxDrop(DesktopWidgets* owner, void* widget) : owner_(owner), widget_(widget) {}
+
+    HRESULT __stdcall DragEnter(IDataObject* data, DWORD keys, POINTL, DWORD* effect) override
+    {
+        const bool ok = !DroppedPaths(data).empty();
+        owner_->HoverWidget(widget_, ok);
+        if (effect)
+            *effect = ok ? EffectOf(keys) : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    HRESULT __stdcall DragOver(DWORD keys, POINTL, DWORD* effect) override
+    {
+        if (effect)
+            *effect = EffectOf(keys);
+        return S_OK;
+    }
+    HRESULT __stdcall DragLeave() override
+    {
+        owner_->HoverWidget(widget_, false);
+        return S_OK;
+    }
+    HRESULT __stdcall Drop(IDataObject* data, DWORD keys, POINTL, DWORD* effect) override
+    {
+        owner_->HoverWidget(widget_, false);
+        const std::vector<std::wstring> paths = DroppedPaths(data);
+        const bool copy = (keys & MK_CONTROL) != 0;
+        if (!paths.empty())
+            owner_->DropOnWidget(widget_, paths, copy);
+        if (effect)
+            *effect = paths.empty() ? DROPEFFECT_NONE : (copy ? DROPEFFECT_COPY : DROPEFFECT_MOVE);
+        return S_OK;
+    }
+
+private:
+    static DWORD EffectOf(DWORD keys) { return (keys & MK_CONTROL) ? DROPEFFECT_COPY : DROPEFFECT_MOVE; }
+
+    DesktopWidgets* owner_;
+    void* widget_;
+};
+
+} // namespace
+
+void DesktopWidgets::AttachDrop(Widget& w)
+{
+    if (!w.surface || w.drop)
+        return;
+    // The drop target needs OLE on this (STA) thread; the first box turns it on and the last one
+    // turns it off (the destructor).
+    if (!oleReady_)
+        oleReady_ = SUCCEEDED(OleInitialize(nullptr));
+    if (!oleReady_) {
+        Log(L"files: OLE is unavailable; dropping onto a box is off");
+        return;
+    }
+    w.drop = winrt::make<BoxDrop>(this, &w);
+    if (FAILED(RegisterDragDrop(w.surface->Hwnd(), w.drop.get())))
+        Log(L"files: RegisterDragDrop failed; dropping onto a box is off");
+}
+
+void DesktopWidgets::HoverWidget(void* widget, bool on)
+{
+    auto* w = static_cast<Widget*>(widget);
+    if (!Has(w) || w->content.dropHover == on)
+        return;
+    w->content.dropHover = on;
+    if (w->surface)
+        w->surface->Invalidate();
+}
+
+void DesktopWidgets::DropOnWidget(void* widget, const std::vector<std::wstring>& paths, bool copy)
+{
+    auto* w = static_cast<Widget*>(widget);
+    if (Has(w))
+        DropInto(*w, paths, copy);
+}
+
+void DesktopWidgets::DropInto(Widget& w, const std::vector<std::wstring>& paths, bool copy)
+{
+    if (w.content.folder.empty())
+        return;
+    std::vector<std::wstring> moving;
+    for (const std::wstring& p : paths)
+        if (!NameOfPath(p).empty() && _wcsicmp(p.c_str(), w.content.folder.c_str()) != 0)
+            moving.push_back(p);
+    if (moving.empty() || !TransferInto(moving, w.content.folder, copy))
+        return;
+    Log(L"files: %s %d item(s) into %s", copy ? L"copied" : L"moved", int(moving.size()), w.content.folder.c_str());
+    LoadFiles(w);
+}
+
+void DesktopWidgets::WatchBox(Widget& w)
+{
+    if (!w.watch)
+        w.watch = std::make_unique<FileBoxWatch>(host_, WM_WIDGET_WATCH, &w);
+    w.watch->SetFolder(w.content.folder);
+}
+
+// The folder's entries and their icons, read on a worker thread; a newer read replaces an older.
+void DesktopWidgets::LoadFiles(Widget& w)
+{
+    if (!w.surface)
+        return;
+    const std::wstring folder = w.content.folder;
+    if (folder.empty())
+        return;
+    const float s = Scale();
+    const int px = std::max(24, int(std::lround(48 * s)));
+    const unsigned gen = w.fileGen = ++fileGen_;
+    w.filesAt = GetTickCount64();
+    HWND host = host_;
+    void* widget = &w;
+    std::thread([=] {
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        auto* read = new FileRead{widget, gen, folder, {}};
+        ListFiles(folder, read->files, 512);
+        for (size_t i = 0; i < read->files.size(); ++i) {
+            FileEntry& f = read->files[i];
+            IconImage img;
+            if (LoadShellImage(f.path, px, img) && !img.empty()) {
+                f.icon = std::make_shared<const IconImage>(std::move(img));
+                f.iconKey = L"box:" + std::to_wstring(gen) + L":" + std::to_wstring(i);
+            }
+        }
+        CoUninitialize();
+        if (!PostMessageW(host, WM_WIDGET_FILES, 0, reinterpret_cast<LPARAM>(read)))
+            delete read;
+    }).detach();
+}
+
+void DesktopWidgets::PickBoxFolder(Widget& w)
+{
+    winrt::com_ptr<IFileOpenDialog> dialog;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dialog.put()))))
+        return;
+    FILEOPENDIALOGOPTIONS o = 0;
+    dialog->GetOptions(&o);
+    dialog->SetOptions(o | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    dialog->SetTitle(L"选择这个盒子显示的文件夹");
+    Widget* wp = &w;
+    winrt::com_ptr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->Show(host_)) || FAILED(dialog->GetResult(item.put())) || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        return;
+    const std::wstring chosen = path;
+    CoTaskMemFree(path);
+    if (!Has(wp))
+        return; // the dialog ran its own message loop
+    wp->content.folder = chosen;
+    wp->content.files.clear();
+    wp->content.scrollRow = 0;
+    Save();
+    WatchBox(*wp);
+    LoadFiles(*wp);
+}
+
 // ---- input -------------------------------------------------------------------
 
 bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r)
@@ -1052,6 +1403,16 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
         return false;
     }
     case WM_MOUSEWHEEL:
+        if (w.kind == WidgetKind::FileBox) {
+            // A grid scrolls a row at a time, and only when there is another row to show.
+            const int cols = FileBoxCols(w.size), rows = FileBoxRows(w.size);
+            const int total = std::max(1, (int(w.content.files.size()) + cols - 1) / cols);
+            const float most = float(std::max(0, total - rows));
+            const float step = GET_WHEEL_DELTA_WPARAM(wp) > 0 ? -1.f : 1.f;
+            w.content.scrollRow = std::clamp(w.content.scrollRow + step, 0.f, most);
+            w.surface->Invalidate();
+            return true;
+        }
         if (w.kind != WidgetKind::Reminders)
             return false;
         w.content.scroll = std::clamp(w.content.scroll - float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA * kReminderRow * 3,
@@ -1218,11 +1579,21 @@ void DesktopWidgets::Activate(Widget& w)
     case WidgetKind::Bluetooth:
         open = L"ms-settings:bluetooth"; // Bluetooth & devices: each device with its battery
         break;
+    case WidgetKind::Network:
+        open = L"ms-settings:network-status"; // 网络和 Internet: the adapters, their speeds and their usage
+        break;
     case WidgetKind::Photos:
         if (w.content.photo.empty())
             PickFolder(w);
         else
             open = w.content.photo;
+        break;
+    case WidgetKind::FileBox:
+        // A box with a folder opens it; one without asks for one.
+        if (w.content.folder.empty())
+            PickBoxFolder(w);
+        else
+            open = w.content.folder;
         break;
     case WidgetKind::Weather:
         // Windows' weather app, else its web page.
@@ -1263,6 +1634,16 @@ void DesktopWidgets::Click(Widget& w, POINT content)
         w.surface->Invalidate();
     } else if (id.rfind(L"item:", 0) == 0) {
         StartEdit(w, _wtoi(id.c_str() + 5));
+    } else if (id.rfind(L"file:", 0) == 0) {
+        // A file or a subfolder of the box: the shell opens it the way a double click would.
+        const size_t i = size_t(_wtoi(id.c_str() + 5));
+        if (i < c.files.size()) {
+            const std::wstring path = c.files[i].path;
+            if (INT_PTR(ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32)
+                Log(L"files: opened %s", path.c_str());
+            else
+                Log(L"files: could not open %s", path.c_str());
+        }
     } else if (id == L"add") {
         EndEdit(w);
         c.items.push_back({});
@@ -1447,17 +1828,17 @@ void DesktopWidgets::PickCity(Widget& w, POINT at)
     if (!menu)
         return;
     const std::vector<std::wstring> cities = WidgetCities(w.kind, w.content.cities);
-    std::vector<MenuEntry> slots{{L"更改哪个城市", 0, false, false, true}};
+    std::vector<MenuEntry> slots{{Tr(L"更改哪个城市"), 0, false, false, true}};
     for (size_t i = 0; i < cities.size(); ++i)
-        slots.push_back({cities[i], int(i) + 1});
+        slots.push_back({Tr(cities[i].c_str()), int(i) + 1});
     Widget* target = &w;
     menu->Open(std::move(slots), at, MenuPlace::Below, [this, target, at, cities](int slot) {
         if (slot <= 0 || !Has(target))
             return;
-        std::vector<MenuEntry> list{{cities[size_t(slot - 1)] + L" 换成", 0, false, false, true}};
+        std::vector<MenuEntry> list{{TrFormat(L"把「%s」换成", Tr(cities[size_t(slot - 1)].c_str())), 0, false, false, true}};
         const auto& all = WorldCities();
         for (size_t i = 0; i < all.size(); ++i)
-            list.push_back({all[i].name, int(i) + 1, cities[size_t(slot - 1)] == all[i].name});
+            list.push_back({Tr(all[i].name), int(i) + 1, cities[size_t(slot - 1)] == all[i].name});
         menu->Open(std::move(list), at, MenuPlace::Below, [this, target, slot, cities](int pick) {
             if (pick <= 0 || !Has(target))
                 return;
@@ -1476,29 +1857,35 @@ void DesktopWidgets::Menu(Widget& w)
 {
     if (!menu)
         return;
-    enum { kSmall = 1, kMedium, kLarge, kRemove, kFolder, kNextPhoto, kClearDone, kAdd, kCities };
+    enum { kSmall = 1, kMedium, kLarge, kRemove, kFolder, kNextPhoto, kClearDone, kAdd, kCities, kOpenFolder, kRefresh };
     std::vector<MenuEntry> entries;
     auto size = [&](int id, WidgetSize s, const wchar_t* label) { entries.push_back({label, id, w.size == s, !WidgetSupports(w.kind, s)}); };
-    size(kSmall, WidgetSize::Small, L"小");
-    size(kMedium, WidgetSize::Medium, L"中");
-    size(kLarge, WidgetSize::Large, L"大");
+    size(kSmall, WidgetSize::Small, Tr(L"小"));
+    size(kMedium, WidgetSize::Medium, Tr(L"中"));
+    size(kLarge, WidgetSize::Large, Tr(L"大"));
     entries.push_back({});
     if (w.kind == WidgetKind::Photos) {
-        entries.push_back({L"选择照片文件夹…", kFolder});
-        entries.push_back({L"换一张", kNextPhoto});
+        entries.push_back({Tr(L"选择照片文件夹…"), kFolder});
+        entries.push_back({Tr(L"换一张"), kNextPhoto});
+        entries.push_back({});
+    }
+    if (w.kind == WidgetKind::FileBox) {
+        entries.push_back({L"选择文件夹…", kFolder});
+        entries.push_back({L"打开文件夹", kOpenFolder, false, w.content.folder.empty()});
+        entries.push_back({L"刷新", kRefresh});
         entries.push_back({});
     }
     if (HasWorldClocks(w.kind, w.size)) {
-        entries.push_back({L"更改城市…", kCities});
+        entries.push_back({Tr(L"更改城市…"), kCities});
         entries.push_back({});
     }
     if (w.kind == WidgetKind::Reminders) {
         bool anyDone = std::any_of(w.content.items.begin(), w.content.items.end(), [](const Reminder& r) { return r.done; });
-        entries.push_back({L"清除已完成", kClearDone, false, !anyDone});
+        entries.push_back({Tr(L"清除已完成"), kClearDone, false, !anyDone});
         entries.push_back({});
     }
-    entries.push_back({L"移除小组件", kRemove});
-    entries.push_back({L"添加小组件…", kAdd});
+    entries.push_back({Tr(L"移除小组件"), kRemove});
+    entries.push_back({Tr(L"添加小组件…"), kAdd});
     POINT p;
     GetCursorPos(&p);
     Widget* target = &w;
@@ -1518,7 +1905,17 @@ void DesktopWidgets::Menu(Widget& w)
             Resize(w, cmd == kSmall ? WidgetSize::Small : cmd == kMedium ? WidgetSize::Medium : WidgetSize::Large);
             break;
         case kFolder:
-            PickFolder(w);
+            if (w.kind == WidgetKind::FileBox)
+                PickBoxFolder(w);
+            else
+                PickFolder(w);
+            break;
+        case kOpenFolder:
+            if (!w.content.folder.empty())
+                ShellExecuteW(nullptr, L"open", w.content.folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case kRefresh:
+            LoadFiles(w);
             break;
         case kCities:
             PickCity(w, p);
