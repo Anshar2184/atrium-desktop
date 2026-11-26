@@ -603,7 +603,7 @@ bool GlassRenderer::Present(const std::vector<GlassParams>& shapes, const std::f
 bool GlassRenderer::PresentSpan(std::span<const GlassParams> shapes, const std::function<void(ID2D1DeviceContext2*)>& overlay, bool backdropDirty)
 {
     lastPresentBusy_ = false;
-    const bool wasPresented = hasPresented_;
+    bool recordPresented = false;
     auto* ctx = gpu_.context.get();
     EnsureBackBufferRtv();
     NormalizeShapes(shapes);
@@ -619,8 +619,7 @@ bool GlassRenderer::PresentSpan(std::span<const GlassParams> shapes, const std::
             RenderGlassShapes(glassCacheRtv_.get(), normParams_);
             cachedGlassParams_.assign(normParams_.begin(), normParams_.end());
             glassCacheValid_ = true;
-            ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
-            hasPresented_ = hasBackdrop_;
+            recordPresented = true;
         }
         winrt::com_ptr<ID3D11Resource> back;
         rtv_->GetResource(back.put());
@@ -631,23 +630,20 @@ bool GlassRenderer::PresentSpan(std::span<const GlassParams> shapes, const std::
         PrepareBackdrop(); // a present can need the newest glass before its comparison completes
         RenderGlassShapes(rtv_.get(), normParams_);
         lastGlassDrawn_ = true;
-        ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
-        hasPresented_ = hasBackdrop_;
+        recordPresented = true;
     }
     const UINT presentFlags = sync_ == 0 ? DXGI_PRESENT_DO_NOT_WAIT : 0;
     HRESULT hr = swap_->Present(sync_, presentFlags);
     if (presentFlags != 0 && hr == DXGI_ERROR_INVALID_CALL)
         hr = swap_->Present(sync_, 0);
-    if (SUCCEEDED(hr)) {
-        ready_ = false;
+    const PresentStateTransition next = ResolvePresentTransition(hr, hasPresented_, hasBackdrop_, recordPresented);
+    ready_ = next.ready;
+    hasPresented_ = next.hasPresented;
+    lastPresentBusy_ = next.lastPresentBusy;
+    if (next.commitPresentedBackdrop)
+        ctx->CopySubresourceRegion(presented_.get(), 0, 0, 0, 0, roi_.get(), 0, nullptr);
+    if (SUCCEEDED(hr) || hr == DXGI_ERROR_WAS_STILL_DRAWING)
         return true;
-    }
-    if (hr == DXGI_ERROR_WAS_STILL_DRAWING) {
-        hasPresented_ = wasPresented;
-        lastPresentBusy_ = true;
-        ready_ = false;
-        return true;
-    }
     Log(L"glass: swap chain Present failed: 0x%08X", static_cast<unsigned>(hr));
     return false;
 }

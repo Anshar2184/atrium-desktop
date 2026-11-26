@@ -62,6 +62,22 @@ struct Readback {
     float RegionLuma(float x0, float y0, float x1, float y1) const;
 };
 
+struct PresentStateTransition {
+    bool ready = false;
+    bool hasPresented = false;
+    bool lastPresentBusy = false;
+    bool commitPresentedBackdrop = false;
+};
+
+inline PresentStateTransition ResolvePresentTransition(HRESULT hr, bool hadPresented, bool hasBackdrop, bool recordPresented)
+{
+    if (SUCCEEDED(hr))
+        return {false, recordPresented ? hasBackdrop : hadPresented, false, recordPresented};
+    if (hr == DXGI_ERROR_WAS_STILL_DRAWING)
+        return {true, hadPresented, true, false};
+    return {false, hadPresented, false, false};
+}
+
 class GlassRenderer {
 public:
     static constexpr int kPad = 64; // backdrop margin for refraction and blur
