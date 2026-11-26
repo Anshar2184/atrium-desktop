@@ -452,8 +452,8 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t, float alpha
     float wl0 = 0, wh0 = 0, wl1 = 0, wh1 = 0;
     sides(along(0.f), wl0, wh0);
     sides(along(1.f), wl1, wh1);
-    const bool whole = std::abs(wl0 - b0) < 0.75f && std::abs(wh0 - b1) < 0.75f && std::abs(wl1 - b0) < 0.75f &&
-                       std::abs(wh1 - b1) < 0.75f && along(1.f) - along(0.f) > 0.97f * (a1 - a0);
+    const bool whole = std::abs(wl0 - b0) < 0.75f && std::abs(wh0 - b1) < 0.75f && std::abs(wl1 - b0) < 0.75f && std::abs(wh1 - b1) < 0.75f &&
+                       along(1.f) - along(0.f) > 0.97f * (a1 - a0);
     const int rows = whole ? 1 : kRows;
     const float hair = rows > 1 ? 0.5f : 0.f; // a hair over the next: no seams
     for (int i = 0; i < rows; ++i) {
