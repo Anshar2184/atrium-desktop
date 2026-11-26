@@ -1,6 +1,7 @@
 #include "shell/app_catalog.h"
 
 #include "log.h"
+#include "shell/app_catalog_rules.h"
 #include "shell/shell_icon.h"
 #include "shell/start_layout.h"
 
@@ -24,12 +25,14 @@ namespace atrium {
 
 namespace {
 
-std::wstring Fold(const std::wstring& s)
+std::wstring Fold(const std::wstring& s) { return FoldCatalogText(s); }
+
+void SortCatalogApps(std::vector<CatalogApp>& apps)
 {
-    std::wstring out(s);
-    if (!out.empty())
-        LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE, s.c_str(), int(s.size()), out.data(), int(out.size()), nullptr, nullptr, 0);
-    return out;
+    std::ranges::sort(apps, [](const CatalogApp& a, const CatalogApp& b) {
+        return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE | SORT_DIGITSASNUMBERS, a.name.c_str(), int(a.name.size()), b.name.c_str(),
+                               int(b.name.size()), nullptr, nullptr, 0) == CSTR_LESS_THAN;
+    });
 }
 
 std::wstring PropString(IShellItem2* item, const PROPERTYKEY& key)
@@ -72,21 +75,14 @@ std::vector<CatalogApp> Enumerate()
         if (!app.name.empty() && !app.id.empty())
             apps.push_back(std::move(app));
     }
-    std::ranges::sort(apps, [](const CatalogApp& a, const CatalogApp& b) {
-        return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE | SORT_DIGITSASNUMBERS, a.name.c_str(), int(a.name.size()), b.name.c_str(),
-                               int(b.name.size()), nullptr, nullptr, 0) == CSTR_LESS_THAN;
-    });
+    SortCatalogApps(apps);
     return apps;
 }
 
-bool IsPath(const std::wstring& id) { return id.size() > 2 && id[1] == L':' && (id[2] == L'\\' || id[2] == L'/'); }
+bool IsPath(const std::wstring& id) { return IsCatalogDrivePath(id); }
 
 std::wstring ShellTarget(const std::wstring& id) { return IsPath(id) ? id : (id.starts_with(L"::{") ? L"shell:" : L"shell:AppsFolder\\") + id; }
 
-constexpr const wchar_t* kMakers[] = {
-    L"nvidia",  L"intel", L"realtek", L"dolby",      L"lenovo",    L"dell",        L"hp inc",
-    L"hewlett", L"asus",  L"acer",    L"micro-star", L"synaptics", L"waves audio", L"elan",
-};
 constexpr const wchar_t* kHelperPackages[] = {
     L"microsoft.windowsfeedbackhub_",
     L"microsoft.gethelp_",
@@ -98,11 +94,6 @@ constexpr const wchar_t* kHelperPackages[] = {
     L"microsoft.xboxgamingoverlay_",
     L"microsoftwindows.client.",
 };
-
-bool ByMaker(const std::wstring& folded)
-{
-    return std::ranges::any_of(kMakers, [&](const wchar_t* m) { return folded.find(m) != std::wstring::npos; });
-}
 
 int64_t Ticks(const FILETIME& t) { return int64_t((uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime); }
 
@@ -127,7 +118,7 @@ std::map<std::wstring, PackageInfo> CollectInstalledPackages()
             const auto id = package.Id();
             const std::wstring publisher = Fold(std::wstring(id.Publisher()));
             const std::wstring family = Fold(std::wstring(id.FamilyName()));
-            const bool system = package.SignatureKind() == Wam::PackageSignatureKind::System || ByMaker(publisher) ||
+            const bool system = package.SignatureKind() == Wam::PackageSignatureKind::System || CatalogByMaker(publisher) ||
                                 std::ranges::any_of(kHelperPackages, [&](const wchar_t* p) { return family.starts_with(p); });
             packages[family] = {package.InstalledDate().time_since_epoch().count(), system};
         }
@@ -142,6 +133,7 @@ struct ShortcutIndex {
     std::map<std::wstring, int64_t> byName;
     std::set<std::wstring> systemTargets;
     std::set<std::wstring> systemNames;
+    std::vector<CatalogApp> shortcuts;
 };
 
 void RecordEarliest(std::map<std::wstring, int64_t>& m, const std::wstring& key, int64_t t)
@@ -176,7 +168,8 @@ void IndexProgramsFolderLinks(const KNOWNFOLDERID& id, ShortcutIndex& index)
     for (const auto& [_, link] : links) {
         const int64_t t = Created(link);
         const std::wstring file = link.substr(link.find_last_of(L'\\') + 1);
-        const std::wstring name = Fold(file.substr(0, file.size() - 4));
+        const std::wstring displayName = file.substr(0, file.size() - 4);
+        const std::wstring name = Fold(displayName);
         const std::wstring within = Fold(link.substr(std::min(link.size(), programs.size() + 1)));
         const bool inSystem = IsSystemShortcutRelativePath(within);
         RecordEarliest(index.byName, name, t);
@@ -186,10 +179,23 @@ void IndexProgramsFolderLinks(const KNOWNFOLDERID& id, ShortcutIndex& index)
         wchar_t target[MAX_PATH] = {};
         if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(shell.put()))) &&
             SUCCEEDED(shell.as<IPersistFile>()->Load(link.c_str(), STGM_READ)) && SUCCEEDED(shell->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH))) {
-            const std::wstring folded = Fold(ExpandKnownEnvFolders(target));
+            const std::wstring expandedTarget = ExpandKnownEnvFolders(target);
+            const std::wstring folded = Fold(expandedTarget);
             RecordEarliest(index.byTarget, folded, t);
             if (inSystem)
                 index.systemTargets.insert(folded);
+            wchar_t args[1024] = {};
+            if (FAILED(shell->GetArguments(args, static_cast<int>(std::size(args)))))
+                args[0] = L'\0';
+            std::wstring aumid;
+            if (auto props = shell.try_as<IPropertyStore>()) {
+                PROPVARIANT pv;
+                PropVariantInit(&pv);
+                if (SUCCEEDED(props->GetValue(PKEY_AppUserModel_ID, &pv)) && pv.vt == VT_LPWSTR && pv.pwszVal)
+                    aumid = pv.pwszVal;
+                PropVariantClear(&pv);
+            }
+            index.shortcuts.push_back(CatalogApp{displayName, link, aumid, expandedTarget, args, t, inSystem});
         }
     }
 }
@@ -222,7 +228,7 @@ void StampApp(CatalogApp& app, const std::map<std::wstring, PackageInfo>& packag
     // File Explorer is Windows' own and everyday, as the Finder.
     app.system = (target.starts_with(windowsDir) && exe != L"explorer.exe") || index.systemTargets.contains(target) ||
                  index.systemNames.contains(Fold(app.name)) || (id.starts_with(L"microsoft.windows.") && id != L"microsoft.windows.explorer") ||
-                 id.starts_with(L"::{") || ByMaker(ProgramFilesVendor(target));
+                 id.starts_with(L"::{") || CatalogByMaker(ProgramFilesVendor(target));
     if (IsPath(app.id) && Fold(app.id).ends_with(L".lnk")) {
         app.installed = Created(app.id);
         return;
@@ -246,6 +252,8 @@ void StampInstalled(std::vector<CatalogApp>& apps)
     ShortcutIndex index;
     IndexProgramsFolderLinks(FOLDERID_CommonPrograms, index);
     IndexProgramsFolderLinks(FOLDERID_Programs, index);
+    if (MergeStartMenuShortcuts(apps, index.shortcuts, &AppCatalog::IsLaunchable))
+        SortCatalogApps(apps);
     for (CatalogApp& app : apps)
         StampApp(app, packages, index, windowsDir);
 }
@@ -260,10 +268,8 @@ bool AppCatalog::IsLaunchable(const CatalogApp& app)
     for (const wchar_t* ext : {L".url", L".txt", L".pdf", L".chm", L".htm", L".html", L".md", L".rtf", L".doc", L".docx", L".website"})
         if (id.ends_with(ext))
             return false;
-    for (const wchar_t* word :
-         {L"readme", L"read me", L"help", L"帮助", L"manual", L"手册", L"license", L"许可", L"website", L"官网", L"官方网站", L"release notes"})
-        if (name.find(word) != std::wstring::npos)
-            return false;
+    if (CatalogNameExcluded(name))
+        return false;
     return !NotAnAppShortcut(app);
 }
 

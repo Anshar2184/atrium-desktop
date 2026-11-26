@@ -26,6 +26,7 @@
 #include "ui/stage_merge.h"
 #include "ui/stage_scroll.h"
 #include "ui/stage_open.h"
+#include "ui/stage_watch.h"
 #include "stage_excluded.h"
 #include "ui/surface.h"
 #include "ui/window_snapshot.h"
@@ -274,6 +275,7 @@ private:
     bool Covered();                              // a window on the stage is where the strip goes
     RECT Zone() const;                           // where the strip goes, to the screen's edge, px
     RECT WorkArea() const;
+    MONITORINFO MonitorInfo() const;
     D2D1_RECT_F Box(const Entry& e) const { return StageBoxRect(size_.width, e.y, onRight_); } // the windows' room, content DIP
     int EntryAt(POINT pt) const;
     std::shared_ptr<const WindowPicture> PictureOf(HWND window, const std::wstring& app, std::wstring& cacheKey);
@@ -365,8 +367,7 @@ private:
     double revealStart_ = 0;
     bool peek_ = false;                // shown over the stage because the pointer asked
     ULONGLONG edgeSince_ = 0, leftAt_ = 0;
-    bool onDesktop_ = false;           // the desktop was in front at the last look
-    ULONGLONG desktopSince_ = 0;       // since when the desktop has been in front (0: it is not)
+    StageDesktopStowState desktopStow_{};
     bool covered_ = false;
     ULONGLONG coveredAt_ = 0;
     std::mutex actionLock_;

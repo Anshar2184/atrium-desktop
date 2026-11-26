@@ -331,14 +331,19 @@ void StageManager::SyncMoveHook()
 
 void StageManager::SetMonitor(HMONITOR monitor, bool refresh)
 {
-    if (monitor == monitor_ && !refresh)
+    const bool changed = monitor != monitor_;
+    if (!changed && !refresh)
         return;
     // Release windows on the old display before managing another one.
-    if (monitor != monitor_ && monitor_)
+    if (changed && monitor_)
         RestoreAll();
     monitor_ = monitor;
     coveredAt_ = 0;
+    if (changed && enabled_)
+        Update(tasks_.Snapshot(true));
     Rebuild();
+    if (changed && enabled_)
+        Watch();
 }
 
 void StageManager::ProcessOpenIntent()
@@ -525,8 +530,7 @@ void StageManager::Park(HWND window, const std::wstring& key)
 // letting clicks through while nothing flies.
 void StageManager::Launch()
 {
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    const MONITORINFO mi = MonitorInfo();
     KillTimer(flight_.Hwnd(), kFlightTimer);
     SetWindowRgn(flight_.Hwnd(), nullptr, FALSE);
     if (!flight_.Visible())
@@ -981,12 +985,19 @@ void StageManager::MoveBeside(HWND window)
 
 // ---- the strip ---------------------------------------------------------------------------------
 
-RECT StageManager::WorkArea() const
+MONITORINFO StageManager::MonitorInfo() const
 {
     MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    return mi.rcWork;
+    if (monitor_ && GetMonitorInfoW(monitor_, &mi))
+        return mi;
+    if (const HMONITOR primary = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY); primary && GetMonitorInfoW(primary, &mi))
+        return mi;
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &mi.rcWork, 0);
+    mi.rcMonitor = mi.rcWork;
+    return mi;
 }
+
+RECT StageManager::WorkArea() const { return MonitorInfo().rcWork; }
 
 int StageManager::Capacity() const
 {
@@ -1210,8 +1221,7 @@ void StageManager::UpdateRegion(bool moving)
 
 RECT StageManager::Zone() const
 {
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    const MONITORINFO mi = MonitorInfo();
     return onRight_ ? RECT{rect_.left, rect_.top, mi.rcMonitor.right, rect_.bottom} : RECT{mi.rcMonitor.left, rect_.top, rect_.right, rect_.bottom};
 }
 
@@ -1272,33 +1282,28 @@ bool StageManager::NeedsAdopt(ULONGLONG now) const
 // and goes once the pointer has left it.
 void StageManager::Watch()
 {
-    // A click on the desktop clears the stage: its windows go to the strip, each on a card of its own.
+    const ULONGLONG now = GetTickCount64();
+    POINT p{};
+    GetCursorPos(&p);
+    const bool anyButtonDown = ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) & 0x8000) != 0;
+    const bool dragging = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
+    // A click on the desktop clears the stage, while pressing to drag a desktop file must not.
     if (enabled_) {
         HWND fg = GetForegroundWindow();
         wchar_t cls[16] = {};
         const bool atDesktop = fg && GetClassNameW(fg, cls, 16) && (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"));
-        // A full-screen game losing the top, or changing its screen mode, drops to the desktop for
-        // a moment: only the desktop staying in front is a click on it.
-        const ULONGLONG at = GetTickCount64();
-        if (!atDesktop)
-            desktopSince_ = 0;
-        else if (!desktopSince_)
-            desktopSince_ = at;
-        const bool desktop = atDesktop && at - desktopSince_ >= kDesktopMs;
-        // A window minimized on the stage goes to the strip even when nothing else told of it: its
-        // minimize can come before it is down, and the task model may see no change (its picture
-        // flies instead of a minimize animation, so missed, it would just vanish).
-        if (NeedsAdopt(at) && AdoptMinimized())
+        // A window minimized on the stage goes to the strip even when nothing else told of it.
+        if (NeedsAdopt(now) && AdoptMinimized())
             Rebuild();
-        // A window just minimized hands the foreground to the desktop: it goes to the strip first.
-        if (desktop && !onDesktop_ && AdoptMinimized())
-            Rebuild();
-        if (desktop && !onDesktop_ && !stage_.empty()) {
-            pending_.clear();
-            Stage(Set{}, false, nullptr, false);
-            Rebuild();
+        if (StepStageDesktopStow(desktopStow_, atDesktop, anyButtonDown, p, GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG), now, kDesktopMs)) {
+            if (AdoptMinimized())
+                Rebuild();
+            if (!stage_.empty()) {
+                pending_.clear();
+                Stage(Set{}, false, nullptr, false);
+                Rebuild();
+            }
         }
-        onDesktop_ = desktop;
         KeepPicture();
     }
     if (!enabled_ || entries_.empty()) {
@@ -1309,29 +1314,24 @@ void StageManager::Watch()
             Hide();
         return;
     }
-    const ULONGLONG now = GetTickCount64();
-    POINT p{};
-    GetCursorPos(&p);
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    // Anywhere along the edge above the bar; not while dragging (a window to snap, a selection).
-    const bool dragging = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
-    const bool atEdge = (!dragging || dragWindow_) && PtInRect(&mi.rcMonitor, p) && (onRight_ ? p.x >= mi.rcMonitor.right - 2 : p.x <= mi.rcMonitor.left + 1) &&
-                        p.y < mi.rcWork.bottom;
-    edgeSince_ = atEdge ? (edgeSince_ ? edgeSince_ : now) : 0;
+    const MONITORINFO mi = MonitorInfo();
+    const bool adjacentAtPointerY = MonitorFromPoint(POINT{onRight_ ? mi.rcMonitor.right : mi.rcMonitor.left - 1, p.y}, MONITOR_DEFAULTTONULL) != nullptr;
+    const StageEdgeResult edge =
+        EvaluateStageEdge(mi.rcMonitor, mi.rcWork, p, onRight_, adjacentAtPointerY, PopupScale(mi.rcWork), dragging, dragWindow_ != nullptr, kEdgeMs);
+    edgeSince_ = edge.atEdge ? (edgeSince_ ? edgeSince_ : now) : 0;
     if (!autoHide_ && !Covered()) {
         peek_ = false;
         Show();
         StepDrag(p);
         return;
     }
-    if (!peek_ && edgeSince_ && now - edgeSince_ >= kEdgeMs && !FullScreenInFront(monitor_)) {
+    if (!peek_ && edgeSince_ && now - edgeSince_ >= edge.dwellMs && !FullScreenInFront(monitor_)) {
         peek_ = true;
         leftAt_ = 0;
     }
     if (peek_) {
         const RECT zone = Zone();
-        if (atEdge || inside_ || PtInRect(&zone, p))
+        if (edge.atEdge || inside_ || PtInRect(&zone, p))
             leftAt_ = 0;
         else if (!leftAt_)
             leftAt_ = now;
@@ -1367,8 +1367,7 @@ void StageManager::Show()
             e.hover = e.drop = motion::Follow{};
         }
         region_ = RECT{};
-        MONITORINFO mi{sizeof(mi)};
-        GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+        const MONITORINFO mi = MonitorInfo();
         POINT anchor{onRight_ ? mi.rcMonitor.right : mi.rcMonitor.left, (rect_.top + rect_.bottom) / 2};
         surface_.Show(rect_, false, anchor, false); // the cards slide out themselves
     } else {

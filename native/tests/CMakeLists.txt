@@ -216,3 +216,11 @@ set_tests_properties(crash_dump PROPERTIES TIMEOUT 30)
 add_executable(glass_present_retry_tests glass_present_retry.cpp)
 target_link_libraries(glass_present_retry_tests PRIVATE atrium_core_lib)
 add_test(NAME glass_present_retry COMMAND glass_present_retry_tests)
+
+add_executable(stage_watch_tests stage_watch.cpp)
+target_link_libraries(stage_watch_tests PRIVATE atrium_core_lib)
+add_test(NAME stage_watch COMMAND stage_watch_tests)
+
+add_executable(app_catalog_rules_tests app_catalog_rules.cpp)
+target_link_libraries(app_catalog_rules_tests PRIVATE atrium_core_lib)
+add_test(NAME app_catalog_rules COMMAND app_catalog_rules_tests)

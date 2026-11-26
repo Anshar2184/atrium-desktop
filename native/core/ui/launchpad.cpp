@@ -78,6 +78,7 @@ void Launchpad::Open(RECT work, HWND previous)
     if (const UINT blink = GetCaretBlinkTime(); blink != INFINITE)
         SetTimer(surface_.Hwnd(), kCaretTimer, std::max(1u, blink), nullptr);
     PlaceIme();
+    catalog_.Refresh();
 }
 
 void Launchpad::Size(RECT work)

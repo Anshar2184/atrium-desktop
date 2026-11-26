@@ -64,9 +64,8 @@ StageManager::Pose StageManager::PoseOf(const Entry& e, size_t j, const WindowPi
 
 D2D1_POINT_2F StageManager::StripOffset() const
 {
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const float s = PopupScale(WorkArea());
+    const MONITORINFO mi = MonitorInfo();
+    const float s = PopupScale(mi.rcWork);
     return D2D1::Point2F(float(rect_.left - mi.rcMonitor.left) / s, float(rect_.top - mi.rcMonitor.top) / s);
 }
 
@@ -96,9 +95,8 @@ bool StageManager::StripPose(HWND window, Pose& pose)
 
 StageManager::Pose StageManager::PlacePose(const RECT& frame) const
 {
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(monitor_ ? monitor_ : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const float s = PopupScale(WorkArea());
+    const MONITORINFO mi = MonitorInfo();
+    const float s = PopupScale(mi.rcWork);
     Pose pose;
     pose.rect = D2D1::RectF(float(frame.left - mi.rcMonitor.left) / s, float(frame.top - mi.rcMonitor.top) / s, float(frame.right - mi.rcMonitor.left) / s,
                             float(frame.bottom - mi.rcMonitor.top) / s);
