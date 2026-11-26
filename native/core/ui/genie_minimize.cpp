@@ -447,9 +447,18 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t, float alpha
         return;
     const IconImage& image = pic.image;
     const float pw = float(pic.width), ph = float(pic.height), pad = float(kPicturePad);
-    for (int i = 0; i < kRows; ++i) {
-        const float v0 = float(i) / kRows, v1 = float(i + 1) / kRows;
-        const float p0 = along(v0), p1 = along(v1) + 0.5f; // a hair over the next: no seams
+    // While the picture is still whole (the first frames of a pour, the last of a restore) slices
+    // only put their seams back: one quad carries it. Slices start once it is being compressed.
+    float wl0 = 0, wh0 = 0, wl1 = 0, wh1 = 0;
+    sides(along(0.f), wl0, wh0);
+    sides(along(1.f), wl1, wh1);
+    const bool whole = std::abs(wl0 - b0) < 0.75f && std::abs(wh0 - b1) < 0.75f && std::abs(wl1 - b0) < 0.75f &&
+                       std::abs(wh1 - b1) < 0.75f && along(1.f) - along(0.f) > 0.97f * (a1 - a0);
+    const int rows = whole ? 1 : kRows;
+    const float hair = rows > 1 ? 0.5f : 0.f; // a hair over the next: no seams
+    for (int i = 0; i < rows; ++i) {
+        const float v0 = float(i) / rows, v1 = float(i + 1) / rows;
+        const float p0 = along(v0), p1 = along(v1) + hair;
         if (p1 - p0 < 0.55f)
             continue;
         float lo0 = 0, hi0 = 0, lo1 = 0, hi1 = 0;

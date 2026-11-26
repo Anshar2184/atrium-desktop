@@ -378,7 +378,9 @@ void Canvas::ImageQuad(const std::wstring& key, const IconImage& image, D2D1_REC
         return;
     const D2D1::Matrix4x4F m(a / w, d / w, 0, g / w, bx / ht, e / ht, 0, h / ht, 0, 0, 1, 0, p[0].x, p[0].y, 0, 1);
     const D2D1_RECT_F dest = D2D1::RectF(0, 0, w, ht);
-    d2d_->DrawBitmap(b, &dest, opacity * alpha_, D2D1_INTERPOLATION_MODE_LINEAR, &source, &m);
+    // A slice pours into a few pixels near the icon: bilinear alone picks single source rows and
+    // the picture breaks into stripes. Multi-sample averages four, which the fade then hides.
+    d2d_->DrawBitmap(b, &dest, opacity * alpha_, D2D1_INTERPOLATION_MODE_MULTI_SAMPLE_LINEAR, &source, &m);
 }
 
 bool Canvas::Cached(const std::wstring& key) const
