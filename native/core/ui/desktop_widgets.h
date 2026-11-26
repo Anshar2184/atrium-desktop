@@ -52,6 +52,10 @@ public:
     std::function<void()> onStatusRequest;
     GlassMenu* menu = nullptr;           // a widget's menu (main's)
 
+    // A file box's drop target (desktop_widgets.cpp) reports through these; `widget` is the box.
+    void DropOnWidget(void* widget, const std::vector<std::wstring>& paths, bool copy);
+    void HoverWidget(void* widget, bool on);
+
 private:
     struct Widget;
     static void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD);
@@ -102,6 +106,13 @@ private:
     void PlaceImeWindow(Widget& w);
     // Photos: a picture from the folder, read and scaled on a worker thread.
     void PickFolder(Widget& w);
+    // File boxes: what the folder holds, read on a worker thread; a drop moves (or copies) into it;
+    // a click opens the file or the folder; the folder is watched while the box shows it.
+    void LoadFiles(Widget& w);
+    void DropInto(Widget& w, const std::vector<std::wstring>& paths, bool copy);
+    void PickBoxFolder(Widget& w);
+    void WatchBox(Widget& w);
+    void AttachDrop(Widget& w);
     void PickCity(Widget& w, POINT at);
     void LoadPhoto(Widget& w, bool another);
     void PhotoWorker();
@@ -144,6 +155,8 @@ private:
     std::deque<PhotoJob> photoJobs_;
     bool photoStop_ = false;
     std::thread photoWorker_;
+    unsigned fileGen_ = 0; // the file-box read being served
+    bool oleReady_ = false; // this thread's OLE, for the boxes' drop targets
     bool restackPosted_ = false;
     bool wasShowDesktop_ = false;
     ULONGLONG lastRestackLog_ = 0;

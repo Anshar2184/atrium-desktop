@@ -48,6 +48,7 @@ add_library(atrium_core_lib STATIC
     settings_server.cpp
     localization.cpp
     shell/ime_status.cpp
+    shell/file_box_watch.cpp
     shell/keyboard_hook.cpp
     shell/shell_icon.cpp
     shell/task_launch.cpp

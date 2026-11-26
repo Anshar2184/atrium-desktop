@@ -737,6 +737,74 @@ void PaintPhotos(Canvas& c, const WidgetContent& ph, const Pal& p, float fw, flo
     c.Text(Tr(L"Right-click to choose a photo folder"), D2D1::RectF(0, fh / 2 + 20, fw, fh / 2 + 38), 11.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
 }
 
+// ---- file box -----------------------------------------------------------------
+
+namespace {
+
+std::wstring BaseName(const std::wstring& path)
+{
+    size_t i = path.find_last_of(L"\\/");
+    return i == std::wstring::npos ? path : path.substr(i + 1);
+}
+
+// A name that fits `width`: shortened with an ellipsis when it does not.
+std::wstring Fitted(Canvas& c, const std::wstring& name, float size, float width)
+{
+    if (c.TextWidth(name, size) <= width)
+        return name;
+    for (size_t keep = name.size(); keep > 0; --keep) {
+        std::wstring cut = name.substr(0, keep - 1) + L"…";
+        if (c.TextWidth(cut, size) <= width)
+            return cut;
+    }
+    return L"…";
+}
+
+} // namespace
+
+// A folder's contents as a grid of icons and names: a drop target for files (dropped files move
+// into the folder) and an opener (a click opens the file, or the folder, with the shell's default).
+void PaintFileBox(Canvas& c, WidgetSize size, const WidgetContent& b, const Pal& p, float W, float H, std::vector<WidgetHit>& hits)
+{
+    const float top = kPad + 26;
+    const int cols = FileBoxCols(size), rows = FileBoxRows(size);
+    const float cw = (W - 2 * kPad) / float(cols), ch = (H - top - kPad) / float(rows);
+    const float box = std::min(cw - 8, ch - 20);
+    const std::wstring title = b.folder.empty() ? L"文件盒子" : BaseName(b.folder);
+    c.Text(Fitted(c, title, 13.5f, W - 2 * kPad - 56), D2D1::RectF(kPad + 2, kPad - 2, W - kPad - 52, kPad + 18), 13.5f, p.orange,
+           DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    if (!b.files.empty())
+        c.Text(std::to_wstring(b.files.size()) + L" 项", D2D1::RectF(W - kPad - 50, kPad - 1, W - kPad, kPad + 16), 11.5f, p.faint,
+               DWRITE_FONT_WEIGHT_NORMAL, 2);
+    if (b.dropHover)
+        c.Stroke(D2D1::RectF(2, 2, W - 2, H - 2), kWidgetRadius - 3, p.blue, 2);
+    if (b.files.empty()) {
+        c.Glyph(L"\uE8B7", D2D1::RectF(0, H / 2 - 46, W, H / 2 - 6), 28, p.sub);
+        c.Text(L"空文件夹", D2D1::RectF(0, H / 2, W, H / 2 + 20), 13.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+        c.Text(b.folder.empty() ? L"右键选择文件夹" : L"拖文件到这里", D2D1::RectF(0, H / 2 + 20, W, H / 2 + 38), 11.5f, p.sub,
+               DWRITE_FONT_WEIGHT_NORMAL, 1);
+        return;
+    }
+    const int first = std::max(0, int(b.scrollRow));
+    for (int r = 0; r < rows; ++r) {
+        for (int col = 0; col < cols; ++col) {
+            const size_t i = size_t((first + r) * cols + col);
+            if (i >= b.files.size())
+                return;
+            const FileEntry& f = b.files[i];
+            const float x = kPad + cw * float(col), y = top + ch * float(r);
+            const D2D1_RECT_F box2 = D2D1::RectF(x + (cw - box) / 2, y + 1, x + (cw + box) / 2, y + 1 + box);
+            if (f.icon && !f.icon->empty())
+                c.Image(f.iconKey, *f.icon, box2);
+            else
+                c.Glyph(f.folder ? L"\uE8B7" : L"\uE7C3", box2, box * 0.78f, p.sub);
+            c.Text(Fitted(c, f.name, 10.5f, cw - 4), D2D1::RectF(x + 2, box2.bottom + 2, x + cw - 2, box2.bottom + 16), 10.5f, p.text,
+                   DWRITE_FONT_WEIGHT_NORMAL, 1);
+            hits.push_back({D2D1::RectF(x, y, x + cw, y + ch), L"file:" + std::to_wstring(i)});
+        }
+    }
+}
+
 // ---- weather -------------------------------------------------------------------
 
 // What the sky does, for the icon and the widget's tint.
@@ -999,6 +1067,9 @@ Pal Face(Canvas& c, WidgetKind kind, WidgetMaterial material, const WidgetWorld&
 
 } // namespace
 
+int FileBoxCols(WidgetSize size) { return size == WidgetSize::Small ? 2 : 4; }
+int FileBoxRows(WidgetSize size) { return size == WidgetSize::Large ? 4 : 2; }
+
 float ReminderScrollMax(const WidgetContent& content, WidgetSize size)
 {
     return std::max(0.f, float(content.items.size() + 1) * kReminderRow - (WidgetHeight(size) - kReminderTop - kReminderBottom));
@@ -1035,6 +1106,7 @@ void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial mat
     case WidgetKind::Weather: PaintWeather(c, size, world, p, fw, fh); break;
     case WidgetKind::Bluetooth: PaintBluetooth(c, size, world, p, fw, fh); break;
     case WidgetKind::Network: PaintNetwork(c, size, world, p, fw, fh); break;
+    case WidgetKind::FileBox: PaintFileBox(c, size, content, p, fw, fh, hits); break;
     }
 }
 
