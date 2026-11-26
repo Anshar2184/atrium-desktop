@@ -14,6 +14,7 @@ body:
         - **日志 / Logs**：按 `Win + R`，输入 `%LOCALAPPDATA%\Atrium\logs` 回车 / press `Win + R`, type `%LOCALAPPDATA%\Atrium\logs`, press Enter
           - `core.log`：任务栏、开始菜单、台前调度、小组件、通知等的日志；上一份是 `core.1.log` / the taskbar, start menu, Stage Manager, widgets, notifications…; the previous one is `core.1.log`
           - `settings.log`：设置中心崩溃或出错时才有 / only when the settings app crashed or failed
+          - `crash-*.dmp`：闪退/崩溃时尽力生成的小型转储文件（极早期崩溃或被强杀时可能没有），可能含少量周边内存数据，公开上传前请确认不含敏感内容 / best-effort minidump written on crash (may be absent on early/forced termination); may include nearby memory, review before posting publicly
         - **截图和录屏 / Screenshots and videos**：直接拖进输入框即可上传；视频建议 10 MB 以内的 mp4 / drag them into a text box; keep videos under 10 MB (mp4)
   - type: textarea
     id: what

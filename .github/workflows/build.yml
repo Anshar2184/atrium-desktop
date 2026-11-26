@@ -125,6 +125,11 @@ jobs:
           name: Atrium-win-x64
           path: dist/*.zip
           if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: Atrium-symbols-win-x64
+          path: native/build/win-x64/Atrium.pdb
+          if-no-files-found: error
 
   asan:
     runs-on: windows-2022

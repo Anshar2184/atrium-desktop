@@ -8,6 +8,7 @@
 #include "render/capture.h"
 #include "render/shutdown_wait.h"
 #include "clock.h"
+#include "crash_dump.h"
 #include "desktop_helpers.h"
 #include "extras_host.h"
 #include "guard_process.h"
@@ -1411,6 +1412,7 @@ void ShutdownApp(HANDLE mutex, std::thread& startupThread)
         startupThread.join();
     Log(L"core: exited");
     ShutdownLog();
+    ShutdownCrashHandlers();
     ReleaseMutex(mutex);
     CloseHandle(mutex);
 }
@@ -1453,10 +1455,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     if (LowIntegrity())
         Log(L"core: running at low integrity (Atrium.exe has a Low label?): settings cannot be saved, the Windows key is left alone");
     RegisterApplication(ExeDir());
-    SetUnhandledExceptionFilter([](EXCEPTION_POINTERS*) -> LONG {
-        SystemChrome::EmergencyRestore();
-        return EXCEPTION_CONTINUE_SEARCH;
-    });
+    InstallCrashHandlers(&SystemChrome::EmergencyRestore);
     g_app.chrome = std::make_unique<SystemChrome>();
 
     WNDCLASSEXW wc{sizeof(wc)};

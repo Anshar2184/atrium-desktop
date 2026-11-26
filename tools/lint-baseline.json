@@ -3,7 +3,7 @@
   "core/localization.cpp|catch-all": 1,
   "core/localization.cpp|try": 1,
   "core/main.cpp|complexity|HostProc(HWND,UINT,WPARAM,LPARAM)": 49,
-  "core/main.cpp|file-lines": 1509,
+  "core/main.cpp|file-lines": 1508,
   "core/render/capture.cpp|try": 1,
   "core/render/desktop_backdrop.cpp|complexity|DesktopBackdrop::Update(const std::wstring&)": 46,
   "core/render/desktop_backdrop.cpp|complexity|DesktopBackdrop::WallpaperLoop(Wallpaper&)": 42,

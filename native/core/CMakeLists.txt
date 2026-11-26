@@ -35,6 +35,8 @@ add_library(atrium_core_lib STATIC
     bar_layout.cpp
     bar_render.cpp
     bar_stacking.cpp
+    crash_dump.cpp
+    crash_report.cpp
     desktop_helpers.cpp
     notice_actions.cpp
     extras_host.cpp

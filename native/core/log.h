@@ -4,6 +4,7 @@
 namespace atrium {
 
 void Log(const wchar_t* format, ...);
+bool FlushLog(unsigned long timeoutMs);
 void ShutdownLog();
 
 } // namespace atrium

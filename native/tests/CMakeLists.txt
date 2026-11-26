@@ -207,3 +207,8 @@ add_test(NAME desktop_backdrop_target COMMAND desktop_backdrop_target_tests)
 add_executable(window_snapshot_tests window_snapshot.cpp)
 target_link_libraries(window_snapshot_tests PRIVATE atrium_core_lib)
 add_test(NAME window_snapshot COMMAND window_snapshot_tests)
+
+add_executable(crash_dump_tests crash_dump.cpp)
+target_link_libraries(crash_dump_tests PRIVATE atrium_core_lib)
+add_test(NAME crash_dump COMMAND crash_dump_tests --development --data-dir "${CMAKE_CURRENT_BINARY_DIR}/crash_dump_test_data")
+set_tests_properties(crash_dump PROPERTIES TIMEOUT 30)
