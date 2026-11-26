@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.UI;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
@@ -19,12 +20,9 @@ internal static partial class WidgetFaces
     private const double Pad = 14; // kPad
     public static readonly Color Red = Color.FromArgb(255, 0xFF, 0x45, 0x3A), Orange = Color.FromArgb(255, 0xFF, 0x9F, 0x0A),
                                  Green = Color.FromArgb(255, 0x30, 0xD1, 0x58), Blue = Color.FromArgb(255, 0x0A, 0x84, 0xFF);
-    private static readonly string[] WeekLong = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-    private static readonly string[] WeekShort = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    private static readonly string[] Months =
-    [
-        "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
-    ];
+    private static readonly string[] WeekLong = { "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日" };
+    private static readonly string[] WeekShort = { "一", "二", "三", "四", "五", "六", "日" };
+    private static readonly string[] Months = { "一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月" };
 
     // What the weather's symbols are drawn over (widget_faces.cpp, Ink).
     private enum Ink { Light, Dark, Mono }
@@ -38,7 +36,7 @@ internal static partial class WidgetFaces
         // The glass's inks (Theme::For) and macOS's dark-mode accents.
         public static Pal For(bool dark)
         {
-            var ink = dark ? Color.FromArgb(255, 0x11, 0x13, 0x17) : Color.FromArgb(255, 255, 255, 255);
+            Color ink = dark ? Color.FromArgb(255, 0x11, 0x13, 0x17) : Color.FromArgb(255, 255, 255, 255);
             Color A(double a) => Color.FromArgb((byte)Math.Round(255 * a), ink.R, ink.G, ink.B);
             double text = dark ? 0.92 : 0.96;
             return new Pal(A(text), A(dark ? 0.66 : 0.76), A(dark ? 0.46 : 0.56), A(text * 0.10), A(text * 0.18),
@@ -55,7 +53,7 @@ internal static partial class WidgetFaces
         // Color on a white face: dark ink, macOS's light-mode accents, no halo.
         public static Pal Paper()
         {
-            static Color A(double a) => Color.FromArgb((byte)Math.Round(255 * a), 0x1D, 0x1D, 0x1F);
+            Color A(double a) => Color.FromArgb((byte)Math.Round(255 * a), 0x1D, 0x1D, 0x1F);
             return new Pal(A(0.94), A(0.58), A(0.36), A(0.05), A(0.10), Colors.Transparent, true,
                            Color.FromArgb(255, 0xFF, 0x3B, 0x30), Color.FromArgb(255, 0xFF, 0x95, 0x00), Color.FromArgb(255, 0x34, 0xC7, 0x59),
                            Color.FromArgb(255, 0x00, 0x7A, 0xFF), White(0.98), Color.FromArgb(255, 0x1C, 0x1C, 0x1E), Ink.Dark);
@@ -74,37 +72,24 @@ internal static partial class WidgetFaces
 
     // material: glass (the glass's ink: darkInk), dusk (a dark veil, white only) or color (an opaque face).
     // The world clocks' cities and their Windows time zones (widget_faces.cpp, WorldCities).
-    private static readonly (string Name, string Zone, string Legacy)[] WorldCities =
-    [
-        ("Beijing", "China Standard Time", "北京"), ("Shanghai", "China Standard Time", "上海"),
-        ("Hong Kong", "China Standard Time", "香港"), ("Taipei", "Taipei Standard Time", "台北"),
-        ("Tokyo", "Tokyo Standard Time", "东京"), ("Seoul", "Korea Standard Time", "首尔"),
-        ("Singapore", "Singapore Standard Time", "新加坡"), ("Bangkok", "SE Asia Standard Time", "曼谷"),
-        ("New Delhi", "India Standard Time", "新德里"), ("Dubai", "Arabian Standard Time", "迪拜"),
-        ("Moscow", "Russian Standard Time", "莫斯科"), ("Istanbul", "Turkey Standard Time", "伊斯坦布尔"),
-        ("Cairo", "Egypt Standard Time", "开罗"), ("Johannesburg", "South Africa Standard Time", "约翰内斯堡"),
-        ("Berlin", "W. Europe Standard Time", "柏林"), ("Paris", "Romance Standard Time", "巴黎"),
-        ("London", "GMT Standard Time", "伦敦"), ("São Paulo", "E. South America Standard Time", "圣保罗"),
-        ("New York", "Eastern Standard Time", "纽约"), ("Toronto", "Eastern Standard Time", "多伦多"),
-        ("Chicago", "Central Standard Time", "芝加哥"), ("Denver", "Mountain Standard Time", "丹佛"),
-        ("Los Angeles", "Pacific Standard Time", "洛杉矶"), ("Vancouver", "Pacific Standard Time", "温哥华"),
-        ("Anchorage", "Alaskan Standard Time", "安克雷奇"), ("Honolulu", "Hawaiian Standard Time", "檀香山"),
-        ("Sydney", "AUS Eastern Standard Time", "悉尼"), ("Melbourne", "AUS Eastern Standard Time", "墨尔本"),
-        ("Auckland", "New Zealand Standard Time", "奥克兰"),
-    ];
-
-    internal static string CanonicalCity(string name) =>
-        WorldCities.FirstOrDefault(c => c.Name == name || c.Legacy == name).Name ?? name;
+    private static readonly (string Name, string Zone)[] WorldCities =
+    {
+        ("北京", "China Standard Time"), ("上海", "China Standard Time"), ("香港", "China Standard Time"), ("台北", "Taipei Standard Time"),
+        ("东京", "Tokyo Standard Time"), ("首尔", "Korea Standard Time"), ("新加坡", "Singapore Standard Time"), ("曼谷", "SE Asia Standard Time"),
+        ("新德里", "India Standard Time"), ("迪拜", "Arabian Standard Time"), ("莫斯科", "Russian Standard Time"), ("伊斯坦布尔", "Turkey Standard Time"),
+        ("开罗", "Egypt Standard Time"), ("约翰内斯堡", "South Africa Standard Time"), ("柏林", "W. Europe Standard Time"), ("巴黎", "Romance Standard Time"),
+        ("伦敦", "GMT Standard Time"), ("圣保罗", "E. South America Standard Time"), ("纽约", "Eastern Standard Time"), ("多伦多", "Eastern Standard Time"),
+        ("芝加哥", "Central Standard Time"), ("丹佛", "Mountain Standard Time"), ("洛杉矶", "Pacific Standard Time"), ("温哥华", "Pacific Standard Time"),
+        ("安克雷奇", "Alaskan Standard Time"), ("檀香山", "Hawaiian Standard Time"), ("悉尼", "AUS Eastern Standard Time"), ("墨尔本", "AUS Eastern Standard Time"),
+        ("奥克兰", "New Zealand Standard Time"),
+    };
 
     // WidgetCities: the widget's own choice where it made one, else the defaults.
     private static string[] CitiesOf(string kind, IReadOnlyList<string>? chosen)
     {
-        string[] cities = kind == "digital" ? ["Tokyo", "London", "New York"] : ["Beijing", "Tokyo", "London", "New York"];
+        string[] cities = kind == "digital" ? new[] { "东京", "伦敦", "纽约" } : new[] { "北京", "东京", "伦敦", "纽约" };
         for (int i = 0; i < cities.Length && chosen != null && i < chosen.Count; i++)
-        {
-            string city = CanonicalCity(chosen[i]);
-            if (WorldCities.Any(c => c.Name == city)) cities[i] = city;
-        }
+            if (WorldCities.Any(c => c.Name == chosen[i])) cities[i] = chosen[i];
         return cities;
     }
 
@@ -114,19 +99,18 @@ internal static partial class WidgetFaces
         var t = now;
         try
         {
-            string zone = WorldCities.FirstOrDefault(c => c.Name == name).Zone;
-            if (zone != null) t = TimeZoneInfo.ConvertTimeFromUtc(PreviewClock.Utc, TimeZoneInfo.FindSystemTimeZoneById(zone));
+            var zone = WorldCities.FirstOrDefault(c => c.Name == name).Zone;
+            if (zone != null) t = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone));
         }
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException) { }
         double hours = Math.Round((t - now).TotalMinutes / 15) / 4;
         int dd = t.Date.CompareTo(now.Date);
         string offset = (hours >= 0 ? "+" : "") + hours.ToString("0.##", CultureInfo.InvariantCulture);
-        string template = dd > 0 ? "Tomorrow {0} h" : dd < 0 ? "Yesterday {0} h" : "Today {0} h";
+        string template = dd > 0 ? "明天 {0}小时" : dd < 0 ? "昨天 {0}小时" : "今天 {0}小时";
         return (t, Loc.F(template, offset));
     }
 
-    public static FrameworkElement Face(string kind, string size, bool darkInk, Brush? photo = null, string material = "glass",
-                                        IReadOnlyList<string>? cities = null)
+    public static FrameworkElement Face(string kind, string size, bool darkInk, Brush? photo = null, string material = "glass", IReadOnlyList<string>? cities = null)
     {
         var (w, h) = Size(size);
         var c = new Canvas { Width = w, Height = h, IsHitTestVisible = false };
@@ -136,248 +120,236 @@ internal static partial class WidgetFaces
             "color" => kind == "weather" ? Pal.Sky() : Pal.Paper(),
             _ => Pal.For(darkInk),
         };
-        if (material == "dusk")
-        {
-            c.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 22, RadiusY = 22, Fill = new SolidColorBrush(Color.FromArgb(56, 0, 0, 0)) });
-        }
-        else if (material == "color")
-        {
-            c.Children.Add(new Rectangle
-            {
-                Width = w,
-                Height = h,
-                RadiusX = 22,
-                RadiusY = 22,
-                Fill = kind == "weather" ? SkyBrush() : new SolidColorBrush(Colors.White),
-            });
-        }
-        var now = PreviewClock.Now;
+        if (material == "dusk") c.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 22, RadiusY = 22, Fill = new SolidColorBrush(Color.FromArgb(56, 0, 0, 0)) });
+        else if (material == "color") c.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 22, RadiusY = 22, Fill = kind == "weather" ? SkyBrush() : new SolidColorBrush(Colors.White) });
+        var now = DateTime.Now;
         switch (kind)
         {
             case "clock" when size == "small":
-                ClockFace(c, w / 2, h / 2, h / 2 - 9, now, p.Face, p.Text, true, Loc.T("Beijing"), p.Sub, p);
+                ClockFace(c, w / 2, h / 2, h / 2 - 9, now, p.Face, p.Text, true, Loc.T("北京"), p.Sub, p);
                 break;
             case "clock":
+            {
+                var names = CitiesOf(kind, cities);
+                double colW = (w - 2 * Pad) / 4, R = 31;
+                for (int i = 0; i < 4; i++)
                 {
-                    string[] names = CitiesOf(kind, cities);
-                    double colW = (w - 2 * Pad) / 4, r = 31;
-                    for (int i = 0; i < 4; i++)
-                    {
-                        var (t, when) = CityTime(names[i], now);
-                        bool night = t.Hour is < 6 or >= 18;
-                        double cx = Pad + colW * (i + 0.5), cy = (h - 2 * r - 42) / 2 + r - 2;
-                        Color face = night ? p.NightFace : p.Face, ink = night ? Color.FromArgb(245, 255, 255, 255) : p.Text;
-                        ClockFace(c, cx, cy, r, t, face, ink, false, null, ink, p);
-                        Text(c, Loc.T(names[i]), cx - colW / 2, cy + r + 8, cx + colW / 2, cy + r + 26, 12.5, p.Text, 2, 1, p);
-                        Text(c, when, cx - colW / 2, cy + r + 26, cx + colW / 2, cy + r + 42, 10.5, p.Sub, 0, 1, p);
-                    }
-                    break;
+                    var (t, when) = CityTime(names[i], now);
+                    bool night = t.Hour < 6 || t.Hour >= 18;
+                    double cx = Pad + colW * (i + 0.5), cy = (h - 2 * R - 42) / 2 + R - 2;
+                    Color face = night ? p.NightFace : p.Face, ink = night ? Color.FromArgb(245, 255, 255, 255) : p.Text;
+                    ClockFace(c, cx, cy, R, t, face, ink, false, null, ink, p);
+                    Text(c, Loc.T(names[i]), cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26, 12.5, p.Text, 2, 1, p);
+                    Text(c, when, cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42, 10.5, p.Sub, 0, 1, p);
                 }
+                break;
+            }
             case "digital":
+            {
+                double leftW = size == "small" ? w - 2 * Pad : 150;
+                Text(c, Loc.T("本地"), Pad + 2, Pad, Pad + leftW, Pad + 18, 12.5, p.Sub, 2, 0, p);
+                // Match the core's fixed daily size, with one DIP of glyph-rounding headroom.
+                double fit = TextWidth("00:00", 50, "TitleFont");
+                double timeW = leftW - 1;
+                Text(c, now.ToString("H:mm"), Pad, Pad + 22, Pad + leftW, Pad + 84, fit > timeW ? 50 * timeW / fit : 50, p.Text, 2, 1, p);
+                Text(c, Loc.T(WeekLong[Weekday(now)]), Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 13, p.Blue, 2, 0, p);
+                Text(c, Loc.English ? $"{Loc.T(Months[now.Month - 1])} {now.Day}" : $"{now.Month}月{now.Day}日", Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 13, p.Text, 0, 0, p);
+                if (size == "small") break;
+                double x0 = Pad + leftW + 8, rowH = (h - 2 * Pad) / 3;
+                var more = CitiesOf(kind, cities);
+                for (int i = 0; i < 3; i++)
                 {
-                    double leftW = size == "small" ? w - 2 * Pad : 150;
-                    Text(c, Loc.T("Local"), Pad + 2, Pad, Pad + leftW, Pad + 18, 12.5, p.Sub, 2, 0, p);
-                    // Match the core's fixed daily size, with one DIP of glyph-rounding headroom.
-                    double fit = TextWidth("00:00", 50, "TitleFont");
-                    double timeW = leftW - 1;
-                    Text(c, now.ToString("H:mm"), Pad, Pad + 22, Pad + leftW, Pad + 84, fit > timeW ? 50 * timeW / fit : 50, p.Text, 2, 1, p);
-                    Text(c, Loc.T(WeekLong[Weekday(now)]), Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 13, p.Blue, 2, 0, p);
-                    string dateText = Loc.English ? $"{Loc.T(Months[now.Month - 1])} {now.Day}" : $"{now.Month}月{now.Day}日";
-                    Text(c, dateText, Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 13, p.Text, 0, 0, p);
-                    if (size == "small") break;
-                    double x0 = Pad + leftW + 8, rowH = (h - 2 * Pad) / 3;
-                    string[] more = CitiesOf(kind, cities);
-                    for (int i = 0; i < 3; i++)
-                    {
-                        double y = Pad + rowH * i;
-                        var (t, when) = CityTime(more[i], now);
-                        if (i > 0) Line(c, x0, y, w - Pad, y, A(p.Text, 0.12), 1);
-                        Text(c, Loc.T(more[i]), x0, y + 4, w - Pad - 70, y + rowH / 2 + 2, 13, p.Text, 2, 0, p);
-                        Text(c, when, x0, y + rowH / 2, w - Pad - 70, y + rowH - 4, 10.5, p.Sub, 0, 0, p);
-                        Text(c, t.ToString("H:mm"), w - Pad - 80, y, w - Pad, y + rowH, 22, p.Text, 2, 2, p);
-                    }
-                    break;
+                    double y = Pad + rowH * i;
+                    var (t, when) = CityTime(more[i], now);
+                    if (i > 0) Line(c, x0, y, w - Pad, y, A(p.Text, 0.12), 1);
+                    Text(c, Loc.T(more[i]), x0, y + 4, w - Pad - 70, y + rowH / 2 + 2, 13, p.Text, 2, 0, p);
+                    Text(c, when, x0, y + rowH / 2, w - Pad - 70, y + rowH - 4, 10.5, p.Sub, 0, 0, p);
+                    Text(c, t.ToString("H:mm"), w - Pad - 80, y, w - Pad, y + rowH, 22, p.Text, 2, 2, p);
                 }
+                break;
+            }
             case "calendar":
                 Calendar(c, size, w, h, now, p);
                 break;
             case "battery":
+            {
+                double cx = w / 2, cy = h / 2 - 12, R = 44;
+                Arc(c, cx, cy, R, -90, 360, p.Track, 9, false);
+                if (!BarFace.HasBattery())
                 {
-                    double cx = w / 2, cy = h / 2 - 12, r = 44;
-                    Arc(c, cx, cy, r, -90, 360, p.Track, 9, false);
-                    if (!BarFace.HasBattery())
-                    {
-                        // A desktop: the ring full, a plug, plugged in (PaintBattery).
-                        Arc(c, cx, cy, r, -90, 360, p.Green, 9, false);
-                        Glyph(c, "\uE83E", cx - 22, cy - 22, cx + 22, cy + 22, 22, p.Text);
-                        Text(c, Loc.T("Plugged in"), 0, cy + r + 12, w, cy + r + 34, 13, p.Text, 2, 1, p);
-                        break;
-                    }
-                    var (fill, charging, low) = BarFace.Battery();
-                    var level = low ? p.Red : p.Green;
-                    Arc(c, cx, cy, r, -90, 360 * fill, level, 9, true);
-                    Glyph(c, "\uE7F8", cx - 22, cy - 22, cx + 22, cy + 22, 24, p.Text);
-                    string n = $"{Math.Round(fill * 100)}%";
-                    double tw = TextWidth(n, 19, "TitleFont"), bolt = charging ? 16 : 0, x0 = (w - tw - bolt) / 2;
-                    if (charging) Glyph(c, "\uE945", x0 - 2, cy + r + 10, x0 + bolt, cy + r + 36, 13, level);
-                    Text(c, n, x0 + bolt, cy + r + 10, x0 + bolt + tw + 4, cy + r + 36, 19, p.Text, 2, 0, p);
+                    // A desktop: the ring full, a plug, plugged in (PaintBattery).
+                    Arc(c, cx, cy, R, -90, 360, p.Green, 9, false);
+                    Glyph(c, "\uE83E", cx - 22, cy - 22, cx + 22, cy + 22, 22, p.Text);
+                    Text(c, Loc.T("已接通电源"), 0, cy + R + 12, w, cy + R + 34, 13, p.Text, 2, 1, p);
                     break;
                 }
+                var (fill, charging, low) = BarFace.Battery();
+                Color level = low ? p.Red : p.Green;
+                Arc(c, cx, cy, R, -90, 360 * fill, level, 9, true);
+                Glyph(c, "\uE7F8", cx - 22, cy - 22, cx + 22, cy + 22, 24, p.Text);
+                string n = $"{Math.Round(fill * 100)}%";
+                double tw = TextWidth(n, 19, "TitleFont"), bolt = charging ? 16 : 0, x0 = (w - tw - bolt) / 2;
+                if (charging) Glyph(c, "\uE945", x0 - 2, cy + R + 10, x0 + bolt, cy + R + 36, 13, level);
+                Text(c, n, x0 + bolt, cy + R + 10, x0 + bolt + tw + 4, cy + R + 36, 19, p.Text, 2, 0, p);
+                break;
+            }
             case "bluetooth":
+            {
+                // PaintBluetooth, with examples: the gallery does not read the devices.
+                (string Glyph, string Name, int Pct)[] d = { ("\uE7F6", Loc.T("耳机"), 82), ("\uE765", Loc.T("键盘"), 64), ("\uE962", Loc.T("鼠标"), 18), ("\uE7FC", Loc.T("手柄"), 45) };
+                Color Col(int v) => v <= 20 ? p.Red : p.Green;
+                if (size == "small")
                 {
-                    // PaintBluetooth, with examples: the gallery does not read the devices.
-                    (string Glyph, string Name, int Pct)[] d =
-                    [
-                        ("\uE7F6", Loc.T("Headphones"), 82), ("\uE765", Loc.T("Keyboard"), 64),
-                        ("\uE962", Loc.T("Mouse"), 18), ("\uE7FC", Loc.T("Gamepad"), 45),
-                    ];
-                    Color Col(int v) => v <= 20 ? p.Red : p.Green;
-                    if (size == "small")
-                    {
-                        double cw = (w - 2 * Pad) / 2, ch = (h - 2 * Pad) / 2, r = 21;
-                        for (int i = 0; i < 4; i++)
-                        {
-                            double cx = Pad + cw * (i % 2 + 0.5), cy = Pad + ch * (i / 2) + 26;
-                            Arc(c, cx, cy, r, -90, 360, p.Track, 5, false);
-                            Arc(c, cx, cy, r, -90, 360 * d[i].Pct / 100.0, Col(d[i].Pct), 5, true);
-                            Glyph(c, d[i].Glyph, cx - r, cy - r, cx + r, cy + r, 15, p.Text);
-                            Text(c, $"{d[i].Pct}%", cx - cw / 2, cy + r + 4, cx + cw / 2, cy + r + 20, 11.5, p.Text, 2, 1, p);
-                        }
-                        break;
-                    }
-                    double rowH = (h - 2 * Pad) / 4;
+                    double cw = (w - 2 * Pad) / 2, ch = (h - 2 * Pad) / 2, R = 21;
                     for (int i = 0; i < 4; i++)
                     {
-                        double mid = Pad + rowH * i + rowH / 2;
-                        Glyph(c, d[i].Glyph, Pad, mid - 12, Pad + 26, mid + 12, 16, p.Text);
-                        Text(c, d[i].Name, Pad + 34, mid - 10, w - Pad - 112, mid + 10, 13, p.Text, 2, 0, p);
-                        Fill(c, w - Pad - 106, mid - 3, w - Pad - 50, mid + 3, 3, p.Track);
-                        Fill(c, w - Pad - 106, mid - 3, w - Pad - 106 + Math.Max(6, 56 * d[i].Pct / 100.0), mid + 3, 3, Col(d[i].Pct));
-                        Text(c, $"{d[i].Pct}%", w - Pad - 46, mid - 10, w - Pad, mid + 10, 13, p.Text, 2, 2, p);
+                        double cx = Pad + cw * (i % 2 + 0.5), cy = Pad + ch * (i / 2) + 26;
+                        Arc(c, cx, cy, R, -90, 360, p.Track, 5, false);
+                        Arc(c, cx, cy, R, -90, 360 * d[i].Pct / 100.0, Col(d[i].Pct), 5, true);
+                        Glyph(c, d[i].Glyph, cx - R, cy - R, cx + R, cy + R, 15, p.Text);
+                        Text(c, $"{d[i].Pct}%", cx - cw / 2, cy + R + 4, cx + cw / 2, cy + R + 20, 11.5, p.Text, 2, 1, p);
                     }
                     break;
                 }
+                double rowH = (h - 2 * Pad) / 4;
+                for (int i = 0; i < 4; i++)
+                {
+                    double mid = Pad + rowH * i + rowH / 2;
+                    Glyph(c, d[i].Glyph, Pad, mid - 12, Pad + 26, mid + 12, 16, p.Text);
+                    Text(c, d[i].Name, Pad + 34, mid - 10, w - Pad - 112, mid + 10, 13, p.Text, 2, 0, p);
+                    Fill(c, w - Pad - 106, mid - 3, w - Pad - 50, mid + 3, 3, p.Track);
+                    Fill(c, w - Pad - 106, mid - 3, w - Pad - 106 + Math.Max(6, 56 * d[i].Pct / 100.0), mid + 3, 3, Col(d[i].Pct));
+                    Text(c, $"{d[i].Pct}%", w - Pad - 46, mid - 10, w - Pad, mid + 10, 13, p.Text, 2, 2, p);
+                }
+                break;
+            }
             case "network":
+            {
+                // PaintNetwork, with example data: the gallery reads no counters itself.
+                double down = 12.4 * 1024 * 1024, up = 1.2 * 1024 * 1024;
+                Color downInk = p.Icon == Ink.Mono ? A(p.Text, 0.95) : p.Blue;
+                Color upInk = p.Icon == Ink.Mono ? A(p.Text, 0.5) : p.Orange;
+                double[] downCurve = Curve(0, down * 0.92), upCurve = Curve(7, up * 0.92);
+                double graphTop = GraphTop(downCurve, upCurve);
+                bool compact = size == "small";
+                double pad = compact ? Pad : 16;
+                Text(c, "网络", pad + 1, pad - 2, w - pad - 40, pad + 16, compact ? 12.5 : 13.5, p.Sub, 2, 0, p);
+                if (!compact) Text(c, "以太网 · 1.0 Gbps", w / 2 - 60, pad - 1, w - pad - 1, pad + 16, 11, p.Sub, 0, 2, p);
+                // A rate: its arrow, the value, the unit on the same baseline (MiSans: 1.044 em down).
+                void Rate(double top, double bottom, double bps, bool outRate, double arrow, double font, double unitSize)
                 {
-                    // PaintNetwork, with example data: the gallery reads no counters itself.
-                    double down = 12.4 * 1024 * 1024, up = 1.2 * 1024 * 1024;
-                    var downInk = p.Icon == Ink.Mono ? A(p.Text, 0.95) : p.Blue;
-                    var upInk = p.Icon == Ink.Mono ? A(p.Text, 0.5) : p.Orange;
-                    double[] downCurve = Curve(0, down * 0.92), upCurve = Curve(7, up * 0.92);
-                    double graphTop = GraphTop(downCurve, upCurve);
-                    bool compact = size == "small";
-                    double pad = compact ? Pad : 16;
-                    Text(c, Loc.T("Network"), pad + 1, pad - 2, w - pad - 40, pad + 16, compact ? 12.5 : 13.5, p.Sub, 2, 0, p);
-                    if (!compact) Text(c, Loc.T("Ethernet · 1.0 Gbps"), w / 2 - 60, pad - 1, w - pad - 1, pad + 16, 11, p.Sub, 0, 2, p);
-                    // A rate: its arrow, the value, the unit on the same baseline (MiSans: 1.044 em down).
-                    void Rate(double top, double bottom, double bps, bool outRate, double arrow, double font, double unitSize)
-                    {
-                        double cy = (top + bottom) / 2, x0 = pad + 2;
-                        RateArrow(c, x0 + arrow, cy, arrow, !outRate, outRate ? upInk : downInk);
-                        double x = x0 + 2 * arrow + 9;
-                        string value = (bps / 1024 / 1024).ToString("0.0", CultureInfo.InvariantCulture);
-                        Text(c, value, x, top, w - pad, bottom, font, p.Text, 2, 0, p);
-                        double tw = TextWidth(value, font, "TitleFont"), shift = 0.381 * (font - unitSize);
-                        Text(c, "MB/s", x + tw + 4, top + shift, x + tw + 4 + unitSize * 5, bottom + shift, unitSize, p.Sub, 2, 0, p);
-                    }
-                    if (compact)
-                    {
-                        Rate(32, 60, down, false, 6.5, 20, 10.5);
-                        Rate(62, 84, up, true, 5, 14.5, 9.5);
-                        Line(c, pad, 126, w - pad, 126, p.Track, 1);
-                        GraphLine(c, downCurve, graphTop, pad, 90, w - pad, 126, downInk);
-                        GraphLine(c, upCurve, graphTop, pad, 90, w - pad, 126, upInk);
-                        Text(c, Loc.T("Ethernet"), pad + 1, h - pad - 14, w - pad, h - pad + 1, 10, p.Sub, 0, 0, p);
-                        break;
-                    }
-                    Rate(34, 72, down, false, 8, 32, 12.5);
-                    Rate(74, 96, up, true, 6, 18, 11);
-                    Line(c, pad, 136, w - pad, 136, p.Track, 1);
-                    GraphLine(c, downCurve, graphTop, pad, 102, w - pad, 136, downInk);
-                    GraphLine(c, upCurve, graphTop, pad, 102, w - pad, 136, upInk);
-                    Text(c, Loc.T("Received 1.24 GB · Sent 86.0 MB this session"), pad, 140, w - pad, 154, 10, p.Sub, 0, 0, p);
+                    double cy = (top + bottom) / 2, x0 = pad + 2;
+                    RateArrow(c, x0 + arrow, cy, arrow, !outRate, outRate ? upInk : downInk);
+                    double x = x0 + 2 * arrow + 9;
+                    string value = (bps / 1024 / 1024).ToString("0.0", CultureInfo.InvariantCulture);
+                    Text(c, value, x, top, w - pad, bottom, font, p.Text, 2, 0, p);
+                    double tw = TextWidth(value, font, "TitleFont"), shift = 0.381 * (font - unitSize);
+                    Text(c, "MB/s", x + tw + 4, top + shift, x + tw + 4 + unitSize * 5, bottom + shift, unitSize, p.Sub, 2, 0, p);
+                }
+                if (compact)
+                {
+                    Rate(32, 60, down, false, 6.5, 20, 10.5);
+                    Rate(62, 84, up, true, 5, 14.5, 9.5);
+                    Line(c, pad, 126, w - pad, 126, p.Track, 1);
+                    GraphLine(c, downCurve, graphTop, pad, 90, w - pad, 126, downInk);
+                    GraphLine(c, upCurve, graphTop, pad, 90, w - pad, 126, upInk);
+                    Text(c, "以太网", pad + 1, h - pad - 14, w - pad, h - pad + 1, 10, p.Sub, 0, 0, p);
                     break;
                 }
+                Rate(34, 72, down, false, 8, 32, 12.5);
+                Rate(74, 96, up, true, 6, 18, 11);
+                Line(c, pad, 136, w - pad, 136, p.Track, 1);
+                GraphLine(c, downCurve, graphTop, pad, 102, w - pad, 136, downInk);
+                GraphLine(c, upCurve, graphTop, pad, 102, w - pad, 136, upInk);
+                Text(c, "本次接收 1.24 GB · 发送 86.0 MB", pad, 140, w - pad, 154, 10, p.Sub, 0, 0, p);
+                break;
+            }
             case "system":
+            {
+                (string Name, double V, string Detail)[] g = { ("CPU", 0.23, Loc.T("处理器")), (Loc.T("内存"), 0.58, "9.2 / 16 GB"), (Loc.T("磁盘"), 0.74, Loc.T("214 GB 可用")) };
+                Color Col(double v) => v >= 0.9 ? p.Red : v >= 0.7 ? p.Orange : p.Green;
+                if (size == "small")
                 {
-                    (string Name, double V, string Detail)[] g =
-                    [
-                        ("CPU", 0.23, Loc.T("CPU")), (Loc.T("Memory"), 0.58, "9.2 / 16 GB"), (Loc.T("Disk"), 0.74, Loc.T("214 GB free")),
-                    ];
-                    Color Col(double v) => v >= 0.9 ? p.Red : v >= 0.7 ? p.Orange : p.Green;
-                    if (size == "small")
-                    {
-                        Text(c, Loc.T("System"), Pad + 2, Pad - 2, w - Pad, Pad + 16, 12.5, p.Sub, 2, 0, p);
-                        double rowH = (h - 2 * Pad - 18) / 3;
-                        for (int i = 0; i < 3; i++)
-                        {
-                            double y = Pad + 18 + rowH * i;
-                            Text(c, g[i].Name, Pad + 2, y + 2, w / 2, y + 22, 13, p.Text, 2, 0, p);
-                            Text(c, $"{Math.Round(g[i].V * 100)}%", w / 2, y + 2, w - Pad - 2, y + 22, 13, p.Text, 2, 2, p);
-                            Fill(c, Pad + 2, y + 26, w - Pad - 2, y + 32, 3, p.Track);
-                            Fill(c, Pad + 2, y + 26, Pad + 2 + Math.Max(6, (w - 2 * Pad - 4) * g[i].V), y + 32, 3, Col(g[i].V));
-                        }
-                        break;
-                    }
-                    double colW = (w - 2 * Pad) / 3, r = 34, cy = Pad + 6 + r;
+                    Text(c, Loc.T("系统"), Pad + 2, Pad - 2, w - Pad, Pad + 16, 12.5, p.Sub, 2, 0, p);
+                    double rowH = (h - 2 * Pad - 18) / 3;
                     for (int i = 0; i < 3; i++)
                     {
-                        double cx = Pad + colW * (i + 0.5);
-                        Arc(c, cx, cy, r, -90, 360, p.Track, 8, false);
-                        Arc(c, cx, cy, r, -90, 360 * g[i].V, Col(g[i].V), 8, true);
-                        Text(c, $"{Math.Round(g[i].V * 100)}%", cx - r, cy - 12, cx + r, cy + 12, 17, p.Text, 2, 1, p);
-                        Text(c, g[i].Name, cx - colW / 2, cy + r + 8, cx + colW / 2, cy + r + 26, 13, p.Text, 2, 1, p);
-                        Text(c, g[i].Detail, cx - colW / 2, cy + r + 26, cx + colW / 2, cy + r + 42, 10.5, p.Sub, 0, 1, p);
+                        double y = Pad + 18 + rowH * i;
+                        Text(c, g[i].Name, Pad + 2, y + 2, w / 2, y + 22, 13, p.Text, 2, 0, p);
+                        Text(c, $"{Math.Round(g[i].V * 100)}%", w / 2, y + 2, w - Pad - 2, y + 22, 13, p.Text, 2, 2, p);
+                        Fill(c, Pad + 2, y + 26, w - Pad - 2, y + 32, 3, p.Track);
+                        Fill(c, Pad + 2, y + 26, Pad + 2 + Math.Max(6, (w - 2 * Pad - 4) * g[i].V), y + 32, 3, Col(g[i].V));
                     }
                     break;
                 }
+                double colW = (w - 2 * Pad) / 3, R = 34, cy = Pad + 6 + R;
+                for (int i = 0; i < 3; i++)
+                {
+                    double cx = Pad + colW * (i + 0.5);
+                    Arc(c, cx, cy, R, -90, 360, p.Track, 8, false);
+                    Arc(c, cx, cy, R, -90, 360 * g[i].V, Col(g[i].V), 8, true);
+                    Text(c, $"{Math.Round(g[i].V * 100)}%", cx - R, cy - 12, cx + R, cy + 12, 17, p.Text, 2, 1, p);
+                    Text(c, g[i].Name, cx - colW / 2, cy + R + 8, cx + colW / 2, cy + R + 26, 13, p.Text, 2, 1, p);
+                    Text(c, g[i].Detail, cx - colW / 2, cy + R + 26, cx + colW / 2, cy + R + 42, 10.5, p.Sub, 0, 1, p);
+                }
+                break;
+            }
             case "notes":
-                Text(c, Loc.T("Notes"), Pad + 2, Pad - 2, w - Pad, Pad + 18, 13.5, p.Orange, 2, 0, p);
-                Paragraph(c,
-                    size == "small"
-                        ? Loc.T("Design review by Friday\nChange the wallpaper")
-                        : Loc.T("Design review by Friday\nChange the wallpaper\nTry the frosted preset"),
-                    Pad + 2, Pad + 24, w - Pad - 2, h - Pad, 13.5, p.Text);
+                Text(c, Loc.T("备忘录"), Pad + 2, Pad - 2, w - Pad, Pad + 18, 13.5, p.Orange, 2, 0, p);
+                Paragraph(c, size == "small" ? Loc.T("周五前交设计评审\n换上新的壁纸") : Loc.T("周五前交设计评审\n换上新的壁纸\n试试磨砂预设"),
+                          Pad + 2, Pad + 24, w - Pad - 2, h - Pad, 13.5, p.Text, p);
                 break;
             case "reminders":
+            {
+                (string Text, bool Done)[] items = { (Loc.T("给桌面拍一组截图"), false), (Loc.T("整理本周的会议记录"), false), (Loc.T("订周末的电影票"), true) };
+                Text(c, Loc.T("提醒事项"), Pad + 2, Pad - 2, w - Pad - 40, Pad + 18, 13.5, p.Orange, 2, 0, p);
+                Text(c, "2", w - Pad - 48, Pad - 6, w - Pad - 2, Pad + 22, 22, p.Orange, 2, 2, p);
+                const double RowH = 27, Top = Pad + 28;
+                int slots = Math.Max(1, (int)((h - Pad - Top) / RowH));
+                int shown = 0;
+                foreach (var it in items)
                 {
-                    (string Text, bool Done)[] items =
-                    [
-                        (Loc.T("Take desktop screenshots"), false),
-                        (Loc.T("Tidy this week's meeting notes"), false),
-                        (Loc.T("Book weekend movie tickets"), true),
-                    ];
-                    Text(c, Loc.T("Reminders"), Pad + 2, Pad - 2, w - Pad - 40, Pad + 18, 13.5, p.Orange, 2, 0, p);
-                    Text(c, "2", w - Pad - 48, Pad - 6, w - Pad - 2, Pad + 22, 22, p.Orange, 2, 2, p);
-                    const double RowH = 27, Top = Pad + 28;
-                    int slots = Math.Max(1, (int)((h - Pad - Top) / RowH));
-                    int shown = 0;
-                    foreach (var it in items)
+                    if (shown >= slots - 1) break;
+                    double y = Top + RowH * shown, cx = Pad + 9, cy = y + RowH / 2;
+                    if (it.Done)
                     {
-                        if (shown >= slots - 1) break;
-                        double y = Top + RowH * shown, cx = Pad + 9, cy = y + RowH / 2;
-                        if (it.Done)
-                        {
-                            Circle(c, cx, cy, 8, p.Orange);
-                            Circle(c, cx, cy, 3.2, p.OnAccent);
-                        }
-                        else
-                        {
-                            Arc(c, cx, cy, 7.4, -90, 360, p.Sub, 1.5, false);
-                        }
-
-                        Text(c, it.Text, Pad + 26, y, w - Pad, y + RowH, 13.5, it.Done ? p.Sub : p.Text, 0, 0, p);
-                        if (it.Done) Line(c, Pad + 26, cy, Math.Min(w - Pad, Pad + 26 + TextWidth(it.Text, 13.5, "TextFont")), cy, p.Sub, 1);
-                        shown++;
+                        Circle(c, cx, cy, 8, p.Orange);
+                        Circle(c, cx, cy, 3.2, p.OnAccent);
                     }
-                    if (shown < slots)
-                    {
-                        double y = Top + RowH * shown;
-                        Text(c, "+", Pad - 1, y, Pad + 19, y + RowH, 17, p.Faint, 0, 1, p);
-                        Text(c, Loc.T("New Reminder"), Pad + 26, y, w - Pad, y + RowH, 13.5, p.Faint, 0, 0, p);
-                    }
-                    break;
+                    else Arc(c, cx, cy, 7.4, -90, 360, p.Sub, 1.5, false);
+                    Text(c, it.Text, Pad + 26, y, w - Pad, y + RowH, 13.5, it.Done ? p.Sub : p.Text, 0, 0, p);
+                    if (it.Done) Line(c, Pad + 26, cy, Math.Min(w - Pad, Pad + 26 + TextWidth(it.Text, 13.5, "TextFont")), cy, p.Sub, 1);
+                    shown++;
                 }
+                if (shown < slots)
+                {
+                    double y = Top + RowH * shown;
+                    Text(c, "+", Pad - 1, y, Pad + 19, y + RowH, 17, p.Faint, 0, 1, p);
+                    Text(c, Loc.T("新提醒"), Pad + 26, y, w - Pad, y + RowH, 13.5, p.Faint, 0, 0, p);
+                }
+                break;
+            }
+            case "filebox":
+            {
+                // PaintFileBox, with examples: the gallery does not read the folder.
+                Text(c, Loc.T("文件盒子"), Pad + 2, Pad - 2, w - Pad - 52, Pad + 18, 13.5, p.Orange, 2, 0, p);
+                Text(c, Loc.T("6 项"), w - Pad - 48, Pad - 1, w - Pad, Pad + 16, 11.5, p.Faint, 0, 2, p);
+                (string Glyph, string Name)[] f =
+                {
+                    ("\uE7C3", Loc.T("报告.docx")), ("\uE8B7", Loc.T("项目资料")), ("\uE7C3", Loc.T("截图.png")), ("\uE7C3", Loc.T("数据.xlsx")),
+                    ("\uE8B7", Loc.T("素材")), ("\uE7C3", Loc.T("方案.pdf")), ("\uE7C3", Loc.T("说明.txt")), ("\uE7C3", Loc.T("预算.xlsx")),
+                };
+                int cols = size == "small" ? 2 : 4, rows = size == "large" ? 4 : 2;
+                double top = Pad + 26, cw = (w - 2 * Pad) / cols, ch = (h - top - Pad) / rows, box = Math.Min(cw - 8, ch - 20);
+                int shown = Math.Min(f.Length, cols * rows);
+                for (int i = 0; i < shown; i++)
+                {
+                    double x = Pad + cw * (i % cols), y = top + ch * (i / cols), bx = x + (cw - box) / 2;
+                    Glyph(c, f[i].Glyph, bx, y + 1, bx + box, y + 1 + box, box * 0.78, p.Sub);
+                    Text(c, f[i].Name, x + 2, y + 1 + box + 2, x + cw - 2, y + 1 + box + 16, 10.5, p.Text, 0, 1, p);
+                }
+                break;
+            }
             case "photos":
                 c.Children.Add(new Rectangle { Width = w, Height = h, RadiusX = 22, RadiusY = 22, Fill = photo });
                 break;
@@ -392,6 +364,9 @@ internal static partial class WidgetFaces
     // existing render request; it does not add a clock or a polling timer to the gallery.
     public static long Stamp(string kind) => kind switch
     {
+        "clock" => DateTime.Now.Ticks / TimeSpan.TicksPerSecond,
+        "digital" => DateTime.Now.Ticks / TimeSpan.TicksPerMinute,
+        "calendar" => DateTime.Today.Ticks,
         "battery" => BatteryStamp(),
         "weather" => WeatherStamp(),
         _ => 0,
@@ -406,11 +381,11 @@ internal static partial class WidgetFaces
     // ---- The calendar: small, medium, and the large month with a lunar day under every date ----
 
     private static readonly ChineseLunisolarCalendar Lunar = new();
-    private static readonly string[] LunarMonths = ["正", "二", "三", "四", "五", "六", "七", "八", "九", "十", "冬", "腊"];
+    private static readonly string[] LunarMonths = { "正", "二", "三", "四", "五", "六", "七", "八", "九", "十", "冬", "腊" };
 
     private static string LunarDay(int d)
     {
-        string[] digits = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+        string[] digits = { "一", "二", "三", "四", "五", "六", "七", "八", "九", "十" };
         if (d == 10) return "初十";
         if (d == 20) return "二十";
         if (d == 30) return "三十";
@@ -440,12 +415,12 @@ internal static partial class WidgetFaces
     // ChineseCalendar::Line: "农历丙午年 九月廿三" ("Lunar 9/23" in English).
     internal static string LunarLine(DateTime t)
     {
-        const string Stems = "甲乙丙丁戊己庚辛壬癸", Branches = "子丑寅卯辰巳午未申酉戌亥";
+        const string stems = "甲乙丙丁戊己庚辛壬癸", branches = "子丑寅卯辰巳午未申酉戌亥";
         if (Loc.English) return LunarMonthDay(t);
         try
         {
             int n = Lunar.GetSexagenaryYear(t);
-            return $"农历{Stems[(n - 1) % 10]}{Branches[(n - 1) % 12]}年 {LunarMonthDay(t)}";
+            return $"农历{stems[(n - 1) % 10]}{branches[(n - 1) % 12]}年 {LunarMonthDay(t)}";
         }
         catch (ArgumentOutOfRangeException) { return ""; }
     }
@@ -454,23 +429,15 @@ internal static partial class WidgetFaces
     internal static string DayLabel(DateTime t, out bool festival)
     {
         festival = true;
-        if (t.Month == 1 && t.Day == 1) return Loc.T("New Year's Day");
-        if (t.Month == 5 && t.Day == 1) return Loc.T("Labour Day");
-        if (t.Month == 10 && t.Day == 1) return Loc.T("National Day");
+        if (t.Month == 1 && t.Day == 1) return Loc.T("元旦");
+        if (t.Month == 5 && t.Day == 1) return Loc.T("劳动节");
+        if (t.Month == 10 && t.Day == 1) return Loc.T("国庆节");
         var (m, d, leap) = ToLunar(t);
         if (!leap)
         {
-            (int M, int D, string Name)[] fests =
-            [
-                (1, 1, Loc.T("Spring Festival")), (1, 15, Loc.T("Lantern Festival")), (5, 5, Loc.T("Dragon Boat Festival")),
-                (7, 7, Loc.T("Qixi Festival")), (8, 15, Loc.T("Mid-Autumn Festival")), (9, 9, Loc.T("Double Ninth Festival")),
-                (12, 8, Loc.T("Laba Festival")),
-            ];
-            foreach (var (fm, fd, name) in fests)
-            {
-                if (fm == m && fd == d) return Loc.T(name);
-            }
-            if (m == 12 && ToLunar(t.AddDays(1)) is (1, 1, false)) return Loc.T("New Year's Eve");
+            (int M, int D, string Name)[] fests = { (1, 1, Loc.T("春节")), (1, 15, Loc.T("元宵节")), (5, 5, Loc.T("端午节")), (7, 7, Loc.T("七夕")), (8, 15, Loc.T("中秋节")), (9, 9, Loc.T("重阳节")), (12, 8, Loc.T("腊八节")) };
+            foreach (var f in fests) if (f.M == m && f.D == d) return Loc.T(f.Name);
+            if (m == 12 && ToLunar(t.AddDays(1)) is (1, 1, false)) return Loc.T("除夕");
         }
         festival = false;
         if (Loc.English) return "";
@@ -487,8 +454,7 @@ internal static partial class WidgetFaces
         if (size == "large")
         {
             Text(c, Loc.T(Months[now.Month - 1]), Pad + 4, Pad, w / 2, Pad + 22, 16, p.Blue, 2, 0, p);
-            string lunarHeader = Loc.English ? $"{now.Year} · {LunarMonthDay(now)}" : $"{now.Year}年 · 农历{LunarMonthDay(now)}";
-            Text(c, lunarHeader, w / 2 - 40, Pad, w - Pad - 4, Pad + 22, 11.5, p.Sub, 0, 2, p);
+            Text(c, Loc.English ? $"{now.Year} · {LunarMonthDay(now)}" : $"{now.Year}年 · 农历{LunarMonthDay(now)}", w / 2 - 40, Pad, w - Pad - 4, Pad + 22, 11.5, p.Sub, 0, 2, p);
             double gx = Pad, cw = (w - 2 * Pad) / 7, y = Pad + 28;
             for (int i = 0; i < 7; i++) Text(c, Loc.T(WeekShort[(first + i) % 7]), gx + i * cw, y, gx + (i + 1) * cw, y + 16, 10.5, p.Sub, 2, 1, p);
             y += 20;
@@ -497,10 +463,10 @@ internal static partial class WidgetFaces
             for (int d = 1; d <= days; d++)
             {
                 int cell = lead + d - 1;
-                double x0 = gx + cell % 7 * cw, y0 = y + cell / 7 * rh, cx = x0 + cw / 2;
+                double x0 = gx + (cell % 7) * cw, y0 = y + (cell / 7) * rh, cx = x0 + cw / 2;
                 bool today = d == now.Day, weekend = (first + cell % 7) % 7 >= 5;
                 if (today) Fill(c, cx - 18, y0 + 1, cx + 18, y0 + rh - 1, 10, p.Blue);
-                var ink = today ? p.OnAccent : weekend ? p.Sub : p.Text;
+                Color ink = today ? p.OnAccent : weekend ? p.Sub : p.Text;
                 Text(c, d.ToString(), x0, y0, x0 + cw, y0 + rh * 0.56, 14, ink, 2, 1, p, halo: !today);
                 string label = DayLabel(new DateTime(now.Year, now.Month, d), out bool festival);
                 Text(c, label, x0, y0 + rh * 0.48, x0 + cw, y0 + rh - 5, 9, today ? A(p.OnAccent, 0.85) : festival ? p.Blue : p.Sub, 0, 1, p, halo: !today);
@@ -511,8 +477,7 @@ internal static partial class WidgetFaces
         Text(c, Loc.T(WeekLong[Weekday(now)]), Pad + 2, Pad, Pad + leftW, Pad + 20, 14, p.Blue, 2, 0, p);
         Text(c, now.Day.ToString(), Pad, Pad + 16, Pad + leftW, Pad + 80, 54, p.Text, 0, 0, p);
         string todayLabel = DayLabel(now, out bool fest);
-        string lunarToday = Loc.English ? LunarMonthDay(now) : Loc.F("Lunar {0}", LunarMonthDay(now));
-        Text(c, lunarToday, Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 12.5, p.Text, 2, 0, p);
+        Text(c, Loc.English ? LunarMonthDay(now) : Loc.F("农历{0}", LunarMonthDay(now)), Pad + 2, h - Pad - 40, Pad + leftW, h - Pad - 20, 12.5, p.Text, 2, 0, p);
         Text(c, fest ? todayLabel : (Loc.English ? $"{now.Year} {Loc.T(Months[now.Month - 1])}" : $"{now.Year}年{Loc.T(Months[now.Month - 1])}"),
              Pad + 2, h - Pad - 20, Pad + leftW, h - Pad, 12, fest ? p.Blue : p.Sub, 0, 0, p);
         if (size == "small") return;
@@ -526,7 +491,7 @@ internal static partial class WidgetFaces
         for (int d = 1; d <= days; d++)
         {
             int cell = lead + d - 1;
-            double x0 = gx2 + cell % 7 * cw2, y0 = yy + cell / 7 * rh2, cx = x0 + cw2 / 2, cy = y0 + rh2 / 2;
+            double x0 = gx2 + (cell % 7) * cw2, y0 = yy + (cell / 7) * rh2, cx = x0 + cw2 / 2, cy = y0 + rh2 / 2;
             bool today = d == now.Day, weekend = (first + cell % 7) % 7 >= 5;
             if (today) Circle(c, cx, cy, rh2 / 2 + 0.5, p.Blue);
             Text(c, d.ToString(), x0, cy - rh2 / 2, x0 + cw2, cy + rh2 / 2, 10.5,
@@ -536,40 +501,37 @@ internal static partial class WidgetFaces
 
     // ---- The analogue face: numbers or ticks, hands with a thin neck, the orange second hand ----
 
-    private static void ClockFace(Canvas c, double cx, double cy, double radius, DateTime t, Color face, Color ink, bool numbers,
-                                  string? label, Color labelInk, Pal p)
+    private static void ClockFace(Canvas c, double cx, double cy, double R, DateTime t, Color face, Color ink, bool numbers, string? label, Color labelInk, Pal p)
     {
-        Circle(c, cx, cy, radius, face);
+        Circle(c, cx, cy, R, face);
         for (int hr = 1; hr <= 12; hr++)
         {
             double a = (hr * 30 - 90) * Math.PI / 180;
             if (numbers)
             {
-                double r = radius * 0.78, fs = radius * 0.21, x = cx + r * Math.Cos(a), y = cy + r * Math.Sin(a);
+                double r = R * 0.78, fs = R * 0.21, x = cx + r * Math.Cos(a), y = cy + r * Math.Sin(a);
                 Text(c, hr.ToString(), x - fs, y - fs * 0.72, x + fs, y + fs * 0.72, fs, ink, 2, 1, p);
             }
             else
             {
-                double r0 = radius * 0.80, r1 = radius * 0.92;
-                Line(c, cx + r0 * Math.Cos(a), cy + r0 * Math.Sin(a), cx + r1 * Math.Cos(a), cy + r1 * Math.Sin(a),
-                    A(ink, hr % 3 != 0 ? 0.45 : 0.9), Math.Max(1, radius * 0.045));
+                double r0 = R * 0.80, r1 = R * 0.92;
+                Line(c, cx + r0 * Math.Cos(a), cy + r0 * Math.Sin(a), cx + r1 * Math.Cos(a), cy + r1 * Math.Sin(a), A(ink, hr % 3 != 0 ? 0.45 : 0.9), Math.Max(1, R * 0.045));
             }
         }
-        if (label != null) Text(c, label, cx - radius, cy + radius * 0.26, cx + radius, cy + radius * 0.26 + radius * 0.2, radius * 0.15, labelInk, 2, 1, p);
+        if (label != null) Text(c, label, cx - R, cy + R * 0.26, cx + R, cy + R * 0.26 + R * 0.2, R * 0.15, labelInk, 2, 1, p);
         double sec = t.Second, min = t.Minute + sec / 60, hour = t.Hour % 12 + min / 60;
         void Hand(double angle, double length, double width)
         {
-            double a = (angle - 90) * Math.PI / 180, neck = radius * 0.16, dx = Math.Cos(a), dy = Math.Sin(a);
+            double a = (angle - 90) * Math.PI / 180, neck = R * 0.16, dx = Math.Cos(a), dy = Math.Sin(a);
             Line(c, cx, cy, cx + dx * neck, cy + dy * neck, ink, Math.Max(1.2, width * 0.36));
             Line(c, cx + dx * neck, cy + dy * neck, cx + dx * length, cy + dy * length, ink, width);
         }
-        Hand(hour * 30, radius * 0.52, Math.Max(2.5, radius * 0.075));
-        Hand(min * 6, radius * 0.80, Math.Max(2.5, radius * 0.075));
-        Circle(c, cx, cy, Math.Max(2.2, radius * 0.055), ink);
+        Hand(hour * 30, R * 0.52, Math.Max(2.5, R * 0.075));
+        Hand(min * 6, R * 0.80, Math.Max(2.5, R * 0.075));
+        Circle(c, cx, cy, Math.Max(2.2, R * 0.055), ink);
         double sa = (sec * 6 - 90) * Math.PI / 180;
-        Line(c, cx - Math.Cos(sa) * radius * 0.18, cy - Math.Sin(sa) * radius * 0.18,
-            cx + Math.Cos(sa) * radius * 0.86, cy + Math.Sin(sa) * radius * 0.86, p.Orange, Math.Max(1, radius * 0.02));
-        Circle(c, cx, cy, Math.Max(1.8, radius * 0.04), p.Orange);
+        Line(c, cx - Math.Cos(sa) * R * 0.18, cy - Math.Sin(sa) * R * 0.18, cx + Math.Cos(sa) * R * 0.86, cy + Math.Sin(sa) * R * 0.86, p.Orange, Math.Max(1, R * 0.02));
+        Circle(c, cx, cy, Math.Max(1.8, R * 0.04), p.Orange);
     }
 
     // ---- Drawing helpers (Canvas in surface.cpp) ----
@@ -587,14 +549,10 @@ internal static partial class WidgetFaces
         {
             var tb = new TextBlock
             {
-                Text = s,
-                FontSize = size,
-                Foreground = new SolidColorBrush(pass == 0 ? A(p.Halo, ink.A / 255.0) : ink),
-                FontFamily = (FontFamily)Application.Current.Resources[font],
-                TextWrapping = TextWrapping.NoWrap,
+                Text = s, FontSize = size, Foreground = new SolidColorBrush(pass == 0 ? A(p.Halo, ink.A / 255.0) : ink),
+                FontFamily = (FontFamily)Application.Current.Resources[font], TextWrapping = TextWrapping.NoWrap,
                 TextAlignment = align == 1 ? TextAlignment.Center : align == 2 ? TextAlignment.Right : TextAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Center,
-                IsTextScaleFactorEnabled = false,
+                VerticalAlignment = VerticalAlignment.Center, IsTextScaleFactorEnabled = false,
             };
             // Left-aligned lines may run past their box (DirectWrite lays them out unwrapped too); the others align in it.
             if (align != 0) tb.Width = Math.Max(1, r - l);
@@ -612,22 +570,16 @@ internal static partial class WidgetFaces
     {
         var tb = new TextBlock { Text = s, FontSize = size, FontFamily = (FontFamily)Application.Current.Resources[font], IsTextScaleFactorEnabled = false };
         Typography.SetNumeralAlignment(tb, FontNumeralAlignment.Tabular);
-        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        tb.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
         return tb.DesiredSize.Width;
     }
 
-    private static void Paragraph(Canvas c, string s, double l, double t, double r, double b, double size, Color ink)
+    private static void Paragraph(Canvas c, string s, double l, double t, double r, double b, double size, Color ink, Pal p)
     {
         var tb = new TextBlock
         {
-            Text = s,
-            FontSize = size,
-            Foreground = new SolidColorBrush(ink),
-            FontFamily = (FontFamily)Application.Current.Resources["TextFont"],
-            TextWrapping = TextWrapping.Wrap,
-            Width = r - l,
-            MaxHeight = b - t,
-            IsTextScaleFactorEnabled = false,
+            Text = s, FontSize = size, Foreground = new SolidColorBrush(ink), FontFamily = (FontFamily)Application.Current.Resources["TextFont"],
+            TextWrapping = TextWrapping.Wrap, Width = r - l, MaxHeight = b - t, IsTextScaleFactorEnabled = false,
         };
         Canvas.SetLeft(tb, l);
         Canvas.SetTop(tb, t);
@@ -636,15 +588,7 @@ internal static partial class WidgetFaces
 
     private static void Glyph(Canvas c, string g, double l, double t, double r, double b, double size, Color ink)
     {
-        var f = new FontIcon
-        {
-            Glyph = g,
-            FontSize = size,
-            Foreground = new SolidColorBrush(ink),
-            Width = r - l,
-            Height = b - t,
-            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
-        };
+        var f = new FontIcon { Glyph = g, FontSize = size, Foreground = new SolidColorBrush(ink), Width = r - l, Height = b - t, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") };
         Canvas.SetLeft(f, l);
         Canvas.SetTop(f, t);
         c.Children.Add(f);
@@ -667,17 +611,8 @@ internal static partial class WidgetFaces
     }
 
     private static void Line(Canvas c, double x1, double y1, double x2, double y2, Color ink, double width) =>
-        c.Children.Add(new Line
-        {
-            X1 = x1,
-            Y1 = y1,
-            X2 = x2,
-            Y2 = y2,
-            Stroke = new SolidColorBrush(ink),
-            StrokeThickness = width,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round
-        });
+        c.Children.Add(new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = new SolidColorBrush(ink), StrokeThickness = width,
+                                  StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
 
     // A rate's arrow: a shaft and two head strokes, down for what comes in, up for what goes out.
     private static void RateArrow(Canvas c, double cx, double cy, double r, bool down, Color ink)
@@ -695,24 +630,21 @@ internal static partial class WidgetFaces
         if (v.Length < 2) return;
         var line = new Polyline
         {
-            Stroke = new SolidColorBrush(ink),
-            StrokeThickness = 1.6,
-            StrokeLineJoin = PenLineJoin.Round,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round,
+            Stroke = new SolidColorBrush(ink), StrokeThickness = 1.6, StrokeLineJoin = PenLineJoin.Round,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
         };
         double step = (r - l) / (v.Length - 1);
         for (int i = 0; i < v.Length; i++)
             line.Points.Add(new Point(l + step * i, b - (b - t) * Math.Min(v[i], top) / top));
         c.Children.Add(line);
-        Circle(c, r, b - (b - t) * Math.Min(v[^1], top) / top, 1.8, ink);
+        Circle(c, r, b - (b - t) * Math.Min(v[v.Length - 1], top) / top, 1.8, ink);
     }
 
     // The graph's top: the peak rounded up to 1, 2 or 5 times a power of ten, with an idle floor.
     private static double GraphTop(params double[][] series)
     {
         double peak = 0;
-        foreach (double[] s in series) foreach (double v in s) peak = Math.Max(peak, v);
+        foreach (var s in series) foreach (double v in s) peak = Math.Max(peak, v);
         if (peak <= 16384) return 16384;
         double e = Math.Pow(10, Math.Floor(Math.Log10(peak))), m = peak / e;
         return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e;
@@ -721,7 +653,7 @@ internal static partial class WidgetFaces
     // A plausible minute of traffic for the gallery's example: two slow waves over a floor.
     private static double[] Curve(int seed, double peak)
     {
-        double[] v = new double[60];
+        var v = new double[60];
         for (int i = 0; i < v.Length; i++)
             v[i] = Math.Max(0.02, 0.55 + Math.Sin((i + seed) * 0.28) * 0.5 + Math.Sin((i + seed) * 0.11 + 1.7) * 0.35) * peak;
         return v;
@@ -741,14 +673,11 @@ internal static partial class WidgetFaces
         }
         Point At(double deg) => new(cx + r * Math.Cos(deg * Math.PI / 180), cy + r * Math.Sin(deg * Math.PI / 180));
         var f = new PathFigure { StartPoint = At(from), IsClosed = false, IsFilled = false };
-        f.Segments.Add(new ArcSegment { Point = At(from + sweep), Size = new Size(r, r), SweepDirection = SweepDirection.Clockwise, IsLargeArc = sweep > 180 });
+        f.Segments.Add(new ArcSegment { Point = At(from + sweep), Size = new Windows.Foundation.Size(r, r), SweepDirection = SweepDirection.Clockwise, IsLargeArc = sweep > 180 });
         c.Children.Add(new Path
         {
-            Data = new PathGeometry { Figures = { f } },
-            Stroke = new SolidColorBrush(ink),
-            StrokeThickness = width,
-            StrokeStartLineCap = caps ? PenLineCap.Round : PenLineCap.Flat,
-            StrokeEndLineCap = caps ? PenLineCap.Round : PenLineCap.Flat,
+            Data = new PathGeometry { Figures = { f } }, Stroke = new SolidColorBrush(ink), StrokeThickness = width,
+            StrokeStartLineCap = caps ? PenLineCap.Round : PenLineCap.Flat, StrokeEndLineCap = caps ? PenLineCap.Round : PenLineCap.Flat,
         });
     }
 }
