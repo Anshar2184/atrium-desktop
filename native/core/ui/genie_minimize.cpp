@@ -25,7 +25,10 @@ constexpr int kLargeMax = 1600;          // the picture, at most this many px ei
 constexpr UINT kIdleMs = 4000;          // the layer stays this long after it was last wanted
 constexpr UINT kFreshMs = 180;           // the bar's minimize waits at most this long for a fresh picture
 constexpr double kFlightMs = 560;
-constexpr double kHoldMs = 90, kDissolveMs = 160; // out of the icon: the picture over the window, then fading
+constexpr double kHoldMs = 280, kDissolveMs = 220; // out of the icon: the picture over the window, then fading.
+                                                  // A restored window can take 300+ ms to present its first
+                                                  // frame (a heavy page, say); uncovering it sooner reads as a
+                                                  // black flash, so the picture covers it well past that.
 constexpr int kRows = 64;                // the picture poured as this many slices
 
 GenieMinimize* g_genie = nullptr; // the one effect, for its hook
@@ -257,6 +260,10 @@ void GenieMinimize::Minimizing(HWND window)
         front_ = nullptr;
         return;
     }
+    if (std::ranges::any_of(flights_, [&](const Flight& f) { return f.window == window; })) {
+        front_ = nullptr; // the pour is already on screen (launched before the hide): nothing to add
+        return;
+    }
     eventMs_ = ClockMs();
     const auto it = pictures_.find(window);
     const std::optional<RECT> to = target_ ? target_(window) : std::nullopt;
@@ -299,8 +306,21 @@ void GenieMinimize::RunPending()
     if (!window || !minimize)
         return;
     const auto it = pictures_.find(window);
-    if (it == pictures_.end() || !it->second.large)
+    if (it == pictures_.end() || !it->second.large || !target_ || !target_(window)) {
         Release(window); // nothing to pour: Windows' own animation
+        minimize();
+        return;
+    }
+    // The picture goes on screen over the still-shown window before it goes down: the pour's first
+    // frame is already up when the window hides, so no frame of bare desktop flashes in between.
+    Release(window);
+    Flight f;
+    f.picture = it->second.large;
+    f.from = it->second.frame;
+    f.to = *target_(window);
+    f.window = window;
+    f.preLaunched = true;
+    Launch(std::move(f));
     minimize();
 }
 
@@ -452,8 +472,8 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t, float alpha
     float wl0 = 0, wh0 = 0, wl1 = 0, wh1 = 0;
     sides(along(0.f), wl0, wh0);
     sides(along(1.f), wl1, wh1);
-    const bool whole = std::abs(wl0 - b0) < 0.75f && std::abs(wh0 - b1) < 0.75f && std::abs(wl1 - b0) < 0.75f && std::abs(wh1 - b1) < 0.75f &&
-                       along(1.f) - along(0.f) > 0.97f * (a1 - a0);
+    const bool whole = std::abs(wl0 - b0) < 0.75f && std::abs(wh0 - b1) < 0.75f && std::abs(wl1 - b0) < 0.75f &&
+                       std::abs(wh1 - b1) < 0.75f && along(1.f) - along(0.f) > 0.97f * (a1 - a0);
     const int rows = whole ? 1 : kRows;
     const float hair = rows > 1 ? 0.5f : 0.f; // a hair over the next: no seams
     for (int i = 0; i < rows; ++i) {
