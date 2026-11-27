@@ -54,7 +54,6 @@ private:
         std::function<void()> restore; // set: out of the icon, then this
         bool restoreDue = false;
         bool restoreTransitions = false;
-        bool preLaunched = false; // launched before the window went down: Minimizing() must not re-launch it
     };
     void Watch();                                              // kWatchTimer: the window in front, its picture, its animations
     void Release(HWND window, bool restoreTransitions = true); // its own animations back (unless another owner took it)

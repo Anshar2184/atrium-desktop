@@ -260,8 +260,9 @@ void GenieMinimize::Minimizing(HWND window)
         front_ = nullptr;
         return;
     }
-    if (std::ranges::any_of(flights_, [&](const Flight& f) { return f.window == window; })) {
-        front_ = nullptr; // the pour is already on screen (launched before the hide): nothing to add
+    if (std::ranges::any_of(flights_, [&](const Flight& f) { return f.window == window && !f.restore && !f.restoreDue; })) {
+        Release(window);  // the pour was launched before the hide: it is on screen, nothing to add
+        front_ = nullptr; // (a restore flight for this window is not one: a new minimize needs its own)
         return;
     }
     eventMs_ = ClockMs();
@@ -306,20 +307,22 @@ void GenieMinimize::RunPending()
     if (!window || !minimize)
         return;
     const auto it = pictures_.find(window);
-    if (it == pictures_.end() || !it->second.large || !target_ || !target_(window)) {
-        Release(window); // nothing to pour: Windows' own animation
+    const std::optional<RECT> to = target_ ? target_(window) : std::nullopt;
+    if (!enabled_ || it == pictures_.end() || !it->second.large || !to) {
+        Release(window); // nothing to pour (or shutting down): Windows' own animation
         minimize();
         return;
     }
     // The picture goes on screen over the still-shown window before it goes down: the pour's first
     // frame is already up when the window hides, so no frame of bare desktop flashes in between.
-    Release(window);
+    // held_ stays set until Minimizing() sees the hide, so Windows' native transition is not
+    // re-enabled before the window starts going down.
     Flight f;
     f.picture = it->second.large;
     f.from = it->second.frame;
-    f.to = *target_(window);
+    f.to = *to;
     f.window = window;
-    f.preLaunched = true;
+    eventMs_ = ClockMs();
     Launch(std::move(f));
     minimize();
 }
