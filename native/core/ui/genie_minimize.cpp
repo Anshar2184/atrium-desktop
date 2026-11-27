@@ -27,9 +27,9 @@ constexpr UINT kFreshMs = 180;           // the bar's minimize waits at most thi
 constexpr double kFlightMs = 560;
 constexpr double kHoldMs = 280, kDissolveMs = 220; // out of the icon: the picture over the window, then fading.
                                                   // A restored window can take 300+ ms to present its first
-                                                  // frame (a heavy page, say); uncovering it sooner reads as a
-                                                  // black flash, so the picture covers it well past that.
-constexpr int kRows = 64;                // the picture poured as this many slices
+                                                   // frame (a heavy page, say); uncovering it sooner reads as a
+                                                   // black flash, so the picture covers it well past that.
+constexpr int kRows = 64; // the picture poured as this many slices
 
 GenieMinimize* g_genie = nullptr; // the one effect, for its hook
 
@@ -261,7 +261,7 @@ void GenieMinimize::Minimizing(HWND window)
         return;
     }
     if (std::ranges::any_of(flights_, [&](const Flight& f) { return f.window == window && !f.restore && !f.restoreDue; })) {
-        Release(window);  // the pour was launched before the hide: it is on screen, nothing to add
+        Release(window); // the pour was launched before the hide: it is on screen, nothing to add
         front_ = nullptr; // (a restore flight for this window is not one: a new minimize needs its own)
         return;
     }
@@ -475,8 +475,8 @@ void GenieMinimize::PaintFlight(Canvas& c, const Flight& f, float t, float alpha
     float wl0 = 0, wh0 = 0, wl1 = 0, wh1 = 0;
     sides(along(0.f), wl0, wh0);
     sides(along(1.f), wl1, wh1);
-    const bool whole = std::abs(wl0 - b0) < 0.75f && std::abs(wh0 - b1) < 0.75f && std::abs(wl1 - b0) < 0.75f &&
-                       std::abs(wh1 - b1) < 0.75f && along(1.f) - along(0.f) > 0.97f * (a1 - a0);
+    const bool whole = std::abs(wl0 - b0) < 0.75f && std::abs(wh0 - b1) < 0.75f && std::abs(wl1 - b0) < 0.75f && std::abs(wh1 - b1) < 0.75f &&
+                       along(1.f) - along(0.f) > 0.97f * (a1 - a0);
     const int rows = whole ? 1 : kRows;
     const float hair = rows > 1 ? 0.5f : 0.f; // a hair over the next: no seams
     for (int i = 0; i < rows; ++i) {
